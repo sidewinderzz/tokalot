@@ -13,11 +13,13 @@ android {
         minSdk = 26
         targetSdk = 34
         // Bump both for every release you install on top of an older one.
-        versionCode = 2
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "1.1"
 
         // arm64 only: every modern phone, and it keeps the APK small and the build fast.
-        ndk { abiFilters += listOf("arm64-v8a") }
+        // Override with -Pabis=x86_64 for the emulator used by the screenshot workflow.
+        val abis = (project.findProperty("abis") as String?)?.split(",") ?: listOf("arm64-v8a")
+        ndk { abiFilters += abis }
 
         externalNativeBuild {
             cmake {

@@ -51,11 +51,19 @@ object AppContext {
 
     private val labels = HashMap<String, String>()
 
+    private val knownNames = mapOf(
+        "com.google.android.apps.messaging" to "Messages", "com.samsung.android.messaging" to "Messages",
+        "com.whatsapp" to "WhatsApp", "com.Slack" to "Slack", "com.discord" to "Discord",
+        "com.google.android.gm" to "Gmail", "com.microsoft.office.outlook" to "Outlook",
+        "com.anthropic.claude" to "Claude", "com.openai.chatgpt" to "ChatGPT", "com.github.android" to "GitHub",
+        "com.android.chrome" to "Chrome", "com.google.android.keep" to "Keep",
+    )
+
     fun label(ctx: Context, pkg: String): String = labels.getOrPut(pkg) {
         runCatching {
             val pm = ctx.packageManager
             pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-        }.getOrDefault(pkg.substringAfterLast('.'))
+        }.getOrNull() ?: knownNames[pkg] ?: pkg.substringAfterLast('.').replaceFirstChar { it.uppercaseChar() }
     }
 
     // ---------- cheap "what did cleanup fix" counters, from the raw transcript ----------

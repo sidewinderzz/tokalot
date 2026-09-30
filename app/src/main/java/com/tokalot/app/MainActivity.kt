@@ -50,6 +50,7 @@ class MainActivity : Activity() {
     private val expanded = HashSet<Long>()
     private val showOriginal = HashSet<Long>()
     private var query = ""
+    private var bannerText: TextView? = null
     private var historyBox: LinearLayout? = null
     private val searchField by lazy {
         field("Search your dictations").apply {
@@ -69,12 +70,19 @@ class MainActivity : Activity() {
     private var playingId: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        Demo.handle(this, intent) // debug builds only: screenshot data
         prefs = Prefs(this)
+        // Pick light or dark before any views exist (dialogs and switches follow the theme too).
+        val systemDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val dark = when (prefs.theme) { "dark" -> true; "light" -> false; else -> systemDark }
+        C.apply(dark)
+        setTheme(if (dark) android.R.style.Theme_DeviceDefault_NoActionBar else android.R.style.Theme_DeviceDefault_Light_NoActionBar)
+        super.onCreate(savedInstanceState)
         window.statusBarColor = C.BG
         window.navigationBarColor = C.BG
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility =
+        window.decorView.systemUiVisibility = if (dark) 0 else
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val root = LinearLayout(this).apply {
@@ -87,7 +95,7 @@ class MainActivity : Activity() {
         headerLeft = FrameLayout(this)
         header.addView(headerLeft, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START or Gravity.CENTER_VERTICAL))
         val logo = row(
-            icon(R.drawable.ic_logo, 30).apply { clearColorFilter() },
+            icon(if (C.dark) R.drawable.ic_logo_dark else R.drawable.ic_logo, 30).apply { clearColorFilter() },
             text("Tokalot", 26f, bold = true).apply { setPadding(dp(8), 0, 0, 0) }
         )
         header.addView(logo, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
@@ -103,6 +111,15 @@ class MainActivity : Activity() {
         }
         root.addView(nav, lp())
         setContentView(root)
+
+        // Screenshot workflow can open a specific screen (debug builds only).
+        if (Demo.isDebug(this)) {
+            intent.getStringExtra("tab")?.let { t -> Tab.values().firstOrNull { it.name == t }?.let { tab = it } }
+            if (intent.getBooleanExtra("settings", false)) inSettings = true
+            intent.getStringExtra("category")?.let { c ->
+                AppCategory.values().firstOrNull { it.name == c }?.let { StyleScreen.selected = it }
+            }
+        }
     }
 
     override fun onResume() {
@@ -127,8 +144,13 @@ class MainActivity : Activity() {
         render()
         val app = applicationContext
         Thread {
+            // Only the banner's label changes while downloading; no full redraw (that flashed).
             val poll = Thread {
-                while (Updater.progress != null) { runOnUiThread { render() }; Thread.sleep(500) }
+                while (Updater.progress != null) {
+                    val pct = Updater.progress
+                    runOnUiThread { bannerText?.text = "Downloading Tokalot ${r.version}… ${pct ?: 0}%" }
+                    Thread.sleep(300)
+                }
             }.also { it.start() }
             try {
                 val apk = Updater.download(app, r)
@@ -228,7 +250,7 @@ class MainActivity : Activity() {
             "Everything stays on this phone. The only thing that leaves is your dictation, sent directly to the speech and cleanup services you picked, using your own API keys. No Tokalot server, account or tracking.")
         point("Check it yourself",
             "Tokalot's code is open for anyone to read or have scanned.")
-        body.addView(text("github.com/${Updater.REPO}", 15f, 0xFF2F6FDB.toInt()).apply {
+        body.addView(text("github.com/${Updater.REPO}", 15f, C.LINK).apply {
             setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/${Updater.REPO}"))) }
         })
         body.addView(text("On the next screen: tap Tokalot › turn it on › Allow. If it's greyed out, open this phone's Settings › Apps › Tokalot › ⋮ › Allow restricted settings first.", 14f, C.SUB), lp().margins(this, t = 16, b = 8))
@@ -376,8 +398,10 @@ class MainActivity : Activity() {
         Updater.available(this)?.let { r ->
             val pct = Updater.progress
             val msg = if (pct != null) "Downloading Tokalot ${r.version}… $pct%" else "Tokalot ${r.version} is available"
+            val label = text(msg, 15f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
+            bannerText = label
             val banner = row(
-                text(msg, 15f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                label,
                 if (pct == null) pill("Update", filled = true) { startUpdate(r) } else spacer(),
                 if (pct == null) icon(R.drawable.ic_close, 20, C.SUB).apply {
                     setPadding(dp(4), dp(4), dp(4), dp(4))

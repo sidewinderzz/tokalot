@@ -26,6 +26,10 @@ class BarsView(context: Context) : View(context) {
             invalidate()
         }
 
+    /** Bar color (white when idle/working, the accent color while listening). */
+    var barColor: Int = Color.WHITE
+        set(v) { field = v; paint.color = v; invalidate() }
+
     /** Returns the current mic level 0..1 (RMS). */
     var level: (() -> Float)? = null
 

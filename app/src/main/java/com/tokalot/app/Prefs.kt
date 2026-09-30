@@ -59,6 +59,21 @@ object Services {
  * Everything the user sets lives in app-private SharedPreferences on the phone.
  * No accounts, no database; uninstalling the app erases it.
  */
+/** Choices for the floating button's listening color. Amber matches the app icon. */
+object Accents {
+    val DEFAULT = 0xFFF2A93B.toInt()
+    val all = listOf(
+        "Amber" to DEFAULT,
+        "Green" to 0xFF34C77B.toInt(),
+        "Teal" to 0xFF2EC4C4.toInt(),
+        "Blue" to 0xFF4C8DFF.toInt(),
+        "Purple" to 0xFFA77BFF.toInt(),
+        "Pink" to 0xFFFF6FAE.toInt(),
+        "Red" to 0xFFFF5A52.toInt(),
+        "White" to 0xFFFFFFFF.toInt(),
+    )
+}
+
 /** Pre-filled "Your instructions" for a fresh install; users can edit or clear it. */
 const val DEFAULT_INSTRUCTIONS = "Always write \"lol\" in lowercase."
 
@@ -120,6 +135,16 @@ class Prefs(ctx: Context) {
             v.forEach { arr.put(JSONObject().put("t", it.trigger).put("x", it.text)) }
             sp.edit().putString("snippets", arr.toString()).apply()
         }
+
+    /** "system", "light" or "dark". */
+    var theme: String
+        get() = sp.getString("theme", "system") ?: "system"
+        set(v) = sp.edit().putString("theme", v).apply()
+
+    /** Color of the floating button's bars while it's listening. */
+    var accent: Int
+        get() = sp.getInt("accent", Accents.DEFAULT)
+        set(v) = sp.edit().putInt("accent", v).apply()
 
     /** Hold the button to talk instead of tap-to-start / tap-to-stop. */
     var holdToTalk: Boolean

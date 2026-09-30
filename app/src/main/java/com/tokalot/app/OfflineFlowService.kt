@@ -42,8 +42,7 @@ class OfflineFlowService : AccessibilityService() {
     companion object {
         @Volatile var instance: OfflineFlowService? = null
         private val COLOR_IDLE = Color.parseColor("#8C3A3A3C")   // grey, semi-transparent
-        private val COLOR_REC = Color.parseColor("#E634A36B")    // friendly green while listening
-        private val COLOR_WORK = Color.parseColor("#E62C2C2E")   // dark while transcribing
+        private val COLOR_ACTIVE = Color.parseColor("#E61C1C1E") // dark while listening/transcribing
         private const val IDLE_ALPHA = 0.75f
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
@@ -309,8 +308,7 @@ class OfflineFlowService : AccessibilityService() {
         buttonBg?.setColor(
             when (s) {
                 State.IDLE -> COLOR_IDLE
-                State.STARTING, State.RECORDING -> COLOR_REC
-                State.WORKING -> COLOR_WORK
+                State.STARTING, State.RECORDING, State.WORKING -> COLOR_ACTIVE
             }
         )
         button?.alpha = if (s == State.IDLE) IDLE_ALPHA else 1f
@@ -320,6 +318,8 @@ class OfflineFlowService : AccessibilityService() {
             p.flags = if (s == State.IDLE) p.flags and keepOn.inv() else p.flags or keepOn
             if (attached) try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
         }
+        // Listening: bars in the accent color (amber by default). Transcribing: white ripple.
+        bars?.barColor = if (s == State.STARTING || s == State.RECORDING) Prefs(this).accent else Color.WHITE
         bars?.mode = when (s) {
             State.IDLE, State.STARTING -> BarsView.Mode.IDLE
             State.RECORDING -> BarsView.Mode.LISTENING

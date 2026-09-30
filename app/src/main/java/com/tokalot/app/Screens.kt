@@ -264,6 +264,8 @@ class SettingsScreen(private val a: MainActivity) {
     companion object {
         @Volatile var downloadPct: Int? = null
         @Volatile var downloadError: String? = null
+        // Progress updates only change this label; redrawing the whole screen each tick made it flash.
+        var modelStatusView: TextView? = null
     }
 
     fun build(): View = with(a) {
@@ -273,7 +275,7 @@ class SettingsScreen(private val a: MainActivity) {
         // --- Setup
         section(col, "Setup")
         val setup = card()
-        fun setupRow(title: String, done: Boolean, doneText: String, action: String, onClick: () -> Unit) {
+        fun setupRow(title: String, done: Boolean, doneText: String, action: String, onClick: () -> Unit): TextView {
             if (setup.childCount > 0) setup.addView(divider())
             val status = text(if (done) doneText else "Not done", 14f, if (done) C.GOOD else C.WARN)
             val texts = LinearLayout(this).apply {
@@ -285,6 +287,7 @@ class SettingsScreen(private val a: MainActivity) {
                 texts.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
                 if (done) spacer() else pill(action) { onClick() }
             ).apply { setPadding(dp(20), dp(14), dp(16), dp(14)) })
+            return status
         }
         setupRow("Microphone", micGranted(), "Allowed", "Allow") {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
@@ -303,11 +306,41 @@ class SettingsScreen(private val a: MainActivity) {
             downloadError != null -> "Failed: $downloadError"
             else -> ""
         }
-        setupRow("Offline backup model (60 MB)", ModelManager.isReady(this) || pct != null, modelStatus, "Download") {
+        modelStatusView = setupRow("Offline backup model (60 MB)", ModelManager.isReady(this) || pct != null, modelStatus, "Download") {
             startDownload()
         }
         col.addView(setup)
         col.addView(text("If the accessibility switch is greyed out: phone Settings › Apps › Tokalot › ⋮ › Allow restricted settings. Also set Tokalot's battery usage to Unrestricted.", 13f, C.SUB), lp().margins(this, t = 8))
+
+        // --- Appearance
+        section(col, "Appearance")
+        val ap = card()
+        listOf("system" to "Match phone", "light" to "Light", "dark" to "Dark").forEachIndexed { i, (id, label) ->
+            if (i > 0) ap.addView(divider())
+            ap.addView(choiceRow(label, "", prefs.theme == id) {
+                if (prefs.theme != id) { prefs.theme = id; recreate() }
+            })
+        }
+        col.addView(ap)
+        col.addView(text("Floating button color while listening", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
+        val swatches = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        Accents.all.forEach { (name, color) ->
+            val on = prefs.accent == color
+            swatches.addView(View(this).apply {
+                // A dark disc with the color as a thick ring, like the button itself.
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(color)
+                    setStroke(dp(if (on) 4 else 1), if (on) C.TEXT else C.PILL)
+                }
+                contentDescription = name
+                setOnClickListener { prefs.accent = color; render() }
+            }, LinearLayout.LayoutParams(dp(34), dp(34)).margins(this, r = 10))
+        }
+        col.addView(android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(swatches)
+        }, lp().margins(this, l = 4))
 
         // --- Recording
         section(col, "Recording")
@@ -453,7 +486,7 @@ class SettingsScreen(private val a: MainActivity) {
         val about = card(18)
         about.addView(text("Tokalot ${Updater.currentVersion(this)}", 17f, bold = true))
         about.addView(text("Your recordings, history and keys stay on this phone. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking.", 14f, C.SUB), lp().margins(this, t = 4))
-        about.addView(text("Source code: github.com/${Updater.REPO}", 14f, 0xFF2F6FDB.toInt()).apply {
+        about.addView(text("Source code: github.com/${Updater.REPO}", 14f, C.LINK).apply {
             setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/${Updater.REPO}"))) }
         }, lp().margins(this, t = 8))
         val status = text("", 14f, C.SUB)
@@ -467,6 +500,12 @@ class SettingsScreen(private val a: MainActivity) {
             }.start()
         }), lp().margins(this, t = 12))
         about.addView(status, lp().margins(this, t = 6))
+        about.addView(text("Open-source licenses", 14f, C.LINK).apply {
+            setOnClickListener {
+                AlertDialog.Builder(this@with).setTitle("Open-source licenses")
+                    .setMessage(Licenses.TEXT).setPositiveButton("OK", null).show()
+            }
+        }, lp().margins(this, t = 12))
         col.addView(about)
 
         scroll(col)
@@ -512,11 +551,15 @@ class SettingsScreen(private val a: MainActivity) {
             var last = -1
             val err = ModelManager.download(app) { p ->
                 downloadPct = p
-                if (p / 5 != last) { last = p / 5; a.runOnUiThread { if (!a.isFinishing) a.render() } }
+                if (p != last) {
+                    last = p
+                    a.runOnUiThread { modelStatusView?.text = "Downloading $p%" }
+                }
             }
             downloadPct = null
             downloadError = err
             a.runOnUiThread { if (!a.isFinishing) a.render() }
         }.start()
     }
+
 }

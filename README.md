@@ -4,6 +4,13 @@ Voice typing for Android that works with the keyboard you already use. Open the 
 
 Bring your own API keys. There's no Tokalot server, account or subscription.
 
+<p align="center">
+  <img src="docs/screenshots/home-light.png" width="24%" alt="Home">
+  <img src="docs/screenshots/home-dark.png" width="24%" alt="Home, dark theme">
+  <img src="docs/screenshots/style.png" width="24%" alt="Per-app styles">
+  <img src="docs/screenshots/snippets.png" width="24%" alt="Snippets">
+</p>
+
 ## What it does
 
 - **Floating button** above the keyboard, only while the keyboard is open. Drag it anywhere; it remembers the spot.
@@ -17,6 +24,7 @@ Bring your own API keys. There's no Tokalot server, account or subscription.
 - **Usage and cost estimates** per month.
 - **Backup / restore** to a single file. API keys are excluded unless you choose to include them.
 - **In-app updates** from this repo's GitHub Releases.
+- **Light and dark theme**, and your choice of color for the button while it's listening.
 
 ## Privacy
 
@@ -39,6 +47,8 @@ Releases are signed with a private key stored as repository secrets (`TOKALOT_KE
 Local build: JDK 17, Android SDK 34, NDK 26.1.10909125, CMake 3.22.1, then `gradle assembleRelease`.
 
 Bump `versionCode` and `versionName` in `app/build.gradle.kts` before tagging a release.
+
+Screenshots: push a tag named `screenshots-<anything>`. A workflow runs the app in an emulator with made-up demo data and commits fresh images to `docs/screenshots`.
 
 ## Credits
 

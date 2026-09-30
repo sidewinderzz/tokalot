@@ -16,16 +16,26 @@ import android.widget.TextView
 
 /** Colors and small view builders shared by every screen. Plain Android views, no libraries. */
 object C {
-    const val BG = 0xFFEFEFF1.toInt()
-    const val CARD = 0xFFFFFFFF.toInt()
-    const val TEXT = 0xFF1C1C1E.toInt()
-    const val SUB = 0xFF8E8E93.toInt()
-    const val LINE = 0xFFE4E4E7.toInt()
-    const val PILL = 0xFFCDCDD2.toInt()
-    const val NAV_ACTIVE = 0xFFDEDEE2.toInt()
-    const val FIELD = 0xFFF4F4F6.toInt()
-    const val GOOD = 0xFF2E7D32.toInt()
-    const val WARN = 0xFFB26A00.toInt()
+    var dark = false
+        private set
+    var BG = 0; var CARD = 0; var TEXT = 0; var SUB = 0; var LINE = 0; var PILL = 0
+    var NAV_ACTIVE = 0; var FIELD = 0; var GOOD = 0; var WARN = 0; var LINK = 0; var RIPPLE = 0
+
+    init { apply(false) }
+
+    /** Switches every color the UI builders use. Screens are rebuilt after this. */
+    fun apply(dark: Boolean) {
+        this.dark = dark
+        if (dark) {
+            BG = 0xFF0E0E10.toInt(); CARD = 0xFF1C1C1E.toInt(); TEXT = 0xFFF2F2F7.toInt(); SUB = 0xFF98989F.toInt()
+            LINE = 0xFF2C2C2E.toInt(); PILL = 0xFF3A3A3C.toInt(); NAV_ACTIVE = 0xFF2C2C2E.toInt(); FIELD = 0xFF2C2C2E.toInt()
+            GOOD = 0xFF66BB6A.toInt(); WARN = 0xFFFFB74D.toInt(); LINK = 0xFF6EA8FE.toInt(); RIPPLE = 0x33FFFFFF
+        } else {
+            BG = 0xFFEFEFF1.toInt(); CARD = 0xFFFFFFFF.toInt(); TEXT = 0xFF1C1C1E.toInt(); SUB = 0xFF8E8E93.toInt()
+            LINE = 0xFFE4E4E7.toInt(); PILL = 0xFFCDCDD2.toInt(); NAV_ACTIVE = 0xFFDEDEE2.toInt(); FIELD = 0xFFF4F4F6.toInt()
+            GOOD = 0xFF2E7D32.toInt(); WARN = 0xFFB26A00.toInt(); LINK = 0xFF2F6FDB.toInt(); RIPPLE = 0x22000000
+        }
+    }
 }
 
 object Fonts {
@@ -46,7 +56,7 @@ fun Context.rounded(color: Int, radiusDp: Int, strokeColor: Int = 0, strokeDp: I
 
 /** A background that shows a touch ripple over [base]. */
 fun Context.pressable(base: GradientDrawable) =
-    RippleDrawable(ColorStateList.valueOf(0x22000000), base, base)
+    RippleDrawable(ColorStateList.valueOf(C.RIPPLE), base, base)
 
 fun Context.text(s: CharSequence, sizeSp: Float = 16f, color: Int = C.TEXT, bold: Boolean = false) = TextView(this).apply {
     text = s
