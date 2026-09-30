@@ -51,6 +51,7 @@ class MainActivity : Activity() {
     private val showOriginal = HashSet<Long>()
     private var query = ""
     private var bannerText: TextView? = null
+    private var logoBars: BarsView? = null
     private var historyBox: LinearLayout? = null
     private val searchField by lazy {
         field("Search your dictations").apply {
@@ -70,7 +71,6 @@ class MainActivity : Activity() {
     private var playingId: Long? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Demo.handle(this, intent) // debug builds only: screenshot data
         prefs = Prefs(this)
         // Pick light or dark before any views exist (dialogs and switches follow the theme too).
         val systemDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
@@ -95,7 +95,12 @@ class MainActivity : Activity() {
         headerLeft = FrameLayout(this)
         header.addView(headerLeft, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.START or Gravity.CENTER_VERTICAL))
         val logo = row(
-            icon(if (C.dark) R.drawable.ic_logo_dark else R.drawable.ic_logo, 30).apply { clearColorFilter() },
+            BarsView(this).apply {
+                barColor = C.TEXT
+                accentColor = prefs.accent
+                layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
+                logoBars = this
+            },
             text("Tokalot", 26f, bold = true).apply { setPadding(dp(8), 0, 0, 0) }
         )
         header.addView(logo, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
@@ -111,15 +116,6 @@ class MainActivity : Activity() {
         }
         root.addView(nav, lp())
         setContentView(root)
-
-        // Screenshot workflow can open a specific screen (debug builds only).
-        if (Demo.isDebug(this)) {
-            intent.getStringExtra("tab")?.let { t -> Tab.values().firstOrNull { it.name == t }?.let { tab = it } }
-            if (intent.getBooleanExtra("settings", false)) inSettings = true
-            intent.getStringExtra("category")?.let { c ->
-                AppCategory.values().firstOrNull { it.name == c }?.let { StyleScreen.selected = it }
-            }
-        }
     }
 
     override fun onResume() {
@@ -310,6 +306,7 @@ class MainActivity : Activity() {
 
     /** Rebuilds the visible screen. Screens are cheap to build, so we just redraw. */
     fun render() {
+        logoBars?.accentColor = prefs.accent // follows the button color picked in Settings
         headerLeft.removeAllViews()
         val leftIcon = if (inSettings) R.drawable.ic_back else R.drawable.ic_menu
         headerLeft.addView(icon(leftIcon, 28).apply {

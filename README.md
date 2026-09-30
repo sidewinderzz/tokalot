@@ -5,10 +5,8 @@ Voice typing for Android that works with the keyboard you already use. Open the 
 Bring your own API keys. There's no Tokalot server, account or subscription.
 
 <p align="center">
-  <img src="docs/screenshots/home-light.png" width="24%" alt="Home">
-  <img src="docs/screenshots/home-dark.png" width="24%" alt="Home, dark theme">
-  <img src="docs/screenshots/style.png" width="24%" alt="Per-app styles">
-  <img src="docs/screenshots/snippets.png" width="24%" alt="Snippets">
+  <img src="docs/screenshots/home-light.png" width="32%" alt="Home, light theme">
+  <img src="docs/screenshots/home-dark.png" width="32%" alt="Home, dark theme">
 </p>
 
 ## What it does
@@ -45,8 +43,6 @@ GitHub Actions builds every push. To release, bump `versionCode` and `versionNam
 Releases are signed with a private key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It is never committed. Forks without those secrets still build, signed with a throwaway debug key.
 
 Local build: JDK 17, Android SDK 34, NDK 26.1.10909125, CMake 3.22.1, then `gradle assembleRelease`.
-
-Screenshots: edit `docs/screenshots/REFRESH` and push (or run the Screenshots workflow from the Actions tab). A workflow runs the app in an emulator with made-up demo data and commits fresh images to `docs/screenshots`.
 
 ## Credits
 

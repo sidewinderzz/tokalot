@@ -30,6 +30,11 @@ class BarsView(context: Context) : View(context) {
     var barColor: Int = Color.WHITE
         set(v) { field = v; paint.color = v; invalidate() }
 
+    /** Optional color for the tall 4th bar, like the amber bar in the app icon. */
+    var accentColor: Int? = null
+        set(v) { field = v; invalidate() }
+    private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
     /** Returns the current mic level 0..1 (RMS). */
     var level: (() -> Float)? = null
 
@@ -63,7 +68,9 @@ class BarsView(context: Context) : View(context) {
             val h = cur[i].coerceIn(6f, 64f) * s
             val cx = (xs[i] + 3f) * s
             r.set(cx - 3f * s, height / 2f - h / 2f, cx + 3f * s, height / 2f + h / 2f)
-            canvas.drawRoundRect(r, 3f * s, 3f * s, paint)
+            val ac = accentColor
+            val p = if (i == 3 && ac != null) accentPaint.also { it.color = ac } else paint
+            canvas.drawRoundRect(r, 3f * s, 3f * s, p)
         }
         if (mode != Mode.IDLE || settling) postInvalidateOnAnimation()
     }
