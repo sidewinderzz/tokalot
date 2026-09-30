@@ -25,9 +25,9 @@ Open the keyboard in any app and a small button floats above it. Talk, and Tokal
 
 ```mermaid
 flowchart LR
-    A(["You talk"]) --> B["Speech to text<br/>Groq Whisper · OpenAI · on-device"]
-    B --> C["AI cleanup<br/>fillers, corrections, per-app style"]
-    C --> D(["Typed into the<br/>box you're in"])
+    A(["You talk"]) --> B["Speech to text<br/>Groq · OpenAI · on-device"]
+    B --> C["AI cleanup<br/>fillers · fixes · style"]
+    C --> D(["Into your<br/>text box"])
     classDef accent fill:#F2A93B,stroke:#F2A93B,color:#1C1C1E
     classDef step fill:#2C2C2E,stroke:#2C2C2E,color:#FFFFFF
     class A,D accent
