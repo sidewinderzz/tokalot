@@ -29,7 +29,9 @@ flowchart LR
     B --> C["AI cleanup<br/>fillers, corrections, per-app style"]
     C --> D(["Typed into the<br/>box you're in"])
     classDef accent fill:#F2A93B,stroke:#F2A93B,color:#1C1C1E
+    classDef step fill:#2C2C2E,stroke:#2C2C2E,color:#FFFFFF
     class A,D accent
+    class B,C step
 ```
 
 If a provider is down or out of free quota, Tokalot tries another one you have a key for, then falls back to on-device speech recognition and basic cleanup. You always get your words.
