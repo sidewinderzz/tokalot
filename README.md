@@ -47,3 +47,7 @@ Local build: JDK 17, Android SDK 34, NDK 26.1.10909125, CMake 3.22.1, then `grad
 ## Credits
 
 On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT). Headings use EB Garamond (SIL Open Font License).
+
+## License
+
+[MIT](LICENSE). Use it, change it, share it. Contributions welcome.
