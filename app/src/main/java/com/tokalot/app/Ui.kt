@@ -80,7 +80,7 @@ fun Context.icon(res: Int, sizeDp: Int = 22, tint: Int = C.TEXT) = ImageView(thi
     layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
 }
 
-/** Outlined pill button like "Copy" in Wispr Flow. */
+/** Outlined pill button, used for Copy / Play / Original and similar actions. */
 fun Context.pill(label: String?, iconRes: Int? = null, filled: Boolean = false, onClick: () -> Unit): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL

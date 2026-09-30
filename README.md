@@ -4,6 +4,8 @@ Voice typing for Android that works with the keyboard you already use. Open the 
 
 Bring your own API keys. There's no Tokalot server, account or subscription.
 
+Tokalot is inspired by [Wispr Flow](https://wisprflow.ai), which is great and worth paying for if you want a polished product. This is an independent, open-source take for people who'd rather bring their own keys. It is not affiliated with Wispr.
+
 <p align="center">
   <img src="docs/screenshots/home-light.png" width="32%" alt="Home, light theme">
   <img src="docs/screenshots/home-dark.png" width="32%" alt="Home, dark theme">
