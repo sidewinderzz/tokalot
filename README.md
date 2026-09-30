@@ -1,45 +1,45 @@
-# OfflineFlow
+# Tokalot
 
-Offline voice typing for Android. Works with whatever keyboard you already use.
+Voice typing for Android that works with the keyboard you already use. Open the keyboard in any app and a small button floats above it. Talk, and your words are typed into the text box, cleaned up by AI: filler words removed, self-corrections applied, and formatted for the app you're in.
 
-Tap any text field and a small mic button floats above the keyboard. Tap it to talk, tap again to stop,
-and the transcript is typed into the field. Speech recognition is Whisper (whisper.cpp) running on the phone.
+Bring your own API keys. There's no Tokalot server, account or subscription.
 
-## Build the APK (no Android Studio needed)
+## What it does
 
-1. Create a new GitHub repo and push this folder to it.
-2. Open the repo's **Actions** tab. The "Build APK" workflow runs on every push (first build takes several
-   minutes because it compiles whisper.cpp).
-3. Open the finished run and download the **OfflineFlow-debug-apk** artifact. Unzip it, send
-   `app-debug.apk` to your phone, and install it (allow "install unknown apps" for whatever app you opened it from).
+- **Floating button** above the keyboard, only while the keyboard is open. Drag it anywhere; it remembers the spot.
+- **Tap to talk or hold to talk.** Long-press or slide away to cancel. Optional auto-stop after 30 seconds of silence.
+- **Keeps recording** if the text box or keyboard closes mid-sentence. The result is copied to the clipboard.
+- **Speech-to-text:** Groq Whisper (fast, generous free tier), OpenAI, or fully offline on-device Whisper.
+- **AI cleanup:** Groq, Claude Haiku, Gemini Flash-Lite or OpenAI. Falls back to another provider you have a key for, then to basic offline cleanup.
+- **Per-app styles:** Messages, Email, AI & code, and everything else, each Formal / Casual / Very casual.
+- **Dictionary** for names and jargon, and **snippets** (say a phrase, get a block of text exactly as written).
+- **History** with search, playback of recordings, the original transcript, and Undo after inserting.
+- **Usage and cost estimates** per month.
+- **Backup / restore** to a single file. API keys are excluded unless you choose to include them.
+- **In-app updates** from this repo's GitHub Releases.
 
-Or open the folder in Android Studio and press Run.
+## Privacy
 
-## First-time setup on the phone
+- The accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to type your words. Tokalot doesn't read your screen, messages or notifications, and skips password fields.
+- History, recordings, settings and keys are stored only in the app's private storage on your phone.
+- Your dictation leaves the phone only to go directly to the speech/cleanup services you picked, using your keys. With on-device speech-to-text and cleanup off, nothing leaves at all.
 
-1. Open OfflineFlow, tap **Allow microphone**.
-2. Tap **Download speech model** (~60 MB, the only time it uses the internet).
-3. Tap **Turn on OfflineFlow in Accessibility** and enable it. Android will show a scary warning; that's
-   normal for any accessibility service. If the switch is greyed out: phone Settings > Apps > OfflineFlow >
-   three-dot menu > **Allow restricted settings**, then try again.
-4. Also set battery usage for OfflineFlow to **Unrestricted** so Android doesn't kill the service.
+## Install
 
-## How it keeps battery use low
+Download the latest APK from [Releases](../../releases) and open it on your phone. Android will warn about installing apps from outside the Play Store and about accessibility apps. That's expected for any sideloaded app of this kind. The source is all here if you want to check it.
 
-- The service only listens for focus/window changes. No polling, no mic, no model loaded while idle.
-- The mic is open only between your two taps.
-- The model loads on your first dictation and is freed after 60 seconds idle.
-- Native code is always built optimized (Release), even in the debug APK.
+In the app: open ☰ Settings, allow the microphone, paste a [Groq key](https://console.groq.com/keys), and turn on the accessibility switch.
 
-## Known limits
+## Build
 
-- English only (base.en model). For better accuracy, change `NAME` in `ModelManager.kt` to
-  `ggml-small.en-q5_1.bin` (about 3x bigger and slower).
-- Tap to start/stop, not hold-to-talk.
-- Password fields are skipped on purpose.
-- Some apps block programmatic text entry; then the text is pasted via the clipboard instead.
-- Filler words (um, uh) and sound tags like [BLANK_AUDIO] are stripped with simple rules. There's no
-  AI rewrite/cleanup step like Whisper Flow has.
-- Untested on a real device so far. The first thing to check is that recording works when you tap the mic
-  inside another app (Android restricts background mic use, and this relies on the accessibility overlay
-  counting as foreground).
+GitHub Actions builds every push. Pushing a tag like `v1.1` publishes a signed Release that installed copies will offer as an update.
+
+Releases are signed with a private key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It is never committed. Forks without those secrets still build, signed with a throwaway debug key.
+
+Local build: JDK 17, Android SDK 34, NDK 26.1.10909125, CMake 3.22.1, then `gradle assembleRelease`.
+
+Bump `versionCode` and `versionName` in `app/build.gradle.kts` before tagging a release.
+
+## Credits
+
+On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT). Headings use EB Garamond (SIL Open Font License).

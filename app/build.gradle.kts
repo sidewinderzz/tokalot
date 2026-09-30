@@ -4,16 +4,17 @@ plugins {
 }
 
 android {
-    namespace = "com.gdm.offlineflow"
+    namespace = "com.tokalot.app"
     compileSdk = 34
     ndkVersion = "26.1.10909125"
 
     defaultConfig {
-        applicationId = "com.gdm.offlineflow"
+        applicationId = "com.tokalot.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        // Bump both for every release you install on top of an older one.
+        versionCode = 2
+        versionName = "1.0"
 
         // arm64 only: every modern phone, and it keeps the APK small and the build fast.
         ndk { abiFilters += listOf("arm64-v8a") }
@@ -27,6 +28,29 @@ android {
         }
     }
 
+    // One permanent key signs every build, so updates always install over the old app.
+    // The key never lives in the repo: CI gets it from GitHub secrets, local builds from
+    // environment variables. Without it (e.g. someone else's fork) builds fall back to the
+    // debug key, which works but can't update your installed copy.
+    val keystorePath = System.getenv("TOKALOT_KEYSTORE")
+    signingConfigs {
+        if (keystorePath != null && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("TOKALOT_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("TOKALOT_KEY_ALIAS") ?: "tokalot"
+                keyPassword = System.getenv("TOKALOT_KEY_PASSWORD") ?: System.getenv("TOKALOT_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+        }
+    }
+
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
@@ -34,9 +58,19 @@ android {
         }
     }
 
+    // Skip the release-time lint pass: it downloads extra tooling and adds minutes to CI.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
 }

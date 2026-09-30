@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OfflineFlow</string>
-    <string name="service_description">Shows a microphone button when a text field is focused, and types what you say into it. Speech recognition runs entirely on this phone.</string>
+    <string name="app_name">Tokalot</string>
+    <string name="service_description">Shows a microphone button when a text field is focused, and types what you say into it. Nothing is recorded until you tap the mic.</string>
 </resources>

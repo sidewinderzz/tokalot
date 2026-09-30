@@ -5,7 +5,7 @@
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_gdm_offlineflow_WhisperBridge_init(JNIEnv *env, jobject /*thiz*/, jstring path) {
+Java_com_tokalot_app_WhisperBridge_init(JNIEnv *env, jobject /*thiz*/, jstring path) {
     const char *p = env->GetStringUTFChars(path, nullptr);
     whisper_context_params cp = whisper_context_default_params();
     cp.use_gpu = false;
@@ -15,8 +15,8 @@ Java_com_gdm_offlineflow_WhisperBridge_init(JNIEnv *env, jobject /*thiz*/, jstri
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_gdm_offlineflow_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/, jlong handle,
-                                                  jfloatArray samples, jint threads) {
+Java_com_tokalot_app_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/, jlong handle,
+                                                  jfloatArray samples, jint threads, jstring prompt) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) return env->NewStringUTF("");
 
@@ -36,6 +36,12 @@ Java_com_gdm_offlineflow_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/,
     wp.suppress_blank = true;
     wp.greedy.best_of = 1;  // fastest decode; accuracy is fine for dictation
 
+    // Dictionary words go in as Whisper's "initial prompt", which biases spelling toward them.
+    const char *pr = env->GetStringUTFChars(prompt, nullptr);
+    std::string promptStr(pr);
+    env->ReleaseStringUTFChars(prompt, pr);
+    if (!promptStr.empty()) wp.initial_prompt = promptStr.c_str();
+
     int rc = whisper_full(ctx, wp, data, n);
     env->ReleaseFloatArrayElements(samples, data, JNI_ABORT);
     if (rc != 0) return env->NewStringUTF("");
@@ -49,7 +55,7 @@ Java_com_gdm_offlineflow_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/,
 }
 
 JNIEXPORT void JNICALL
-Java_com_gdm_offlineflow_WhisperBridge_free(JNIEnv * /*env*/, jobject /*thiz*/, jlong handle) {
+Java_com_tokalot_app_WhisperBridge_free(JNIEnv * /*env*/, jobject /*thiz*/, jlong handle) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx != nullptr) whisper_free(ctx);
 }

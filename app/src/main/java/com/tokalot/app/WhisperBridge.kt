@@ -1,4 +1,4 @@
-package com.gdm.offlineflow
+package com.tokalot.app
 
 /** Thin JNI wrapper around whisper.cpp. All calls must come from one background thread. */
 object WhisperBridge {
@@ -7,6 +7,6 @@ object WhisperBridge {
     }
 
     external fun init(modelPath: String): Long
-    external fun transcribe(ctx: Long, samples: FloatArray, threads: Int): String
+    external fun transcribe(ctx: Long, samples: FloatArray, threads: Int, prompt: String): String
     external fun free(ctx: Long)
 }

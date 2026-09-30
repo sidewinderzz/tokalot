@@ -1,4 +1,4 @@
-package com.gdm.offlineflow
+package com.tokalot.app
 
 import android.content.Context
 import java.io.File

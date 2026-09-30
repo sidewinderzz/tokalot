@@ -1,4 +1,4 @@
-package com.gdm.offlineflow
+package com.tokalot.app
 
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -14,10 +14,21 @@ class Recorder {
 
     companion object {
         const val SAMPLE_RATE = 16000
+        private const val VOICE_RMS = 0.015f // above this counts as "someone is talking"
         private const val MAX_SAMPLES = SAMPLE_RATE * 300 // 5 minute cap
     }
 
     val isRecording: Boolean get() = running
+
+    /** Loudness of the latest audio chunk (RMS, 0..1), for the animated button. */
+    @Volatile var level = 0f
+        private set
+
+    /** When speech was last heard, for auto-stop, and where it ended in the audio. */
+    @Volatile var lastVoiceAt = 0L
+        private set
+    @Volatile var lastVoiceSample = 0
+        private set
 
     /** Caller must already hold RECORD_AUDIO. Returns false if the mic couldn't be opened. */
     fun start(): Boolean {
@@ -40,6 +51,8 @@ class Recorder {
         }
         chunks.clear()
         total = 0
+        lastVoiceAt = System.currentTimeMillis()
+        lastVoiceSample = 0
         record = rec
         running = true
         rec.startRecording()
@@ -47,9 +60,18 @@ class Recorder {
             val buf = ShortArray(minBuf)
             while (running) {
                 val n = rec.read(buf, 0, buf.size)
-                if (n > 0 && total < MAX_SAMPLES) {
-                    chunks.add(buf.copyOf(n))
-                    total += n
+                if (n > 0) {
+                    var sum = 0.0
+                    for (i in 0 until n) { val v = buf[i] / 32768.0; sum += v * v }
+                    level = kotlin.math.sqrt(sum / n).toFloat()
+                    if (level > VOICE_RMS) {
+                        lastVoiceAt = System.currentTimeMillis()
+                        lastVoiceSample = total + n
+                    }
+                    if (total < MAX_SAMPLES) {
+                        chunks.add(buf.copyOf(n))
+                        total += n
+                    }
                 } else if (n < 0) break
             }
         }.also { it.start() }
@@ -59,6 +81,7 @@ class Recorder {
     /** Stops the mic immediately and returns the audio as floats in [-1, 1]. */
     fun stop(): FloatArray {
         running = false
+        level = 0f
         thread?.join(500)
         thread = null
         record?.let {
