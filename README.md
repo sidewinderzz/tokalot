@@ -23,16 +23,12 @@ Open the keyboard in any app and a small button floats above it. Talk, and Tokal
 
 ## How it works
 
-```mermaid
-flowchart LR
-    A(["You talk"]) --> B["Speech to text<br/>Groq · OpenAI · on-device"]
-    B --> C["AI cleanup<br/>fillers · fixes · style"]
-    C --> D(["Into your<br/>text box"])
-    classDef accent fill:#F2A93B,stroke:#F2A93B,color:#1C1C1E
-    classDef step fill:#2C2C2E,stroke:#2C2C2E,color:#FFFFFF
-    class A,D accent
-    class B,C step
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/readme/flow-dark.png">
+    <img src="docs/readme/flow-light.png" alt="You talk, then speech to text (Groq, OpenAI or on-device), then AI cleanup (fillers, corrections, style), then typed into your text box" width="100%">
+  </picture>
+</p>
 
 If a provider is down or out of free quota, Tokalot tries another one you have a key for, then falls back to on-device speech recognition and basic cleanup. You always get your words.
 
