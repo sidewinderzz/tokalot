@@ -40,15 +40,13 @@ In the app: open ☰ Settings, allow the microphone, paste a [Groq key](https://
 
 ## Build
 
-GitHub Actions builds every push. Pushing a tag like `v1.1` publishes a signed Release that installed copies will offer as an update.
+GitHub Actions builds every push. To release, bump `versionCode` and `versionName` in `app/build.gradle.kts` and push to main: the workflow publishes a signed Release for that version, and installed copies offer it as an update.
 
 Releases are signed with a private key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It is never committed. Forks without those secrets still build, signed with a throwaway debug key.
 
 Local build: JDK 17, Android SDK 34, NDK 26.1.10909125, CMake 3.22.1, then `gradle assembleRelease`.
 
-Bump `versionCode` and `versionName` in `app/build.gradle.kts` before tagging a release.
-
-Screenshots: push a tag named `screenshots-<anything>`. A workflow runs the app in an emulator with made-up demo data and commits fresh images to `docs/screenshots`.
+Screenshots: edit `docs/screenshots/REFRESH` and push (or run the Screenshots workflow from the Actions tab). A workflow runs the app in an emulator with made-up demo data and commits fresh images to `docs/screenshots`.
 
 ## Credits
 

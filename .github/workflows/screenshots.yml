@@ -1,10 +1,12 @@
 name: Screenshots
 
-# Push a tag named screenshots-<anything> to refresh the README screenshots.
-# Runs the real app in an emulator with made-up demo data (debug builds only).
+# Refresh the README screenshots by changing docs/screenshots/REFRESH (any edit) and pushing,
+# or with "Run workflow" on the Actions tab. Runs the real app in an emulator with made-up
+# demo data (debug builds only).
 on:
   push:
-    tags: ['screenshots*']
+    branches: [main]
+    paths: ['docs/screenshots/REFRESH']
   workflow_dispatch:
 
 permissions:
