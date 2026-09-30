@@ -46,6 +46,11 @@ class OfflineFlowService : AccessibilityService() {
         private const val IDLE_ALPHA = 0.75f
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
+        /** Placeholders apps show in empty boxes, for apps that don't flag them as hints. */
+        private val COMMON_PLACEHOLDERS = setOf(
+            "message", "type a message", "text message", "write a message", "send a message",
+            "rcs message", "sms message", "chat", "aa", "reply", "add a comment", "search",
+        )
     }
 
     private enum class State { IDLE, STARTING, RECORDING, WORKING }
@@ -532,8 +537,15 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun insert(node: AccessibilityNodeInfo, text: String): Boolean {
-        val hint = node.isShowingHintText
-        val current = if (hint) "" else (node.text?.toString() ?: "")
+        // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
+        // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
+        val raw = node.text?.toString() ?: ""
+        val hintText = node.hintText?.toString()
+        val caretAtStart = node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
+        val looksLikePlaceholder = caretAtStart &&
+            raw.trim().trimEnd('…', '.').lowercase() in COMMON_PLACEHOLDERS
+        val hint = node.isShowingHintText || raw.isEmpty() || (hintText != null && raw == hintText) || looksLikePlaceholder
+        val current = if (hint) "" else raw
         var start = if (hint) 0 else node.textSelectionStart
         var end = if (hint) 0 else node.textSelectionEnd
         if (start < 0 || end < 0) { start = current.length; end = current.length }
