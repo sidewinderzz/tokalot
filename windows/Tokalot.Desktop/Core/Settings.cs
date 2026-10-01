@@ -65,6 +65,9 @@ public sealed class Settings
     public bool LaunchAtStartup { get; set; } = true;
     /** The "Hold to talk" card in the sidebar was closed. */
     public bool HideShortcutTip { get; set; }
+    /** Optional sync: the shared file's path on this PC ("" = off), and whether this PC puts its API keys in it. */
+    public string SyncFile { get; set; } = "";
+    public bool SyncKeys { get; set; }
     /** Encrypted (DPAPI, base64) keys by service id. */
     public Dictionary<string, string> EncryptedKeys { get; set; } = new();
 
@@ -162,6 +165,7 @@ public sealed class Settings
             System.IO.File.WriteAllText(tmp, JsonSerializer.Serialize(this, Json));
             System.IO.File.Move(tmp, f, true);
         }
+        Sync.Queue(); // no-op unless sync is on
     }
 
     /** Replaces the live settings (used by restore). */

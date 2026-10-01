@@ -22,6 +22,8 @@ public static class Backup
         var s = Settings.Current;
         var settingsJson = JsonSerializer.SerializeToNode(s, Settings.Json)!.AsObject();
         settingsJson.Remove("encryptedKeys"); // DPAPI blobs only work on this PC; export plain keys instead if asked
+        settingsJson.Remove("syncFile");      // where the sync file lives is this device's business
+        settingsJson.Remove("syncKeys");
         var manifest = new JsonObject
         {
             ["format"] = 1,
@@ -84,6 +86,8 @@ public static class Backup
             foreach (var (id, val) in manifest["keys"]!.AsObject()) restored.SetKey(id, val?.ToString() ?? "");
         else
             restored.EncryptedKeys = new Dictionary<string, string>(old.EncryptedKeys);
+        restored.SyncFile = old.SyncFile;
+        restored.SyncKeys = old.SyncKeys;
         Settings.Replace(restored);
 
         var recordings = 0;

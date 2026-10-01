@@ -106,6 +106,7 @@ public sealed class App : Application
             tray?.ShowBalloonTip(6000, "Tokalot", "Couldn't listen for Ctrl+Win. Try restarting Tokalot.", System.Windows.Forms.ToolTipIcon.Warning);
 
         _ = CheckForUpdatesLoop();
+        _ = Sync.Run(); // no-op unless sync is on
     }
 
     /** A Start menu entry, so Tokalot can be found by searching "Tokalot" (the silent installer skips it). */

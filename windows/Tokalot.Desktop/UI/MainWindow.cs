@@ -42,6 +42,7 @@ public sealed class MainWindow : Window
     private Snippet? editing;
     private bool editingNew;
     private readonly Action onHistory, onPlayer;
+    private readonly Action<bool> onSync;
 
     private static Settings S => Settings.Current;
 
@@ -104,6 +105,10 @@ public sealed class MainWindow : Window
         Player.Changed += onPlayer;
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); };
         SourceInitialized += (_, _) => DarkTitleBar();
+        Activated += (_, _) => Sync.Queue();
+        onSync = changed => Dispatcher.BeginInvoke(() => { if (changed || CurrentPage == Page.Settings) Render(); });
+        Sync.Finished += onSync;
+        Closed += (_, _) => Sync.Finished -= onSync;
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
@@ -899,7 +904,7 @@ public sealed class MainWindow : Window
             keys.Children.Add(Spaced(box, 0, 6, 0, 0));
         }
         col.Children.Add(Ui.Card(keys, 20));
-        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. Nothing is synced anywhere.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync below and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
 
         // --- Recordings
         Section(col, "Recordings");
@@ -921,6 +926,10 @@ public sealed class MainWindow : Window
             AudioStore.Prune(0);
             Render();
         })), 4, 10, 0, 0));
+
+        // --- Sync (optional)
+        Section(col, "Sync");
+        BuildSync(col);
 
         // --- Backup
         Section(col, "Backup");
@@ -1089,6 +1098,72 @@ public sealed class MainWindow : Window
     }
 
     internal void ShowToast(string msg) => Toast(msg);
+
+    private const string SyncInfo =
+        "Tokalot keeps your dictionary, snippets, styles and instructions in one small file. Put that file in a folder you already sync, " +
+        "such as OneDrive, Google Drive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.\n\n" +
+        "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. " +
+        "Your history and recordings are never put in it.\n\n" +
+        "API keys are left out unless you turn on Include API keys. The file isn't encrypted, so only do that if the folder is private to you. " +
+        "You can stop syncing at any time; your settings stay on this device.";
+
+    /** Optional: share dictionary, snippets, styles and instructions between devices through one file in a synced folder. */
+    private void BuildSync(StackPanel col)
+    {
+        var info = Ui.Button("", () => Ui.Dialog(this, SyncInfo, "Got it", cancel: null, title: "How sync works"), icon: "info");
+        info.ToolTip = "How sync works";
+        System.Windows.Automation.AutomationProperties.SetName(info, "How sync works");
+
+        async void Use(string path)
+        {
+            S.SyncFile = path;
+            S.Save();
+            await Sync.Run();
+            Render();
+        }
+
+        if (S.SyncFile.Length == 0)
+        {
+            var create = Ui.Button("Create a sync file", () =>
+            {
+                var dlg = new Microsoft.Win32.SaveFileDialog { FileName = Sync.FileName, Filter = "Tokalot sync file|*.json", DefaultExt = ".json", OverwritePrompt = false };
+                if (dlg.ShowDialog(this) == true) Use(dlg.FileName);
+            }, filled: true);
+            var existing = Ui.Button("Use an existing sync file", () =>
+            {
+                var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Tokalot sync file|*.json" };
+                if (dlg.ShowDialog(this) == true) Use(dlg.FileName);
+            });
+            create.Margin = new Thickness(0, 0, 8, 0);
+            var buttons = Ui.Row(create, existing);
+            buttons.Margin = new Thickness(20, 0, 20, 16);
+            col.Children.Add(Ui.Card(Ui.Stack(
+                Ui.SettingRow("Sync settings between your devices", "Optional. Off.", info), buttons)));
+            return;
+        }
+
+        var status = Ui.Text(Sync.Status(), 13.5, Sync.LastError != null ? C.Warn : C.Good);
+        var where = Ui.Text(S.SyncFile, 13, C.Sub);
+        where.TextTrimming = TextTrimming.CharacterEllipsis;
+        where.TextWrapping = TextWrapping.NoWrap;
+        var head = Spaced(Spread(Ui.Stack(Ui.Text("Sync settings between your devices", 15), status, where), info), 20, 14, 18, 14);
+        col.Children.Add(Ui.List(
+            head,
+            Ui.SettingRow("Include API keys", "Off by default. The sync file isn't encrypted, so only turn this on if the folder is private to you.",
+                Ui.Switch(S.SyncKeys, v => { S.SyncKeys = v; S.Save(); }))));
+        var now = Ui.Button("Sync now", async () => { await Sync.Run(); Render(); }, filled: true);
+        var stop = Ui.Button("Stop syncing", () =>
+        {
+            if (!Ui.Dialog(this, "Stop syncing on this PC? The sync file and your settings here stay as they are.", "Stop syncing")) return;
+            S.SyncFile = "";
+            S.SyncKeys = false;
+            Sync.Forget();
+            S.Save();
+            Render();
+        });
+        now.Margin = new Thickness(0, 0, 8, 0);
+        col.Children.Add(Spaced(Ui.Row(now, stop), 0, 12, 0, 0));
+    }
 
     private bool busy; // a backup or restore is running
 
