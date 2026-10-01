@@ -54,6 +54,8 @@ public sealed class Settings
     public uint Accent { get; set; } = Catalog.Accents[0].Argb;
     public int AudioKeepDays { get; set; } = 30;
     public bool LaunchAtStartup { get; set; } = true;
+    /** Draw the window on the CPU instead of the graphics card (fixes blank windows on some drivers). */
+    public bool SoftwareRendering { get; set; }
     /** Encrypted (DPAPI, base64) keys by service id. */
     public Dictionary<string, string> EncryptedKeys { get; set; } = new();
 

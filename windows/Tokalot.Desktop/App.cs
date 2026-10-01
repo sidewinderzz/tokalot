@@ -33,7 +33,13 @@ public sealed class App : Application
             try { EventWaitHandle.OpenExisting(ShowSignal).Set(); } catch { }
             return;
         }
-        var app = new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, background = args.Contains("--background") };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Log("Crash: " + e.ExceptionObject);
+        var app = new App
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown,
+            background = args.Contains("--background"),
+            software = args.Contains("--software"),
+        };
         app.Run();
     }
 
@@ -44,18 +50,23 @@ public sealed class App : Application
     private System.Windows.Forms.NotifyIcon? tray;
     private System.Windows.Forms.ToolStripMenuItem? updateItem;
 
-    private bool background;
+    private bool background, software;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         var s = Settings.Current;
+        // Some graphics drivers show WPF windows as blank white; drawing on the CPU avoids that.
+        if (software || s.SoftwareRendering)
+            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+        Log($"Start {Updater.CurrentVersion} · render tier {System.Windows.Media.RenderCapability.Tier >> 16} · software={software || s.SoftwareRendering} · {Environment.OSVersion}");
         C.Apply(s.Theme);
         DispatcherUnhandledException += (_, e) =>
         {
             Log("UI error: " + e.Exception);
             e.Handled = true;
         };
+        TaskScheduler.UnobservedTaskException += (_, e) => { Log("Task error: " + e.Exception); e.SetObserved(); };
 
         Controller = new Controller(Dispatcher);
         SetUpTray();
@@ -82,6 +93,7 @@ public sealed class App : Application
         {
             window = new MainWindow();
             window.Closed += (_, _) => window = null;
+            window.ContentRendered += (_, _) => Log("Window rendered");
         }
         window.Show();
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
