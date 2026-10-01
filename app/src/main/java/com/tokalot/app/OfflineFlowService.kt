@@ -606,6 +606,7 @@ class OfflineFlowService : AccessibilityService() {
         handler.removeCallbacks(silenceCheck)
         Haptics.play(this, Haptics.Kind.STOP)
         val voiceEnd = recorder.lastVoiceSample
+        val speech = recorder.speechSamples
         var samples = recorder.stop()
         // After an auto-stop, drop the trailing 30 s of silence: less to upload, and Whisper
         // tends to invent words ("Thank you.") in long silences.
@@ -628,8 +629,16 @@ class OfflineFlowService : AccessibilityService() {
             updateButton()
             return
         }
+        // A quick tap with nothing said: Whisper turns room noise into "Thank you." (300 ms of sound = speech).
+        val heard = speech >= Recorder.SAMPLE_RATE * 3 / 10
+        if (!heard && samples.size < Recorder.SAMPLE_RATE * 5 / 2) {
+            setState(State.IDLE)
+            toast("Didn't catch anything")
+            updateButton()
+            return
+        }
         setState(State.WORKING)
-        dictation.process(samples, targetApp) { outcome, err ->
+        dictation.process(samples, targetApp, sparse = !heard) { outcome, err ->
             setState(State.IDLE)
             when {
                 err != null -> { Haptics.play(this, Haptics.Kind.ERROR); toast(err) }

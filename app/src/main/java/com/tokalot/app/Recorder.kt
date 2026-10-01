@@ -15,6 +15,7 @@ class Recorder {
     companion object {
         const val SAMPLE_RATE = 16000
         private const val VOICE_RMS = 0.015f // above this counts as "someone is talking"
+        private const val SPEECH_RMS = 0.008f // lower bar for "was anything said at all" (quiet mics)
         private const val MAX_SAMPLES = SAMPLE_RATE * 300 // 5 minute cap
     }
 
@@ -28,6 +29,10 @@ class Recorder {
     @Volatile var lastVoiceAt = 0L
         private set
     @Volatile var lastVoiceSample = 0
+        private set
+
+    /** How much of the recording had sound in it, in samples. */
+    @Volatile var speechSamples = 0
         private set
 
     /** Caller must already hold RECORD_AUDIO. Returns false if the mic couldn't be opened. */
@@ -53,6 +58,7 @@ class Recorder {
         total = 0
         lastVoiceAt = System.currentTimeMillis()
         lastVoiceSample = 0
+        speechSamples = 0
         record = rec
         running = true
         rec.startRecording()
@@ -64,6 +70,7 @@ class Recorder {
                     var sum = 0.0
                     for (i in 0 until n) { val v = buf[i] / 32768.0; sum += v * v }
                     level = kotlin.math.sqrt(sum / n).toFloat()
+                    if (level > SPEECH_RMS) speechSamples += n
                     if (level > VOICE_RMS) {
                         lastVoiceAt = System.currentTimeMillis()
                         lastVoiceSample = total + n

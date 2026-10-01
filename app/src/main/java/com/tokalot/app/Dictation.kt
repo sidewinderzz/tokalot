@@ -45,14 +45,17 @@ class Dictation(context: Context) {
         }.start()
     }
 
-    /** onDone runs on the main thread with either an outcome or an error message. */
-    fun process(samples: FloatArray, appPkg: String?, onDone: (Outcome?, String?) -> Unit) {
+    /**
+     * onDone runs on the main thread with either an outcome or an error message.
+     * sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence.
+     */
+    fun process(samples: FloatArray, appPkg: String?, sparse: Boolean = false, onDone: (Outcome?, String?) -> Unit) {
         main.removeCallbacks(unload)
         exec.execute {
             var outcome: Outcome? = null
             var error: String? = null
             try {
-                outcome = run(samples, appPkg)
+                outcome = run(samples, appPkg, sparse)
             } catch (t: Throwable) {
                 error = t.message ?: "Transcription failed"
             }
@@ -77,7 +80,7 @@ class Dictation(context: Context) {
         }
     }
 
-    private fun run(samples: FloatArray, appPkg: String?): Outcome {
+    private fun run(samples: FloatArray, appPkg: String?, sparse: Boolean): Outcome {
         val prefs = Prefs(app)
         val category = AppContext.categorize(appPkg, prefs)
         val appLabel = appPkg?.let { AppContext.label(app, it) }
@@ -117,7 +120,7 @@ class Dictation(context: Context) {
             usedLocal = true
         }
         val base = TextTools.stripNoise(raw)
-        if (base.isBlank()) return Outcome("", warnings.firstOrNull())
+        if (base.isBlank() || (sparse && TextTools.isPhantom(base))) return Outcome("", warnings.firstOrNull())
 
         // 2-4. Snippets + cleanup
         val snippets = prefs.snippets

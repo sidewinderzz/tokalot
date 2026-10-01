@@ -10,6 +10,11 @@ class TextToolsTest {
         Snippet("home address", "123 Main St, Springfield"),
     )
 
+    @Test fun phantomPhrases() {
+        assertTrue(TextTools.isPhantom(" Thank you. "))
+        assertTrue(!TextTools.isPhantom("Thank you for the update."))
+    }
+
     @Test fun stripsNoise() {
         assertEquals("hello there", TextTools.stripNoise(" [BLANK_AUDIO] hello (music) there "))
     }

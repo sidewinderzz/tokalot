@@ -10,6 +10,14 @@ object TextTools {
     /** Removes Whisper's sound tags like [BLANK_AUDIO] or (music). */
     fun stripNoise(s: String) = s.replace(NOISE, " ").replace(SPACES, " ").trim()
 
+    private val NOT_LETTERS = Regex("""[^a-z ]""")
+    private val PHANTOMS = setOf(
+        "thank you", "thank you very much", "thank you for watching", "thanks for watching", "you", "bye", "beep",
+    )
+
+    /** Whisper invents these for silence. Only trusted as "nothing said" when barely any sound was heard. */
+    fun isPhantom(s: String) = s.lowercase().replace(NOT_LETTERS, " ").replace(SPACES, " ").trim() in PHANTOMS
+
     /** The fallback when AI cleanup is off or unreachable. */
     fun basicClean(s: String) = s.replace(FILLERS, "")
         .replace(SPACES, " ")
