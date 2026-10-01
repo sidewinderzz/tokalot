@@ -148,7 +148,11 @@ object Secrets {
  * No accounts, no database; uninstalling the app erases it.
  */
 class Prefs(ctx: Context) {
-    private val sp = ctx.applicationContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val app = ctx.applicationContext
+    private val sp = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    // Sync's own state lives in a separate file that Backup never reads or replaces, so a
+    // backup restored on another phone can't carry this phone's sync file with it.
+    private val syncSp = app.getSharedPreferences("sync", Context.MODE_PRIVATE)
 
     private inline fun <reified T : Enum<T>> enumOr(name: String?, def: T): T =
         name?.let { runCatching { enumValueOf<T>(it) }.getOrNull() } ?: def
@@ -166,7 +170,21 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putString("style", v.name).apply()
 
     fun styleFor(c: AppCategory): Style = enumOr(sp.safeString("style_${c.name}", null), c.defaultStyle)
-    fun setStyleFor(c: AppCategory, s: Style) = sp.edit().putString("style_${c.name}", s.name).apply()
+    fun setStyleFor(c: AppCategory, s: Style) {
+        sp.edit().putString("style_${c.name}", s.name).apply()
+        Sync.changed(app)
+    }
+
+    /** Only the styles the user picked themselves (category id -> style id); the rest follow the defaults. */
+    val explicitStyles: Map<String, String>
+        get() {
+            val out = LinkedHashMap<String, String>()
+            for (c in AppCategory.values()) {
+                val name = sp.safeString("style_${c.name}", null) ?: continue
+                if (Style.values().any { it.name == name }) out[c.name] = name
+            }
+            return out
+        }
 
     /** User moved an app to a different category. */
     fun appOverride(pkg: String): AppCategory? = sp.safeString("app_$pkg", null)?.let { enumOr(it, AppCategory.OTHER) }
@@ -174,7 +192,10 @@ class Prefs(ctx: Context) {
 
     var customInstructions: String
         get() = sp.safeString("custom", DEFAULT_INSTRUCTIONS) ?: ""
-        set(v) = sp.edit().putString("custom", v).apply()
+        set(v) {
+            sp.edit().putString("custom", v).apply()
+            Sync.changed(app)
+        }
 
     /** API keys are stored encrypted (see [Secrets]); one saved in plain text by an older version is encrypted on first read. */
     fun key(service: String?): String {
@@ -191,6 +212,7 @@ class Prefs(ctx: Context) {
         // If the Keystore is broken on this phone, a plain-text key still beats a key that can't be saved.
         val stored = if (plain.isEmpty()) "" else Secrets.encrypt(plain) ?: plain
         sp.edit().putString("key_$service", stored).apply()
+        if (syncKeys) Sync.changed(app)
     }
 
     /** Model name, user-overridable per choice (providers rename models over time). */
@@ -204,7 +226,10 @@ class Prefs(ctx: Context) {
             val arr = JSONArray(sp.safeString("words", "[]"))
             List(arr.length()) { arr.getString(it) }
         }.getOrDefault(emptyList())
-        set(v) = sp.edit().putString("words", JSONArray(v).toString()).apply()
+        set(v) {
+            sp.edit().putString("words", JSONArray(v).toString()).apply()
+            Sync.changed(app)
+        }
 
     var snippets: List<Snippet>
         get() = runCatching {
@@ -215,10 +240,73 @@ class Prefs(ctx: Context) {
             }
         }.getOrDefault(emptyList())
         set(v) {
-            val arr = JSONArray()
-            v.forEach { arr.put(JSONObject().put("t", it.trigger).put("x", it.text)) }
-            sp.edit().putString("snippets", arr.toString()).apply()
+            sp.edit().putString("snippets", snippetsJson(v)).apply()
+            Sync.changed(app)
         }
+
+    private fun snippetsJson(v: List<Snippet>): String {
+        val arr = JSONArray()
+        v.forEach { arr.put(JSONObject().put("t", it.trigger).put("x", it.text)) }
+        return arr.toString()
+    }
+
+    // ---------- sync (optional; see Sync.kt) ----------
+
+    /** What this device would put in the sync file right now. */
+    fun syncState() = SyncState(words, snippets, explicitStyles, customInstructions)
+
+    /** Stores a merge result in one go, without counting as a change the user made. */
+    fun applySynced(state: SyncState, keys: Map<String, String>) {
+        val ed = sp.edit()
+            .putString("words", JSONArray(state.words).toString())
+            .putString("snippets", snippetsJson(state.snippets))
+            .putString("custom", state.instructions)
+        for (c in AppCategory.values()) {
+            val style = state.styles[c.name]?.takeIf { name -> Style.values().any { it.name == name } }
+            if (style != null) ed.putString("style_${c.name}", style) else ed.remove("style_${c.name}")
+        }
+        ed.apply()
+        // Only fills a slot (or replaces a key that changed), so a key is never re-encrypted for nothing.
+        keys.forEach { (service, v) -> if (v.isNotEmpty() && v != key(service)) setKeyQuietly(service, v) }
+    }
+
+    private fun setKeyQuietly(service: String, v: String) {
+        val plain = v.trim()
+        sp.edit().putString("key_$service", if (plain.isEmpty()) "" else Secrets.encrypt(plain) ?: plain).apply()
+    }
+
+    /** The chosen sync file (a document URI), or null when sync is off. */
+    var syncUri: String?
+        get() = syncSp.safeString("uri", null)?.takeIf { it.isNotEmpty() }
+        set(v) = syncSp.edit().putString("uri", v).apply()
+
+    /** "Include API keys": whether this device writes its keys into the sync file. */
+    var syncKeys: Boolean
+        get() = syncSp.safeBoolean("keys", false)
+        set(v) = syncSp.edit().putBoolean("keys", v).apply()
+
+    /** The synced values as they were after the last successful sync (never keys); null before the first. */
+    var syncBase: String?
+        get() = syncSp.safeString("base", null)
+        set(v) = syncSp.edit().putString("base", v).apply()
+
+    /** When the last successful sync finished, in ms; 0 = never. */
+    var syncLast: Long
+        get() = try { syncSp.getLong("last", 0) } catch (_: ClassCastException) { 0 }
+        set(v) = syncSp.edit().putLong("last", v).apply()
+
+    /** Why the last attempt failed, ready to show; null if it worked. */
+    var syncError: String?
+        get() = syncSp.safeString("error", null)
+        set(v) = syncSp.edit().putString("error", v).apply()
+
+    /** The file's permission is gone: nothing is tried again until the user picks the file again. */
+    var syncBroken: Boolean
+        get() = syncSp.safeBoolean("broken", false)
+        set(v) = syncSp.edit().putBoolean("broken", v).apply()
+
+    /** Turns sync off on this device. The file itself and every setting stay as they are. */
+    fun forgetSync() = syncSp.edit().clear().apply()
 
     /** "system", "light" or "dark". */
     var theme: String

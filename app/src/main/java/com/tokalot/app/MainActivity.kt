@@ -170,6 +170,8 @@ class MainActivity : Activity() {
         super.onResume()
         History.onChange = { if (!inSettings && tab == Tab.HOME) render() }
         render()
+        Sync.onDone = { changed -> if (!isDestroyed) syncFinished(changed) }
+        Sync.request(this)
         // Quietly look for a newer release (at most every few hours).
         Thread { if (Updater.check(applicationContext)) runOnUiThread { render() } }.start()
     }
@@ -264,7 +266,9 @@ class MainActivity : Activity() {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data ?: return
-        if (resultCode != RESULT_OK || (requestCode != REQ_BACKUP && requestCode != REQ_RESTORE)) return
+        if (resultCode != RESULT_OK) return
+        if (requestCode == REQ_SYNC_CREATE || requestCode == REQ_SYNC_OPEN) { useSyncFile(uri); return }
+        if (requestCode != REQ_BACKUP && requestCode != REQ_RESTORE) return
         if (backupBusy != null) return
         val app = applicationContext
         val withAudio = backupAudio
@@ -290,8 +294,67 @@ class MainActivity : Activity() {
                 backupBusy = null
                 if (!isDestroyed) applyTheme() // a restore can change the theme along with everything else
                 Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
+                if (requestCode == REQ_RESTORE) Sync.request(app)
             }
         }.start()
+    }
+
+    // ---------- sync file (optional; see Sync.kt) ----------
+
+    /** "Setting up…" while a newly picked sync file gets its first sync, else null. */
+    var syncSetup: String? = null
+        private set
+
+    fun createSyncFile() {
+        if (syncSetup != null) return
+        @Suppress("DEPRECATION")
+        startActivityForResult(
+            Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/json").putExtra(Intent.EXTRA_TITLE, SyncFormat.FILE_NAME)
+                .addFlags(SYNC_FILE_FLAGS), REQ_SYNC_CREATE
+        )
+    }
+
+    fun openSyncFile() {
+        if (syncSetup != null) return
+        // Any type: cloud folders don't agree on what a .json file is.
+        @Suppress("DEPRECATION")
+        startActivityForResult(
+            Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                .addFlags(SYNC_FILE_FLAGS), REQ_SYNC_OPEN
+        )
+    }
+
+    private fun useSyncFile(uri: Uri) {
+        if (syncSetup != null) return
+        if (!Sync.keepPermission(this, uri)) {
+            Toast.makeText(this, "Tokalot can't keep access to that file. Try another folder.", Toast.LENGTH_LONG).show()
+            return
+        }
+        syncSetup = "Setting up…"
+        render()
+        val app = applicationContext
+        Sync.adopt(app, uri) { error, _ ->
+            syncSetup = null
+            Toast.makeText(app, error ?: "Sync is on", Toast.LENGTH_LONG).show()
+            if (!isDestroyed) render()
+        }
+    }
+
+    fun syncNow() {
+        SettingsScreen.syncStatusView?.apply { text = "Syncing…"; setTextColor(C.SUB) }
+        Sync.request(this)
+    }
+
+    fun stopSync() {
+        Sync.stop(this)
+        render()
+    }
+
+    /** A sync ended. Only a change to what's on screen redraws it; otherwise just the status line moves. */
+    private fun syncFinished(changedLocal: Boolean) {
+        if (changedLocal || (inSettings && prefs.syncBroken != SettingsScreen.syncShownBroken)) render()
+        else if (inSettings) SettingsScreen.showSyncStatus(prefs)
     }
 
     // ---------- accessibility disclosure ----------
@@ -347,6 +410,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         History.onChange = null
+        Sync.onDone = null
         stopPlayback(redraw = false)
     }
 
@@ -755,6 +819,10 @@ class MainActivity : Activity() {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
         private const val REQ_BACKUP = 41
         private const val REQ_RESTORE = 42
+        private const val REQ_SYNC_CREATE = 43
+        private const val REQ_SYNC_OPEN = 44
+        private const val SYNC_FILE_FLAGS = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+            Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
 
         /** "Backing up…" / "Restoring…" while one runs in the background, else null. Outlives a redraw of the screen. */
         @Volatile var backupBusy: String? = null

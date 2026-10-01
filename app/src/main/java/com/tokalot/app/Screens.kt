@@ -266,6 +266,28 @@ class SettingsScreen(private val a: MainActivity) {
         @Volatile var downloadError: String? = null
         // Progress updates only change this label; redrawing the whole screen each tick made it flash.
         var modelStatusView: TextView? = null
+
+        // Same for sync: a finished sync only moves this line, so it never interrupts typing in a field below.
+        var syncStatusView: TextView? = null
+        var syncShownBroken = false
+
+        fun showSyncStatus(prefs: Prefs) {
+            val error = prefs.syncError
+            syncStatusView?.apply {
+                text = when {
+                    error != null -> error
+                    Sync.running -> "Syncing…"
+                    else -> Sync.ago(prefs.syncLast)
+                }
+                setTextColor(if (error != null) C.WARN else C.SUB)
+            }
+        }
+
+        val SYNC_INFO = listOf(
+            "Tokalot keeps your dictionary, snippets, styles and instructions in one small file. Put that file in a folder you already sync, such as Google Drive, OneDrive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.",
+            "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. Your history and recordings are never put in it.",
+            "API keys are left out unless you turn on Include API keys. The file isn't encrypted, so only do that if the folder is private to you. You can stop syncing at any time; your settings stay on this device.",
+        ).joinToString("\n\n")
     }
 
     fun build(): View = with(a) {
@@ -413,7 +435,11 @@ class SettingsScreen(private val a: MainActivity) {
             keys.addView(f, lp().margins(this, t = 6))
         }
         col.addView(keys)
-        col.addView(text("Keys are saved only on this phone, encrypted, in Tokalot's private storage. Nothing is synced anywhere. Uninstalling the app deletes them.", 13f, C.SUB), lp().margins(this, t = 8))
+        col.addView(text(
+            if (prefs.syncUri != null && prefs.syncKeys) "Keys are saved on this phone, encrypted, in Tokalot's private storage. Include API keys is on under Sync, so they are also written to your sync file."
+            else "Keys are saved only on this phone, encrypted, in Tokalot's private storage. Nothing is synced anywhere. Uninstalling the app deletes them.",
+            13f, C.SUB
+        ), lp().margins(this, t = 8))
 
         // --- Recordings
         section(col, "Recordings")
@@ -447,6 +473,10 @@ class SettingsScreen(private val a: MainActivity) {
                 confirm("Delete all saved recordings? Transcripts stay.", "Delete") { AudioStore.deleteAll(this); render() }
             }
         ), lp().margins(this, t = 8))
+
+        // --- Sync (optional)
+        section(col, "Sync")
+        col.addView(syncCard())
 
         // --- Backup
         section(col, "Backup")
@@ -539,6 +569,58 @@ class SettingsScreen(private val a: MainActivity) {
         col.addView(text(title.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply {
             letterSpacing = 0.08f
         }, lp().margins(this, t = 28, b = 8, l = 4))
+    }
+
+    /** One card: an invitation while sync is off, its status and controls once a file is chosen. */
+    private fun syncCard(): View = with(a) {
+        val on = prefs.syncUri != null
+        val broken = on && prefs.syncBroken
+        syncShownBroken = broken
+        val setup = syncSetup
+        val status = text(if (on) "" else "Optional. Off.", 14f, C.SUB)
+        syncStatusView = if (on) status else null
+        if (on) showSyncStatus(prefs)
+        val c = card()
+        c.addView(row(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text("Sync settings between your devices", 17f))
+                addView(status)
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+            iconButton(R.drawable.ic_info, "How sync works", 22, C.SUB) { info("How sync works", SYNC_INFO) }
+        ).apply { setPadding(dp(20), dp(12), dp(6), dp(4)) })
+
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(16), dp(12))
+        }
+        when {
+            // The first sync runs in the background; the buttons come back when it's done.
+            setup != null -> actions.addView(text(setup, 15f, C.SUB).apply { minHeight = dp(TOUCH_DP); gravity = Gravity.CENTER_VERTICAL })
+            !on || broken -> {
+                actions.addView(row(pill("Create a sync file") { createSyncFile() }))
+                actions.addView(row(pill("Use an existing sync file") { openSyncFile() }))
+            }
+            else -> actions.addView(row(pill("Sync now") { syncNow() }))
+        }
+        c.addView(actions)
+        if (on) {
+            c.addView(divider())
+            c.addView(switchRow("Include API keys", "Off by default. The sync file isn't encrypted, so only turn this on if the folder is private to you.", prefs.syncKeys) {
+                prefs.syncKeys = it
+                Sync.request(this)
+                render() // the note under API keys says where they go
+            })
+            c.addView(divider())
+            c.addView(row(pill("Stop syncing") {
+                confirm(
+                    "Tokalot forgets the sync file on this device. The file itself and all your settings stay as they are.",
+                    "Stop syncing", title = "Stop syncing?"
+                ) { stopSync() }
+            }).apply { setPadding(dp(20), dp(8), dp(16), dp(8)) })
+        }
+        c
     }
 
     private fun modelField(value: String, save: (String) -> Unit): View = with(a) {

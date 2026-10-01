@@ -17,6 +17,8 @@ import java.util.zip.ZipOutputStream
  * Both directions block; call them off the main thread.
  */
 object Backup {
+    // The "sync" preferences (sync file location, base and status) are deliberately not here:
+    // they belong to this phone, so they are neither exported nor replaced by a restore.
     private val PREF_FILES = listOf("settings", "usage", "overlay")
     private const val KEY_PREFIX = "key_"
     private const val MAX_JSON_BYTES = 64 * 1024 * 1024 // far above any real history; stops a hostile zip
@@ -171,6 +173,9 @@ object Backup {
             }
             // Keys arrive in plain text; reading each one encrypts it for this phone.
             if (m.hasKeys) Prefs(app).let { p -> Services.all.forEach { (id, _) -> p.key(id) } }
+            // If this phone syncs, the next sync starts over as a first one: the restored settings
+            // are combined with the sync file's, instead of counting as deletions for every device.
+            Prefs(app).let { p -> if (p.syncUri != null) p.syncBase = null }
             if (history != null) {
                 val target = File(app.filesDir, "history.json")
                 val tmp = File(app.filesDir, "history.restore")
