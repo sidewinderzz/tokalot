@@ -113,6 +113,7 @@ class OfflineFlowService : AccessibilityService() {
     override fun onDestroy() {
         instance = null
         handler.removeCallbacksAndMessages(null)
+        button?.animate()?.cancel()
         if (recorder.isRecording) recorder.stop()
         RecordingService.stop(this)
         detach()
@@ -252,18 +253,55 @@ class OfflineFlowService : AccessibilityService() {
         // Idle: only show when the keyboard is actually up on an editable field.
         // Recording/transcribing: stay visible even if the field or keyboard closed.
         if (state == State.IDLE && (keyboardTop() == null || focusedEditable() == null)) {
+            handler.removeCallbacks(settle)
+            settling = false
             detach()
             return
         }
-        if (!touching) position()
+        if (touching) return
+        val p = params ?: return
+        val (tx, ty) = targetPosition()
         if (!attached) {
+            // Appear invisibly, then fade in once the keyboard has finished sliding up.
+            p.x = tx; p.y = ty
+            button?.alpha = 0f
             try {
                 wm.addView(button, params)
                 attached = true
-            } catch (_: Exception) {}
-        } else {
-            try { wm.updateViewLayout(button, params) } catch (_: Exception) {}
+            } catch (_: Exception) { return }
+            beginSettle()
+            return
         }
+        if (abs(tx - p.x) > dp(12) || abs(ty - p.y) > dp(12)) {
+            // The keyboard is moving (closing, opening or resizing). Don't chase its
+            // animation; fade out and reappear where it comes to rest.
+            if (state == State.IDLE) button?.animate()?.alpha(0f)?.setDuration(90)?.start()
+            beginSettle()
+        }
+    }
+
+    private var settling = false
+    private val settle = Runnable { settling = false; applySettled() }
+
+    private fun beginSettle() {
+        settling = true
+        handler.removeCallbacks(settle)
+        handler.postDelayed(settle, 180)
+    }
+
+    /** Called once the keyboard has stopped moving: final position, then fade back in. */
+    private fun applySettled() {
+        if (state == State.IDLE && (keyboardTop() == null || focusedEditable() == null)) {
+            detach()
+            return
+        }
+        val p = params ?: return
+        if (!attached || touching) return
+        val (tx, ty) = targetPosition()
+        p.x = tx; p.y = ty
+        try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
+        val rest = if (state == State.IDLE) IDLE_ALPHA else 1f
+        button?.animate()?.alpha(rest)?.setDuration(140)?.start()
     }
 
     private fun keyboardTop(): Int? {
@@ -278,13 +316,12 @@ class OfflineFlowService : AccessibilityService() {
     private fun anchor() = keyboardTop() ?: resources.displayMetrics.heightPixels
     private fun overlayPrefs() = getSharedPreferences("overlay", Context.MODE_PRIVATE)
 
-    private fun position() {
+    private fun targetPosition(): Pair<Int, Int> {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
-        val p = params ?: return
-        p.x = sp.getInt("x", dm.widthPixels - sizePx - dp(12))
-        p.y = anchor() - sizePx - sp.getInt("above", dp(8))
-        clamp(p)
+        val x = sp.getInt("x", dm.widthPixels - sizePx - dp(12)).coerceIn(0, dm.widthPixels - sizePx)
+        val y = (anchor() - sizePx - sp.getInt("above", dp(8))).coerceIn(dp(24), dm.heightPixels - sizePx)
+        return x to y
     }
 
     private fun clamp(p: WindowManager.LayoutParams) {
@@ -315,6 +352,7 @@ class OfflineFlowService : AccessibilityService() {
                 State.STARTING, State.RECORDING, State.WORKING -> COLOR_ACTIVE
             }
         )
+        button?.animate()?.cancel()
         button?.alpha = if (s == State.IDLE) IDLE_ALPHA else 1f
         // Keep the screen awake from tap to finished text, so it can't sleep mid-sentence.
         params?.let { p ->
