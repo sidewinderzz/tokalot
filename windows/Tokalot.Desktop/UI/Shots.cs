@@ -96,6 +96,7 @@ internal static class Shots
         setup(w);
         var root = (FrameworkElement)w.Content;
         w.Content = null;
+        root.LayoutTransform = null; // the window draws at 90%; screenshots are taken at full size
         Layout(root, width, 800);
         var h = Math.Max(800, w.ExtentHeight + 4);
         Layout(root, width, h);
@@ -168,7 +169,7 @@ internal static class Shots
         s.SetKey("groq", "sample-key-for-screenshots");
         s.Save();
 
-        var now = DateTimeOffset.Now;
+        var now = new DateTimeOffset(DateTime.Today.AddHours(23.5)); // late evening, so "hours ago" entries are still today
         void Add(TimeSpan ago, string text, string raw, string app, int secs, bool cleaned = true)
         {
             var t = now - ago;

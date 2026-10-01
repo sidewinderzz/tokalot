@@ -1,23 +1,26 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/hero-dark.png">
-    <img src="docs/readme/hero-light.png" alt="Tokalot: voice typing for Android that works with the keyboard you already use" width="100%">
+    <img src="docs/readme/hero-light.png" alt="Tokalot: voice typing for Android and Windows. Talk, and it types what you meant." width="100%">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/sidewinderzz/tokalot/releases/latest"><img src="https://img.shields.io/github/v/release/sidewinderzz/tokalot?style=for-the-badge&label=Download%20APK&color=F2A93B&logo=android&logoColor=white" alt="Download the latest APK"></a>
+  <a href="https://github.com/sidewinderzz/tokalot/releases/latest"><img src="https://img.shields.io/github/v/release/sidewinderzz/tokalot?style=for-the-badge&label=Android%20APK&color=F2A93B&logo=android&logoColor=white" alt="Download the latest Android APK"></a>
+  &nbsp;
+  <a href="https://github.com/sidewinderzz/tokalot/releases/download/desktop/TokalotSetup.exe"><img src="https://img.shields.io/badge/Windows-Download%20installer-F2A93B?style=for-the-badge" alt="Download the Windows installer"></a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Android-8.0%2B-3A3A3C?logo=android&logoColor=white" alt="Android 8.0+">
+  <img src="https://img.shields.io/badge/Windows-10%20%26%2011-3A3A3C" alt="Windows 10 and 11">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/sidewinderzz/tokalot?color=3A3A3C" alt="MIT license"></a>
   <a href="https://github.com/sidewinderzz/tokalot/releases"><img src="https://img.shields.io/github/downloads/sidewinderzz/tokalot/total?color=3A3A3C&label=downloads" alt="Downloads"></a>
 </p>
 
 <br>
 
-**Tokalot** *(talk-a-lot)* is voice typing that floats over your keyboard. Open the keyboard in any app and a small button floats above it. Talk, and Tokalot types what you meant: filler words gone, self-corrections applied, formatted for the app you're in. It works with the keyboard you already use, and you bring your own API keys, so there's no subscription, account or Tokalot server.
+**Tokalot** *(talk-a-lot)* is voice typing for your phone and your PC. Talk, and Tokalot types what you meant: filler words gone, self-corrections applied, formatted for the app you're in. On Android a small button floats above the keyboard you already use. On Windows you hold **Ctrl+Win** in any app. You bring your own API keys, so there's no subscription, account or Tokalot server.
 
 <sub>Inspired by <a href="https://wisprflow.ai">Wispr Flow</a>, which is excellent and worth paying for if you want a polished product. Tokalot is an independent, open-source take for people who'd rather bring their own keys. Not affiliated with Wispr.</sub>
 
@@ -37,12 +40,12 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 <table>
   <tr>
     <td width="33%" valign="top">
-      <b>Works with your keyboard</b><br>
-      A floating button appears only while the keyboard is open. Drag it anywhere and it remembers the spot.
+      <b>Works where you type</b><br>
+      Android: a floating button over any keyboard, in any app. Windows: hold Ctrl+Win anywhere and the text is pasted at your cursor.
     </td>
     <td width="33%" valign="top">
       <b>Talk your way</b><br>
-      Tap or hold to talk, auto-stop after 30&nbsp;s of silence, and it keeps recording even if the text box closes.
+      Hold to talk or tap for hands-free. Auto-stop after 30&nbsp;s of silence, and Esc cancels on Windows.
     </td>
     <td width="33%" valign="top">
       <b>Cleans up after you</b><br>
@@ -66,11 +69,11 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
   <tr>
     <td valign="top">
       <b>History you can search</b><br>
-      Every dictation with playback, the original transcript, one-tap copy, and Undo after inserting.
+      Every dictation with playback, the original transcript and one-tap copy. A failed or cancelled recording is kept so you can transcribe it again.
     </td>
     <td valign="top">
       <b>Private by design</b><br>
-      Everything stays on your phone. Dictation goes only to the providers you pick, with your keys.
+      Everything stays on your device. Dictation goes only to the providers you pick, with your keys.
     </td>
     <td valign="top">
       <b>Yours to keep</b><br>
@@ -81,6 +84,8 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 
 ## Get started
 
+### Android
+
 1. **Install.** Download the APK from [Releases](https://github.com/sidewinderzz/tokalot/releases/latest) and open it on your phone.
 2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it in Tokalot's ☰ Settings.
 3. **Allow the mic and turn on the accessibility switch.** The app explains exactly what that permission is used for before it takes you there.
@@ -88,6 +93,22 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 
 > [!NOTE]
 > Android and Play Protect show strong warnings for any app installed outside the Play Store that uses the accessibility permission, because that permission is powerful. That's expected. Everything Tokalot does is in this repo for you to read, and every release is built and signed by GitHub Actions from this code.
+
+### Windows
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/desktop-home-dark.png">
+    <img src="docs/screenshots/desktop-home-light.png" alt="Tokalot for Windows: the Home page with this month's stats and dictation history" width="80%">
+  </picture>
+</p>
+
+1. **Install.** Download [TokalotSetup.exe](https://github.com/sidewinderzz/tokalot/releases/download/desktop/TokalotSetup.exe) and run it. Tokalot then lives in the tray and updates itself.
+2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it under Settings › API keys.
+3. **Talk.** Click into any text box, hold **Ctrl+Win** while you talk, and let go. Tap Ctrl+Win once for hands-free and tap again to finish. Esc cancels.
+
+> [!NOTE]
+> Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Click **More info → Run anyway**. Every release is built by GitHub Actions from this code.
 
 ## What it costs
 
@@ -103,29 +124,39 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 
 ## Privacy
 
-- The accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to type your words. Tokalot doesn't read your screen, messages or notifications, and it skips password fields.
-- History, recordings, settings and keys live only in the app's private storage on your phone. Backups leave out your API keys unless you choose to include them.
-- Audio and text go only to the speech and cleanup services you picked, using your keys. With on-device speech recognition and cleanup turned off, nothing leaves your phone.
+- **Android:** the accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to put your words into that text box. Tokalot doesn't read your messages or notifications, and it skips password fields.
+- **Windows:** the Ctrl+Win listener only watches for that shortcut; it never records your typing. API keys are encrypted with your Windows account, and dictated text is kept out of Windows clipboard history.
+- History, recordings, settings and keys live only on your device. Backups leave out your API keys unless you choose to include them.
+- Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into and your dictionary words, so the model can match the style and spelling. With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
+- The apps check GitHub for new releases. There are no Tokalot servers, accounts or tracking.
 
 <details>
 <summary><b>Building from source and releasing</b></summary>
 <br>
 
-Requirements: JDK 17, Android SDK 34, NDK 26.1.10909125, CMake 3.22.1. Then:
+**Android** (`app/`). Requirements: JDK 17, Android SDK 34, NDK 26.1.10909125, CMake 3.22.1. Then:
 
 ```sh
 gradle assembleRelease
 ```
 
-GitHub Actions builds and tests every push. To release, bump `versionCode` and `versionName` in `app/build.gradle.kts` and push to `main`. The workflow publishes a signed Release for that version, and installed copies offer it as an update.
+To release, bump `versionCode` and `versionName` in `app/build.gradle.kts` and push to `main`. The workflow publishes a signed Release for that version, and installed copies offer it as an update. Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
 
-Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
+**Windows** (`windows/Tokalot.Desktop`). Requirements: the .NET 10 SDK. Then:
+
+```sh
+dotnet publish windows/Tokalot.Desktop -c Release -r win-x64 --self-contained
+```
+
+To release, bump `<Version>` in `Tokalot.Desktop.csproj` and push to `main`. The workflow publishes `desktop-v<version>` and refreshes the rolling `desktop` release that the installer link and the in-app updater use. `Tokalot.exe --screenshots <folder>` renders every page with sample data, which is how the screenshots here are made.
+
+GitHub Actions builds every push and runs the Android unit tests.
 
 </details>
 
 ## Credits
 
-On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License).
+On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT), through [Whisper.net](https://github.com/sandrohanea/whisper.net) on Windows. Audio on Windows uses [NAudio](https://github.com/naudio/NAudio), and installs and updates use [Velopack](https://github.com/velopack/velopack). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License).
 
 ## License
 
