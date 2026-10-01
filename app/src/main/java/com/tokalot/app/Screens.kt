@@ -22,7 +22,7 @@ private fun EditText.onChange(block: (String) -> Unit) = addTextChangedListener(
 
 /** A title/subtitle row with an on/off switch. */
 private fun MainActivity.switchRow(title: String, sub: String, on: Boolean, onChange: (Boolean) -> Unit): View {
-    val sw = android.widget.Switch(this).apply { isChecked = on }
+    val sw = themedSwitch(on, prefs.accent)
     val texts = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(text(title, 17f))

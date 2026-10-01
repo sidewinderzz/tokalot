@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.RippleDrawable
+import android.graphics.drawable.StateListDrawable
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -78,6 +80,41 @@ fun Context.icon(res: Int, sizeDp: Int = 22, tint: Int = C.TEXT) = ImageView(thi
     setImageResource(res)
     setColorFilter(tint)
     layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+}
+
+/**
+ * A switch drawn from the app palette instead of the stock Android tint, which comes out
+ * almost the same color as the card in dark mode (so the switch vanished when on).
+ * On = accent-colored track; off = neutral track. The thumb flips dark/white so it stays
+ * visible against any accent, including white.
+ */
+fun Context.themedSwitch(on: Boolean, accent: Int): android.widget.Switch {
+    val trackW = dp(52); val trackH = dp(32); val inset = dp(4)
+    fun track(color: Int) = GradientDrawable().apply {
+        setColor(color); cornerRadius = trackH / 2f; setSize(trackW, trackH)
+    }
+    fun thumb(color: Int) = InsetDrawable(
+        GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color); setSize(trackH - inset * 2, trackH - inset * 2) },
+        inset
+    )
+    val lightAccent = (0.299 * android.graphics.Color.red(accent) + 0.587 * android.graphics.Color.green(accent) +
+        0.114 * android.graphics.Color.blue(accent)) / 255.0 > 0.6
+    val thumbOn = if (lightAccent) 0xFF1C1C1E.toInt() else 0xFFFFFFFF.toInt()
+    val thumbOff = if (C.dark) 0xFFB5B5BA.toInt() else 0xFFFFFFFF.toInt()
+    val trackOff = if (C.dark) 0xFF48484A.toInt() else 0xFFC7C7CC.toInt()
+
+    return android.widget.Switch(this).apply {
+        trackDrawable = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_checked), track(accent))
+            addState(intArrayOf(), track(trackOff))
+        }
+        thumbDrawable = StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_checked), thumb(thumbOn))
+            addState(intArrayOf(), thumb(thumbOff))
+        }
+        showText = false
+        isChecked = on
+    }
 }
 
 /** Outlined pill button, used for Copy / Play / Original and similar actions. */
