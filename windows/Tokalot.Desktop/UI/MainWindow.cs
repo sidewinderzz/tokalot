@@ -57,15 +57,15 @@ public sealed class MainWindow : Window
         search.TextChanged += (_, _) => FillHistory();
 
         toastText = new TextBlock { Foreground = Brushes.White, FontSize = 13.5, FontFamily = C.Sans };
-        toast = new Border
+        toast = Ui.Stadium(new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x1C, 0x1C, 0x1E)), CornerRadius = new CornerRadius(100),
+            Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x1C, 0x1C, 0x1E)),
             Padding = new Thickness(18, 9, 18, 9), Child = toastText, Opacity = 0, IsHitTestVisible = false,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 28),
-        };
+        });
 
         // Sidebar | content
-        var root = new Grid();
+        var root = new Grid { Background = C.Bg };
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(232) });
         root.ColumnDefinitions.Add(new ColumnDefinition());
         root.Children.Add(Sidebar());
@@ -90,7 +90,7 @@ public sealed class MainWindow : Window
     private UIElement Sidebar()
     {
         var logo = new Bars { Width = 34, Height = 34, BarBrush = C.Text, AccentBrush = C.Argb(S.Accent) };
-        var title = new TextBlock { Text = "Tokalot", FontFamily = C.Serif, FontSize = 30, Foreground = C.Text, Margin = new Thickness(8, 0, 0, 2), VerticalAlignment = VerticalAlignment.Center };
+        var title = new TextBlock { Text = "Tokalot", FontFamily = C.Sans, FontWeight = FontWeights.Bold, FontSize = 23, Foreground = C.Text, Margin = new Thickness(8, 0, 0, 1), VerticalAlignment = VerticalAlignment.Center };
         var head = Ui.Row(logo, title);
         head.Margin = new Thickness(22, 26, 0, 4);
 
@@ -146,6 +146,13 @@ public sealed class MainWindow : Window
         nav.Children.Add(new Border { Height = 14 });
         Item(Page.Settings, "", "Settings");
     }
+
+    /** Full height of the current page (screenshot mode). */
+    internal double ExtentHeight => scroller.ExtentHeight;
+
+    internal void SetStyleTab(string id) => styleTab = id;
+
+    internal void OpenSnippetEditor(Snippet? s) { editing = s; editingNew = s == null; Render(); }
 
     public void Go(Page p)
     {
@@ -247,7 +254,7 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(Ui.Card(banner, 14), 0, 0, 0, 14));
         }
 
-        if (!app.Controller.HotkeyWorks)
+        if (!(app.Controller?.HotkeyWorks ?? true))
         {
             var c = Ui.Card(Ui.Text("Tokalot couldn't listen for Ctrl+Win. Quit it from the tray icon and open it again.", 15, C.Warn), 18);
             col.Children.Add(Spaced(c, 0, 0, 0, 14));
@@ -527,12 +534,12 @@ public sealed class MainWindow : Window
         foreach (var c in Catalog.Categories)
         {
             var on = c.Id == styleTab;
-            var t = new Border
+            var t = Ui.Stadium(new Border
             {
-                CornerRadius = new CornerRadius(100), Padding = new Thickness(16, 8, 16, 8), Margin = new Thickness(0, 0, 8, 8),
+                Padding = new Thickness(16, 9, 16, 9), Margin = new Thickness(0, 0, 8, 8),
                 Background = on ? C.Text : C.Card, BorderBrush = on ? C.Text : C.Pill, BorderThickness = new Thickness(1), Cursor = Cursors.Hand,
                 Child = Ui.Text(c.Label, 14.5, on ? C.Card : C.Text),
-            };
+            });
             var id = c.Id;
             t.MouseLeftButtonUp += (_, _) => { styleTab = id; Render(); };
             tabs.Children.Add(t);
@@ -607,7 +614,7 @@ public sealed class MainWindow : Window
             if (title.StartsWith("Offline")) modelStatus = st;
             return Spaced(Spread(Ui.Stack(Ui.Text(title, 15.5), st), action ?? new Border()), 20, 13, 16, 13);
         }
-        var hookOk = App.Current.Controller.HotkeyWorks;
+        var hookOk = App.Current.Controller?.HotkeyWorks ?? true;
         var modelText = ModelManager.IsReady ? "Downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
         col.Children.Add(Ui.List(
             Status("Ctrl+Win shortcut", hookOk, "Working", "Not working. Restart Tokalot."),

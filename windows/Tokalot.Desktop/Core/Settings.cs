@@ -16,7 +16,10 @@ public static class Paths
     {
         get
         {
-            var p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Tokalot");
+            // TOKALOT_DATA points somewhere else (used by the screenshot mode, so real data is never touched).
+            var p = Environment.GetEnvironmentVariable("TOKALOT_DATA") is { Length: > 0 } custom
+                ? custom
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Tokalot");
             Directory.CreateDirectory(p);
             return p;
         }

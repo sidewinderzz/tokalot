@@ -26,6 +26,14 @@ public sealed class App : Application
         // Must run first: lets the installer/updater hook into startup.
         VelopackApp.Build().Run();
 
+        // Developer tool: "Tokalot.exe --screenshots <folder>" renders every page to PNGs with sample data.
+        if (args.Length >= 2 && args[0] == "--screenshots")
+        {
+            Environment.SetEnvironmentVariable("TOKALOT_DATA", Path.Combine(Path.GetTempPath(), "tokalot-shots-" + Guid.NewGuid().ToString("N")));
+            new App { ShutdownMode = ShutdownMode.OnExplicitShutdown, shotsDir = args[1] }.Run();
+            return;
+        }
+
         using var single = new Mutex(true, "Tokalot.Desktop.SingleInstance", out var first);
         if (!first)
         {
@@ -45,12 +53,13 @@ public sealed class App : Application
 
     public static new App Current => (App)Application.Current;
 
-    public Controller Controller { get; private set; } = null!;
+    public Controller? Controller { get; private set; }
     private MainWindow? window;
     private System.Windows.Forms.NotifyIcon? tray;
     private System.Windows.Forms.ToolStripMenuItem? updateItem;
 
     private bool background, gpu;
+    private string? shotsDir;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -60,6 +69,12 @@ public sealed class App : Application
         // Tokalot's UI is simple, so drawing it on the CPU costs nothing noticeable and always works.
         // "--gpu" switches back to hardware rendering for testing.
         if (!gpu) System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+        if (shotsDir != null)
+        {
+            try { Shots.Run(shotsDir); } catch (Exception ex) { Log("Screenshots failed: " + ex); }
+            Shutdown();
+            return;
+        }
         Log($"Start {Updater.CurrentVersion} · render tier {System.Windows.Media.RenderCapability.Tier >> 16} · gpu={gpu} · {Environment.OSVersion}");
         C.Apply(s.Theme);
         DispatcherUnhandledException += (_, e) =>
@@ -80,7 +95,7 @@ public sealed class App : Application
         new Thread(() => { while (signal.WaitOne()) Dispatcher.BeginInvoke(ShowWindow); }) { IsBackground = true }.Start();
 
         if (!background) ShowWindow();
-        else if (!Controller.HotkeyWorks)
+        else if (!Controller!.HotkeyWorks)
             tray?.ShowBalloonTip(6000, "Tokalot", "Couldn't listen for Ctrl+Win. Try restarting Tokalot.", System.Windows.Forms.ToolTipIcon.Warning);
 
         _ = CheckForUpdatesLoop();
@@ -145,7 +160,7 @@ public sealed class App : Application
 
     public void Quit()
     {
-        Controller.Dispose();
+        Controller?.Dispose();
         if (tray != null) { tray.Visible = false; tray.Dispose(); }
         Shutdown();
     }

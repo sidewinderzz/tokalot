@@ -54,6 +54,16 @@ public static class C
 
 public static class Ui
 {
+    /**
+     * Pill shape with straight sides (like Android's rounded(…, 100)). WPF turns an oversized
+     * CornerRadius into an ellipse, so the radius follows the actual height instead.
+     */
+    public static T Stadium<T>(T b) where T : Border
+    {
+        b.SizeChanged += (_, e) => b.CornerRadius = new CornerRadius(e.NewSize.Height / 2);
+        return b;
+    }
+
     public static TextBlock Text(string s, double size = 15, Brush? color = null, bool bold = false) => new()
     {
         Text = s, FontSize = size, Foreground = color ?? C.Text, FontFamily = C.Sans,
@@ -74,7 +84,7 @@ public static class Ui
 
     public static Border Card(UIElement? child = null, double pad = 0) => new()
     {
-        Background = C.Card, CornerRadius = new CornerRadius(20), Padding = new Thickness(pad), Child = child,
+        Background = C.Card, CornerRadius = new CornerRadius(28), Padding = new Thickness(pad), Child = child,
     };
 
     public static StackPanel Stack(params UIElement[] children)
@@ -101,23 +111,24 @@ public static class Ui
         if (glyph != null)
             content.Children.Add(new TextBlock
             {
-                Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 13,
+                Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 15,
                 Foreground = fg, VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, label.Length > 0 ? 8 : 0, 0),
             });
         if (label.Length > 0)
-            content.Children.Add(new TextBlock { Text = label, FontSize = 14, Foreground = fg, FontFamily = C.Sans, VerticalAlignment = VerticalAlignment.Center });
-        var b = new Border
+            content.Children.Add(new TextBlock { Text = label, FontSize = 14.5, Foreground = fg, FontFamily = C.Sans, VerticalAlignment = VerticalAlignment.Center });
+        var b = Stadium(new Border
         {
-            CornerRadius = new CornerRadius(100),
             Background = filled ? C.Text : C.Card,
             BorderBrush = filled ? C.Text : C.Pill,
             BorderThickness = new Thickness(1),
-            Padding = label.Length > 0 ? new Thickness(16, 8, 16, 8) : new Thickness(11, 9, 11, 9),
+            Padding = label.Length > 0 ? new Thickness(18, 9, 18, 9) : new Thickness(11, 9, 11, 9),
+            MinWidth = label.Length > 0 ? 0 : 38,
             Child = content,
             Cursor = Cursors.Hand,
             HorizontalAlignment = HorizontalAlignment.Left,
-        };
+        });
+        content.HorizontalAlignment = HorizontalAlignment.Center;
         var normal = b.Background;
         b.MouseEnter += (_, _) => b.Opacity = 0.82;
         b.MouseLeave += (_, _) => b.Opacity = 1;
@@ -130,7 +141,7 @@ public static class Ui
     {
         var tb = new TextBox
         {
-            Text = value, FontSize = 14.5, FontFamily = C.Sans, Foreground = C.Text, Background = Brushes.Transparent,
+            Text = value, FontSize = 15, FontFamily = C.Sans, Foreground = C.Text, Background = Brushes.Transparent,
             BorderThickness = new Thickness(0), CaretBrush = C.Text, AcceptsReturn = multiLine,
             TextWrapping = multiLine ? TextWrapping.Wrap : TextWrapping.NoWrap, MinHeight = multiLine ? 64 : 0,
             VerticalContentAlignment = multiLine ? VerticalAlignment.Top : VerticalAlignment.Center,
@@ -142,7 +153,7 @@ public static class Ui
     {
         var pb = new PasswordBox
         {
-            Password = value, FontSize = 14.5, Foreground = C.Text, Background = Brushes.Transparent,
+            Password = value, FontSize = 15, Foreground = C.Text, Background = Brushes.Transparent,
             BorderThickness = new Thickness(0), CaretBrush = C.Text,
         };
         return (Wrap(pb, hint), pb);
@@ -152,7 +163,7 @@ public static class Ui
     {
         var placeholder = new TextBlock
         {
-            Text = hint, Foreground = C.Sub, FontSize = 14.5, FontFamily = C.Sans, IsHitTestVisible = false,
+            Text = hint, Foreground = C.Sub, FontSize = 15, FontFamily = C.Sans, IsHitTestVisible = false,
             Margin = new Thickness(2, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top,
         };
         void Sync()
@@ -165,7 +176,7 @@ public static class Ui
         var grid = new Grid();
         grid.Children.Add(input);
         grid.Children.Add(placeholder);
-        return new Border { Background = C.Field, CornerRadius = new CornerRadius(12), Padding = new Thickness(12, 9, 12, 9), Child = grid };
+        return new Border { Background = C.Field, CornerRadius = new CornerRadius(14), Padding = new Thickness(14, 11, 14, 11), Child = grid };
     }
 
     /** iOS-style on/off switch. */
@@ -204,7 +215,7 @@ public static class Ui
     {
         var dot = new Border
         {
-            Width = 18, Height = 18, CornerRadius = new CornerRadius(9),
+            Width = 20, Height = 20, CornerRadius = new CornerRadius(10),
             Background = selected ? C.Text : C.Card, BorderBrush = C.Pill, BorderThickness = new Thickness(selected ? 0 : 2),
             VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 14, 0),
         };
@@ -216,7 +227,7 @@ public static class Ui
         g.Children.Add(dot);
         Grid.SetColumn(texts, 1);
         g.Children.Add(texts);
-        var b = new Border { Padding = new Thickness(20, 13, 20, 13), Child = g, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        var b = new Border { Padding = new Thickness(20, 14, 20, 14), Child = g, Background = Brushes.Transparent, Cursor = Cursors.Hand };
         b.MouseEnter += (_, _) => b.Background = C.Hover;
         b.MouseLeave += (_, _) => b.Background = Brushes.Transparent;
         b.MouseLeftButtonUp += (_, e) => { e.Handled = true; onPick(); };

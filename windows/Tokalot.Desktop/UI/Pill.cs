@@ -107,17 +107,16 @@ public sealed class Pill : Window
         Focusable = false;
         Opacity = 0;
         bars.Level = level;
-        Content = new Border
+        Content = Ui.Stadium(new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x1C, 0x1C, 0x1E)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(22),
             Padding = new Thickness(12, 7, 14, 7),
             Child = Ui.Row(bars, label),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.35 },
             Margin = new Thickness(16),
-        };
+        });
         hideTimer.Tick += (_, _) => { hideTimer.Stop(); FadeOut(); };
         SourceInitialized += (_, _) =>
         {
@@ -126,6 +125,17 @@ public sealed class Pill : Window
         };
         SizeChanged += (_, _) => Place();
     }
+
+    /** Sets what the pill shows without putting it on screen (screenshot mode). */
+    internal FrameworkElement Preview(Bars.Mode mode, Brush barColor, string text)
+    {
+        bars.BarBrush = barColor;
+        bars.CurrentMode = mode;
+        SetText(text);
+        return (FrameworkElement)Content;
+    }
+
+    internal Bars BarsView => bars;
 
     /** Listening / working / idle display. Text is optional (e.g. "Hands-free · Ctrl+Win to finish"). */
     public void Show(Bars.Mode mode, Brush barColor, string text = "")
