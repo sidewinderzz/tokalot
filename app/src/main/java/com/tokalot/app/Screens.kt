@@ -387,6 +387,15 @@ class SettingsScreen(private val a: MainActivity) {
             prefs.autoLanguage = it
         })
         col.addView(rc)
+        col.addView(row(
+            text("The floating button sits where you last dragged it, measured from the top of the keyboard.", 14f, C.SUB).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+            pill("Reset position") {
+                getSharedPreferences("overlay", android.content.Context.MODE_PRIVATE).edit().remove("x").remove("above").apply()
+                android.widget.Toast.makeText(this, "Back at the right edge, just above the keyboard", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        ), lp().margins(this, t = 8, l = 4))
 
         // --- Speech to text
         section(col, "Speech to text")

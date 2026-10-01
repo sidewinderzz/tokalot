@@ -153,6 +153,7 @@ class OfflineFlowService : AccessibilityService() {
         val bg = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(COLOR_IDLE)
+            setStroke(dp(1), Color.parseColor("#66FFFFFF")) // a light rim, so the grey button shows on dark apps too
         }
         val b = BarsView(this).apply {
             level = { recorder.level }
@@ -434,7 +435,7 @@ class OfflineFlowService : AccessibilityService() {
     /** Called once the keyboard has stopped moving: final position, then fade back in. */
     private fun applySettled() {
         if (state == State.IDLE && (dismissed || keyboardTop() == null || focusedEditable() == null)) {
-            detach()
+            updateButton() // hides it, and looks again shortly if the keyboard is up but the field wasn't found
             return
         }
         val p = params ?: return
@@ -473,10 +474,11 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun savePosition(p: WindowManager.LayoutParams) {
-        overlayPrefs().edit()
-            .putInt("x", p.x)
-            .putInt("above", anchor() - sizePx - p.y)
-            .apply()
+        val e = overlayPrefs().edit().putInt("x", p.x)
+        // The height is measured from the keyboard. With no keyboard on screen (dragged while
+        // recording after it closed) keep the old height, or the button turns up somewhere odd next time.
+        keyboardTop()?.let { e.putInt("above", it - sizePx - p.y) }
+        e.apply()
     }
 
     private fun detach() {
