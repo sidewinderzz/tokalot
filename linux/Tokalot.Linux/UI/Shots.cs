@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
@@ -41,6 +42,37 @@ internal static class Shots
         IndicatorShots(dir);
         try { MenuShot(dir); } catch (Exception e) { Console.Error.WriteLine("menu.png skipped: " + e.Message); }
         AudioRoundTrip(dir);
+        SyncChecks(dir);
+    }
+
+    /** The sync merge cases the Android app is tested against too; writes PASS/FAIL per case. */
+    private static void SyncChecks(string dir)
+    {
+        static Sync.Data D(string[]? words = null, (string, string)[]? snips = null, (string, string)[]? styles = null, string ins = "x") => new(
+            (words ?? Array.Empty<string>()).ToList(),
+            (snips ?? Array.Empty<(string, string)>()).Select(t => new Snippet(t.Item1, t.Item2)).ToList(),
+            (styles ?? Array.Empty<(string, string)>()).ToDictionary(t => t.Item1, t => t.Item2), ins);
+        var lines = new System.Collections.Generic.List<string>();
+        void Check(string name, bool ok) => lines.Add((ok ? "PASS " : "FAIL ") + name);
+        string W(Sync.Data d) => string.Join(",", d.Words);
+        string St(Sync.Data d) => string.Join(",", d.Styles.OrderBy(kv => kv.Key).Select(kv => kv.Key + "=" + kv.Value));
+
+        Check("1 first sync unions words", W(Sync.Merge(D(new[] { "Alpha", "Beta" }), D(new[] { "beta", "Gamma" }), D())) == "beta,Gamma,Alpha");
+        Check("2 local delete wins", W(Sync.Merge(D(new[] { "Alpha", "Gamma" }), D(new[] { "Alpha", "Beta", "Gamma", "Delta" }), D(new[] { "Alpha", "Beta", "Gamma" }))) == "Alpha,Gamma,Delta");
+        Check("3 remote delete applies", W(Sync.Merge(D(new[] { "Alpha", "Beta" }), D(new[] { "Alpha" }), D(new[] { "Alpha", "Beta" }))) == "Alpha");
+        var b4 = D(snips: new[] { ("my email", "a@x") });
+        Check("4a snippet changed elsewhere", Sync.Merge(D(snips: new[] { ("my email", "a@x") }), D(snips: new[] { ("my email", "b@x") }), b4).Snippets[0].Text == "b@x");
+        Check("4b snippet changed here", Sync.Merge(D(snips: new[] { ("my email", "c@x") }), D(snips: new[] { ("my email", "b@x") }), b4).Snippets[0].Text == "c@x");
+        Check("5a styles from elsewhere", St(Sync.Merge(D(styles: new[] { ("EMAIL", "FORMAL") }), D(styles: new[] { ("EMAIL", "CASUAL"), ("MESSAGING", "VERY_CASUAL") }), D(styles: new[] { ("EMAIL", "FORMAL") }))) == "EMAIL=CASUAL,MESSAGING=VERY_CASUAL");
+        Check("5b style set here", St(Sync.Merge(D(styles: new[] { ("EMAIL", "CASUAL") }), D(styles: new[] { ("EMAIL", "FORMAL") }), D())) == "EMAIL=CASUAL");
+        Check("6a instructions from elsewhere", Sync.Merge(D(ins: "x"), D(ins: "y"), D(ins: "x")).Instructions == "y");
+        Check("6b instructions changed here", Sync.Merge(D(ins: "z"), D(ins: "y"), D(ins: "x")).Instructions == "z");
+        var settled = Sync.Merge(D(new[] { "Alpha", "Beta" }), D(new[] { "beta", "Gamma" }), D());
+        Check("9 settles: a second device with the same file changes nothing",
+            W(Sync.Merge(D(new[] { "Gamma", "Alpha", "BETA" }), settled, D())) == W(settled) && W(Sync.Merge(settled, settled, settled)) == W(settled));
+        var round = Sync.Parse(System.Text.Json.Nodes.JsonNode.Parse(Sync.ToJson(D(new[] { "A" }, new[] { ("t", "v") }, new[] { ("EMAIL", "FORMAL") }, "i"), null).ToJsonString())!.AsObject(), "d");
+        Check("8 json round trip", Sync.Same(round, D(new[] { "A" }, new[] { ("t", "v") }, new[] { ("EMAIL", "FORMAL") }, "i")));
+        File.WriteAllLines(Path.Combine(dir, "sync-checks.txt"), lines);
     }
 
     /** Saves two seconds of tone and reads it back, the path "Transcribe" on a failed entry relies on. */

@@ -88,6 +88,9 @@ public sealed class Settings
     public bool LaunchAtStartup { get; set; } = true;
     /** The "Hold to talk" card in the sidebar was closed. */
     public bool HideShortcutTip { get; set; }
+    /** Optional sync: the shared file's path on this computer ("" = off), and whether this computer puts its API keys in it. */
+    public string SyncFile { get; set; } = "";
+    public bool SyncKeys { get; set; }
     /**
      * Same name as on Windows (the shared Backup code copies it), but on Linux the value is only a
      * note of where that service's key is kept: "keyring" or "file". The key itself is in KeyStore.
@@ -203,6 +206,7 @@ public sealed class Settings
             System.IO.File.WriteAllText(tmp, JsonSerializer.Serialize(this, Json));
             System.IO.File.Move(tmp, f, true);
         }
+        Sync.Queue(); // no-op unless sync is on
     }
 
     /** Replaces the live settings (used by restore). */
@@ -249,8 +253,9 @@ public static class KeyStore
 
     /** A sentence for Settings saying where keys are kept. */
     public static string Where => (Backend == Keyring
-        ? "Keys are stored only on this computer, in your login keyring (through secret-tool). Nothing is synced anywhere."
-        : "Keys are stored only on this computer, in " + Pretty(KeysFile) + ", which only your user account can read (not encrypted; install secret-tool to use the login keyring instead). Nothing is synced anywhere.")
+        ? "Keys are stored only on this computer, in your login keyring (through secret-tool)."
+        : "Keys are stored only on this computer, in " + Pretty(KeysFile) + ", which only your user account can read (not encrypted; install secret-tool to use the login keyring instead).")
+        + " They never leave it unless you turn on Sync below and choose to include them."
         + (Notice != null ? " " + Notice : "");
 
     private static string KeysFile => Paths.File("keys.json");
@@ -300,9 +305,13 @@ public static class KeyStore
         }
         if (where == Keyring && SecretTool != null)
         {
-            // Not fetched yet: make sure the background fetch is on its way and answer "no key" for now.
-            if (preload == null) Preload(Settings.Current);
-            return "";
+            // Not fetched yet: make sure the background fetch is on its way.
+            var loading = preload ?? Preload(Settings.Current);
+            // The window's thread never waits (it shows "no key" for a moment). Background work does: a dictation
+            // would otherwise fail for want of a key, and sync would take a key from the file over the one in the keyring.
+            if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) return "";
+            try { loading.Wait(25000); } catch { }
+            lock (Gate) return Cache.GetValueOrDefault(service, "");
         }
         var value = ReadFile().GetValueOrDefault(service) ?? "";
         lock (Gate) Cache[service] = value;

@@ -86,6 +86,11 @@ Optional:
 | `notify-send` | A notification if the shortcut can't be set up when Tokalot starts in the background |
 | An AppIndicator / tray | The tray icon (see GNOME below) |
 
+Optional sync: Settings › Sync can keep your dictionary, snippets, styles and instructions in one
+small file (`tokalot-sync.json`) that you put in a folder you already sync (Nextcloud, Dropbox,
+Syncthing…). Point each device at the same file, including the Windows and Android apps. There is
+no account or server; API keys stay out of the file unless you switch "Include API keys" on.
+
 Data lives in `~/.config/Tokalot` (settings, history, recordings, the offline model, `log.txt`).
 The folder is private to your user (mode 0700).
 

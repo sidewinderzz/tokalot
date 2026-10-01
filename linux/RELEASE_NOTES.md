@@ -1,8 +1,12 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.2.0
+
+- Optional settings sync (Settings › Sync): keep your dictionary, snippets, styles and instructions in one file inside a folder you already sync, and point your other devices, including the Windows and Android apps, at the same file. No account, no server; API keys are left out unless you choose to include them.
+
 ## What has and hasn't been tested
 
-It was built and run under WSL (Ubuntu 24.04): the window, all pages, the recording indicator, the Ctrl+Super shortcut (with a simulated keyboard), recording (with a simulated microphone), offline transcription and the paste keystroke were exercised there.
+It was built and run under WSL (Ubuntu 24.04): the window, all pages, the recording indicator, the Ctrl+Super shortcut (with a simulated keyboard), recording (with a simulated microphone), offline transcription and the paste keystroke were exercised there. Sync was checked there with two copies sharing one file.
 
 It has **not yet been run on a real Linux desktop**. Expect rough edges with:
 
@@ -11,6 +15,7 @@ It has **not yet been run on a real Linux desktop**. Expect rough edges with:
 - the tray icon (GNOME needs the AppIndicator extension)
 - the on-screen recording indicator: staying on top, never taking focus, and its position on Wayland
 - tiling window managers and multi-monitor or fractionally scaled setups
+- sync through a real sync service (it was only tested with a local file), and the file choosers that pick the sync file
 
 If you try it, please open an issue saying which distro and desktop you use and what happened. `Tokalot --diagnose` prints a summary worth pasting in.
 

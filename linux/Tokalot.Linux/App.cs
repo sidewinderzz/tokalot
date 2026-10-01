@@ -171,6 +171,7 @@ public sealed class App : Application
         else if (!Controller!.HotkeyWorks)
             Sh.Notify("Tokalot", "Couldn't listen for Ctrl+Super. Open Tokalot to see how to fix it.");
 
+        _ = Sync.Run(); // no-op unless sync is on
         _ = CheckForUpdatesLoop();
     }
 
