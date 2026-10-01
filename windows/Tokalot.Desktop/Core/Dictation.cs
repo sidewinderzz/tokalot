@@ -110,11 +110,16 @@ public sealed class Dictation : IDisposable
         final ??= TextTools.Restore(TextTools.BasicClean(protectedText), map);
 
         var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
-        History.Add(new Entry
+        // A history file that's briefly locked must not stop the text from being pasted.
+        try
         {
-            Id = now, Time = now, Text = final, Raw = baseText, DurationMs = (long)(seconds * 1000),
-            Cleaned = cleaned, AppKey = app?.Key ?? "", AppLabel = app?.Label ?? "",
-        });
+            History.Add(new Entry
+            {
+                Id = now, Time = now, Text = final, Raw = baseText, DurationMs = (long)(seconds * 1000),
+                Cleaned = cleaned, AppKey = app?.Key ?? "", AppLabel = app?.Label ?? "",
+            });
+        }
+        catch { }
         Usage.RecordDictation(TextTools.WordCount(final), usedLocal);
         Usage.RecordEdits(AppDetect.FillerCount(baseText), cleaned ? AppDetect.CorrectionCount(baseText) : 0);
         return new Outcome(final, warnings.FirstOrDefault(), now);

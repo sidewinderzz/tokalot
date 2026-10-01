@@ -71,13 +71,14 @@ public static class Cleanup
             var body = new JsonObject
             {
                 ["model"] = model,
-                ["max_tokens"] = 2048,
+                ["max_tokens"] = 8192,
                 ["temperature"] = 0,
                 ["system"] = system,
                 ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = user }),
             };
             var res = await Net.PostJson(choice.BaseUrl + "/messages",
                 new Dictionary<string, string> { ["x-api-key"] = key, ["anthropic-version"] = "2023-06-01" }, body);
+            if (res["stop_reason"]?.ToString() == "max_tokens") throw new System.InvalidOperationException("Cleanup was cut off");
             inTok = (long?)res["usage"]?["input_tokens"] ?? 0;
             outTok = (long?)res["usage"]?["output_tokens"] ?? 0;
             var sb = new StringBuilder();
@@ -99,6 +100,7 @@ public static class Cleanup
             if (choice.Id == "GROQ") body["temperature"] = 0;
             var res = await Net.PostJson(choice.BaseUrl + "/chat/completions",
                 new Dictionary<string, string> { ["Authorization"] = "Bearer " + key }, body);
+            if (res["choices"]?[0]?["finish_reason"]?.ToString() == "length") throw new System.InvalidOperationException("Cleanup was cut off");
             inTok = (long?)res["usage"]?["prompt_tokens"] ?? 0;
             outTok = (long?)res["usage"]?["completion_tokens"] ?? 0;
             output = res["choices"]![0]!["message"]!["content"]?.ToString() ?? "";

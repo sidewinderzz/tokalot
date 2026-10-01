@@ -131,8 +131,13 @@ public sealed class Settings
                 try
                 {
                     current = System.IO.File.Exists(f)
-                        ? JsonSerializer.Deserialize<Settings>(System.IO.File.ReadAllText(f), Json) ?? new Settings()
+                        ? JsonSerializer.Deserialize<Settings>(Files.ReadText(f), Json) ?? new Settings()
                         : new Settings();
+                }
+                catch (IOException)
+                {
+                    // The file is there but locked: run on defaults for now and never save over it (it holds the API keys).
+                    current = new Settings { unread = true };
                 }
                 catch
                 {
@@ -145,8 +150,11 @@ public sealed class Settings
         }
     }
 
+    private bool unread;
+
     public void Save()
     {
+        if (unread) return;
         lock (Gate)
         {
             var f = Paths.File("settings.json");

@@ -36,6 +36,19 @@ internal static class Shots
         }
         PillShots(dir);
         IndicatorShots(dir);
+        MenuShot(dir);
+    }
+
+    /** The pop-up menu (history's three dots, the app list on Style) in the dark theme. */
+    private static void MenuShot(string dir)
+    {
+        C.Apply("dark");
+        var menu = new System.Windows.Controls.ContextMenu { Resources = Ui.MenuStyles() };
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Copy original" });
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Delete" });
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "Messages", IsCheckable = true, IsChecked = true });
+        Layout(menu, 240, double.NaN);
+        Save(menu, Path.Combine(dir, "menu.png"));
     }
 
     /** Every indicator style in each state, plus the ripple pill on the side edges. */

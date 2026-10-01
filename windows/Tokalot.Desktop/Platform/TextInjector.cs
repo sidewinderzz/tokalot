@@ -24,7 +24,7 @@ public static class TextInjector
 
         var previous = Snapshot();
 
-        if (!await SetClipboard(text)) return;
+        if (!await SetClipboard(text, transient: true)) return;
         var inputs = new[]
         {
             HotkeyHook.Key(0x11, false), HotkeyHook.Key(0x56, false), // Ctrl down, V down
@@ -34,12 +34,16 @@ public static class TextInjector
 
         // Give the target app time to read the clipboard before restoring it.
         await Task.Delay(450);
-        if (previous == null) return;
         // Only put the old clipboard back if nothing else replaced ours in the meantime.
         try { if (Clipboard.ContainsText() && Clipboard.GetText() != text) return; } catch { }
         for (int i = 0; i < 8; i++)
         {
-            try { Clipboard.SetDataObject(previous, true); return; }
+            try
+            {
+                if (previous != null) Clipboard.SetDataObject(previous, true);
+                else Clipboard.Clear(); // it was empty before, so leave it empty
+                return;
+            }
             catch { await Task.Delay(40); }
         }
     }
@@ -69,12 +73,25 @@ public static class TextInjector
 
     public static Task<bool> Copy(string text) => SetClipboard(text);
 
-    private static async Task<bool> SetClipboard(string text)
+    /** transient: just passing through for a paste, so keep it out of Win+V history and cloud clipboard sync. */
+    private static async Task<bool> SetClipboard(string text, bool transient = false)
     {
         // Other apps can hold the clipboard open for a moment; retry a few times.
         for (int i = 0; i < 8; i++)
         {
-            try { Clipboard.SetDataObject(text, true); return true; }
+            try
+            {
+                var data = new DataObject();
+                data.SetText(text);
+                if (transient)
+                {
+                    data.SetData("ExcludeClipboardContentFromMonitorProcessing", new MemoryStream(new byte[4]));
+                    data.SetData("CanIncludeInClipboardHistory", new MemoryStream(new byte[4]));
+                    data.SetData("CanUploadToCloudClipboard", new MemoryStream(new byte[4]));
+                }
+                Clipboard.SetDataObject(data, true);
+                return true;
+            }
             catch { await Task.Delay(40); }
         }
         return false;

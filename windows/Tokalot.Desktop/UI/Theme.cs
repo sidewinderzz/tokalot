@@ -292,6 +292,64 @@ public static class Ui
 </Style>");
     }
 
+    /** Pop-up menus as rounded cards in the theme's colors (the stock ones are grey and square). Goes in the app's resources. */
+    public static ResourceDictionary MenuStyles()
+    {
+        string Hex(Brush b) => ((SolidColorBrush)b).Color.ToString();
+        string card = Hex(C.Card), line = Hex(C.Pill), text = Hex(C.Text), hover = Hex(C.Hover);
+        return (ResourceDictionary)XamlReader.Parse($@"
+<ResourceDictionary xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>
+  <Style TargetType='ContextMenu'>
+    <Setter Property='Foreground' Value='{text}'/>
+    <Setter Property='FontFamily' Value='Segoe UI Variable Text, Segoe UI'/>
+    <Setter Property='FontSize' Value='14'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='ContextMenu'>
+          <Border Background='{card}' BorderBrush='{line}' BorderThickness='1' CornerRadius='12' Padding='5' Margin='10' SnapsToDevicePixels='True'>
+            <Border.Effect><DropShadowEffect BlurRadius='14' ShadowDepth='3' Opacity='0.3'/></Border.Effect>
+            <StackPanel IsItemsHost='True'/>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType='ToolTip'>
+    <Setter Property='Foreground' Value='{text}'/>
+    <Setter Property='FontFamily' Value='Segoe UI Variable Text, Segoe UI'/>
+    <Setter Property='FontSize' Value='12.5'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='ToolTip'>
+          <Border Background='{card}' BorderBrush='{line}' BorderThickness='1' CornerRadius='8' Padding='9,5,9,6'>
+            <ContentPresenter/>
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType='MenuItem'>
+    <Setter Property='Foreground' Value='{text}'/>
+    <Setter Property='Template'>
+      <Setter.Value>
+        <ControlTemplate TargetType='MenuItem'>
+          <Border x:Name='b' Background='Transparent' CornerRadius='8' Padding='12,7,14,7' MinWidth='150'>
+            <DockPanel>
+              <Path x:Name='check' DockPanel.Dock='Right' Data='M0.5,4.5 L4,8 L10.5,0.5' Stroke='{text}' StrokeThickness='1.5' Width='11' Height='9' Margin='16,0,0,0' VerticalAlignment='Center' Visibility='Collapsed'/>
+              <ContentPresenter ContentSource='Header' VerticalAlignment='Center'/>
+            </DockPanel>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property='IsHighlighted' Value='True'><Setter TargetName='b' Property='Background' Value='{hover}'/></Trigger>
+            <Trigger Property='IsChecked' Value='True'><Setter TargetName='check' Property='Visibility' Value='Visible'/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+</ResourceDictionary>");
+    }
+
     public static string Money(double v) => v == 0 ? "$0" : v < 0.01 ? "<$0.01" : $"${v:0.00}";
 
     public static string Compact(long n) => n >= 1_000_000 ? $"{n / 1e6:0.0}M" : n >= 10_000 ? $"{n / 1000}K" : n >= 1000 ? $"{n / 1e3:0.0}K" : n.ToString();

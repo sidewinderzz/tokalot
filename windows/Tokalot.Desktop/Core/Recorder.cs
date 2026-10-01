@@ -17,6 +17,8 @@ public sealed class Recorder : IDisposable
     private readonly object gate = new();
 
     public bool IsRecording { get; private set; }
+    /** The 10 minute cap was reached; later audio is not being kept. */
+    public bool Full { get { lock (gate) return samples.Count >= MaxSamples; } }
     /** Loudness of the latest chunk (RMS 0..1), for the animated bars. */
     public float Level { get; private set; }
     /** When speech was last heard, and where it ended in the audio (for auto-stop trimming). */

@@ -19,6 +19,19 @@ public sealed class Entry
     public string AppLabel { get; set; } = "";
 }
 
+internal static class Files
+{
+    /** Reads a file, waiting out a brief lock (antivirus, a backup in progress). */
+    public static string ReadText(string path)
+    {
+        for (int i = 0; ; i++)
+        {
+            try { return File.ReadAllText(path); }
+            catch (IOException) when (i < 5) { System.Threading.Thread.Sleep(100); }
+        }
+    }
+}
+
 /** Every dictation, stored as one JSON file. Newest first. */
 public static class History
 {
@@ -31,18 +44,26 @@ public static class History
 
     private static string FilePath => Paths.File("history.json");
 
+    /** The file exists but couldn't be read (not corrupt, just unavailable): never save over it. */
+    private static bool unread;
+
     private static List<Entry> Load()
     {
         if (cache != null) return cache;
         try
         {
             cache = File.Exists(FilePath)
-                ? JsonSerializer.Deserialize<List<Entry>>(File.ReadAllText(FilePath), Settings.Json) ?? new()
+                ? JsonSerializer.Deserialize<List<Entry>>(Files.ReadText(FilePath), Settings.Json) ?? new()
                 : new();
+        }
+        catch (JsonException)
+        {
+            try { File.Copy(FilePath, Paths.File("history.corrupt.json"), true); } catch { }
+            cache = new();
         }
         catch
         {
-            try { File.Copy(FilePath, Paths.File("history.corrupt.json"), true); } catch { }
+            unread = true;
             cache = new();
         }
         return cache;
@@ -50,6 +71,7 @@ public static class History
 
     private static void Save()
     {
+        if (unread) return;
         var tmp = FilePath + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(cache, Settings.Json));
         File.Move(tmp, FilePath, true);
@@ -125,16 +147,19 @@ public static class Usage
     private static string FilePath => Paths.File("usage.json");
     private static string Key(DateTime t) => t.ToString("yyyy-MM", CultureInfo.InvariantCulture);
 
+    private static bool unread;
+
     private static Dictionary<string, Month> Load()
     {
         if (data != null) return data;
         try
         {
             data = File.Exists(FilePath)
-                ? JsonSerializer.Deserialize<Dictionary<string, Month>>(File.ReadAllText(FilePath), Settings.Json) ?? new()
+                ? JsonSerializer.Deserialize<Dictionary<string, Month>>(Files.ReadText(FilePath), Settings.Json) ?? new()
                 : new();
         }
-        catch { data = new(); }
+        catch (JsonException) { data = new(); }
+        catch { unread = true; data = new(); }
         return data;
     }
 
@@ -146,7 +171,15 @@ public static class Usage
             var k = Key(DateTime.Now);
             if (!d.TryGetValue(k, out var m)) d[k] = m = new Month();
             f(m);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(d, Settings.Json));
+            if (unread) return;
+            // Counting usage must never fail a dictation, and a crash mid-write must not empty the file.
+            try
+            {
+                var tmp = FilePath + ".tmp";
+                File.WriteAllText(tmp, JsonSerializer.Serialize(d, Settings.Json));
+                File.Move(tmp, FilePath, true);
+            }
+            catch { }
         }
     }
 

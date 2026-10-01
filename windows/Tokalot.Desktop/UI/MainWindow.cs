@@ -53,7 +53,10 @@ public sealed class MainWindow : Window
     public MainWindow()
     {
         Title = "Tokalot";
-        Width = 1040; Height = 760; MinWidth = 760; MinHeight = 520;
+        // Never open larger than the screen: the title strip with Close must stay reachable.
+        var area = SystemParameters.WorkArea;
+        Width = Math.Min(1040, area.Width); Height = Math.Min(760, area.Height);
+        MinWidth = Math.Min(760, Width); MinHeight = Math.Min(520, Height);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = C.Bg;
         FontFamily = C.Sans;
@@ -61,7 +64,8 @@ public sealed class MainWindow : Window
         // No system title bar: the app draws to the top edge. Resizing, snapping and double-click to maximize still work.
         WindowChrome.SetWindowChrome(this, new WindowChrome
         {
-            CaptionHeight = CaptionHeight * UiScale, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(1),
+            // Windows adds the top resize border to the caption, so take it off to match the drawn strip.
+            CaptionHeight = CaptionHeight * UiScale - 6, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(1),
             CornerRadius = new CornerRadius(0), UseAeroCaptionButtons = false,
         });
 
@@ -886,6 +890,10 @@ public sealed class MainWindow : Window
         col.Children.Add(Ui.List(new[] { (0, "Don't save audio"), (7, "Keep 7 days"), (30, "Keep 30 days"), (int.MaxValue, "Keep forever") }
             .Select(t => (UIElement)Ui.Choice(t.Item2, "", S.AudioKeepDays == t.Item1, () =>
             {
+                if (t.Item1 < S.AudioKeepDays && AudioStore.TotalBytes() > 0 && MessageBox.Show(this,
+                        t.Item1 == 0 ? "Delete all saved recordings now? Transcripts stay."
+                            : $"Delete recordings older than {t.Item1} days now? Transcripts stay.",
+                        "Tokalot", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
                 S.AudioKeepDays = t.Item1; S.Save();
                 Task.Run(() => AudioStore.Prune(t.Item1)).ContinueWith(_ => Dispatcher.BeginInvoke(Render));
                 Render();
@@ -1025,7 +1033,7 @@ public sealed class MainWindow : Window
     private static UIElement ModelField(string value, Action<string> save)
     {
         var (box, input) = Ui.Field(value, "Model");
-        input.TextChanged += (_, _) => { if (input.Text.Trim().Length > 0) save(input.Text); };
+        input.TextChanged += (_, _) => save(input.Text); // empty = the provider's default model
         return Spaced(Ui.Stack(Spaced(Ui.Text("Model name (change only if the provider renames it)", 13, C.Sub), 4, 10, 0, 4), box), 0, 0, 0, 0);
     }
 

@@ -69,6 +69,12 @@ public sealed class HotkeyHook : IDisposable
 
     public bool Installed => hook != IntPtr.Zero;
 
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
+    private static bool Held(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
+
+    /** True while Ctrl and Win are physically held, whatever the hook last saw. */
+    public static bool ComboHeld => Held(VK_CONTROL) && (Held(VK_LWIN) || Held(VK_RWIN));
+
     private IntPtr Callback(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode < 0) return CallNextHookEx(hook, nCode, wParam, lParam);
@@ -82,6 +88,11 @@ public sealed class HotkeyHook : IDisposable
         int vk = (int)k.vkCode;
         bool isCtrl = vk is VK_LCONTROL or VK_RCONTROL or VK_CONTROL;
         bool isWin = vk is VK_LWIN or VK_RWIN;
+
+        // The hook sees nothing on the lock screen, a UAC prompt or an elevated window, so a key-up
+        // can be missed there. Re-read the key this event isn't about, so a stale "held" never sticks.
+        if (!isCtrl) ctrl = Held(VK_CONTROL);
+        if (!isWin) win = Held(VK_LWIN) || Held(VK_RWIN);
 
         if (isCtrl) { if (down) ctrl = true; else if (up) ctrl = false; }
         else if (isWin) { if (down) win = true; else if (up) win = false; }

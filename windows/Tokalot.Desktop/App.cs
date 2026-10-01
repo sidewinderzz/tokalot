@@ -79,6 +79,7 @@ public sealed class App : Application
         }
         Log($"Start {Updater.CurrentVersion} · render tier {System.Windows.Media.RenderCapability.Tier >> 16} · gpu={gpu} · {Environment.OSVersion}");
         C.Apply(s.Theme);
+        Resources = Ui.MenuStyles();
         DispatcherUnhandledException += (_, e) =>
         {
             Log("UI error: " + e.Exception);
@@ -149,6 +150,7 @@ public sealed class App : Application
     public void ApplyTheme()
     {
         C.Apply(Settings.Current.Theme);
+        Resources = Ui.MenuStyles();
         if (window == null) return;
         var bounds = new Rect(window.Left, window.Top, window.Width, window.Height);
         var page = window.CurrentPage;
@@ -160,6 +162,13 @@ public sealed class App : Application
     }
 
     public void Refresh() => window?.Render();
+
+    /** Home shows the new entry and stats. Other pages are left alone so a half-typed snippet or word list isn't wiped. */
+    public void RefreshAfterDictation()
+    {
+        if (window?.CurrentPage == UI.MainWindow.Page.Home) window.Render();
+    }
+
 
     // ---------- tray ----------
 
@@ -363,8 +372,16 @@ public sealed class Controller : IDisposable
     {
         if (state != State.Recording) { tick.Stop(); return; }
         var s = Settings.Current;
-        if (handsFree && s.AutoStop && (DateTime.UtcNow - recorder.LastVoiceAt).TotalSeconds > AutoStopSeconds)
+        if (recorder.Full)
+        {
+            Say("Reached the 10 minute limit. Transcribing…", 3000);
+            Finish();
+        }
+        else if (handsFree && s.AutoStop && (DateTime.UtcNow - recorder.LastVoiceAt).TotalSeconds > AutoStopSeconds)
             Finish(trimSilence: true);
+        // Hold mode, but the keys are up and the release never arrived (focus went to a UAC prompt or the lock screen).
+        else if (!handsFree && !HotkeyHook.ComboHeld && (DateTime.UtcNow - pressedAt).TotalMilliseconds > ShortcutWindowMs)
+            Finish();
     }
 
     /** Stops recording without transcribing. */
@@ -463,7 +480,7 @@ public sealed class Controller : IDisposable
         finally
         {
             state = State.Idle;
-            App.Current.Refresh();
+            App.Current.RefreshAfterDictation();
         }
     }
 

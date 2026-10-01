@@ -8,7 +8,7 @@ namespace Tokalot.Desktop.Core;
 public static class TextTools
 {
     private static readonly Regex Noise = new(@"\[[^\]]*]|\((?:music|laughs?|applause|silence|inaudible|blank_audio|noise)[^)]*\)|\*[^*]*\*", RegexOptions.IgnoreCase);
-    private static readonly Regex Fillers = new(@"(?i)\b(?:um+|uh+|erm?|hmm+|mm+)\b[,.]?\s*");
+    private static readonly Regex Fillers = new(@"(?i)\b(?:um+|uh+|erm|hmm+)\b[,.]?\s*"); // not "er"/"mm": those are real words (the ER, 5 mm)
     private static readonly Regex Spaces = new(@"\s+");
     private static readonly Regex SpaceBeforePunct = new(@"\s+([,.!?;:])");
 

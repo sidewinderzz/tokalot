@@ -94,10 +94,10 @@ public static class Player
         try
         {
             reader = f.EndsWith(".wav") ? new WaveFileReader(f) : new MediaFoundationReader(f);
-            output = new WaveOutEvent();
-            output.Init(reader);
-            output.PlaybackStopped += (_, _) => Stop();
-            output.Play();
+            var o = output = new WaveOutEvent();
+            o.Init(reader);
+            o.PlaybackStopped += (_, _) => { if (ReferenceEquals(output, o)) Stop(); };
+            o.Play();
             PlayingId = id;
         }
         catch { Stop(false); }
