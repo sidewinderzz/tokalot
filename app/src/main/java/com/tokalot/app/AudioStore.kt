@@ -3,9 +3,12 @@ package com.tokalot.app
 import android.content.Context
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -23,23 +26,101 @@ object AudioStore {
 
     fun totalBytes(ctx: Context) = dir(ctx).listFiles()?.sumOf { it.length() } ?: 0L
 
-    /** Deletes recordings older than [days]. days <= 0 means keep none; Int.MAX_VALUE keeps all. */
+    /**
+     * Deletes recordings older than [days]. days <= 0 means keep none; Int.MAX_VALUE keeps all.
+     * Recordings that still have no transcript (failed or cancelled) are always kept, so they can be retried.
+     */
     fun prune(ctx: Context, days: Int) {
         if (days == Int.MAX_VALUE) return
+        val keep = History.pendingIds(ctx)
         val cutoff = System.currentTimeMillis() - days.toLong() * 24 * 3600 * 1000
-        dir(ctx).listFiles()?.forEach { if (days <= 0 || it.lastModified() < cutoff) it.delete() }
+        dir(ctx).listFiles()?.forEach {
+            if (it.name.removeSuffix(".m4a").toLongOrNull() in keep) return@forEach
+            if (days <= 0 || it.lastModified() < cutoff) it.delete()
+        }
     }
 
-    /** Blocking; call off the main thread. Silently gives up on any codec error. */
-    fun save(ctx: Context, id: Long, samples: FloatArray) {
+    /** The explicit "Delete all" button: every recording, including ones waiting for a retry. */
+    fun deleteAll(ctx: Context) { dir(ctx).listFiles()?.forEach { it.delete() } }
+
+    /** Blocking; call off the main thread. Returns false (and saves nothing) on any codec error. */
+    fun save(ctx: Context, id: Long, samples: FloatArray): Boolean {
         val out = file(ctx, id)
         val tmp = File(out.parentFile, "$id.tmp")
-        try {
+        return try {
             encode(samples, tmp)
             tmp.renameTo(out)
         } catch (_: Exception) {
             tmp.delete()
+            false
         }
+    }
+
+    /**
+     * Reads a saved recording back into 16 kHz mono floats, to transcribe it again.
+     * Blocking; throws if the file can't be decoded.
+     */
+    fun decode(file: File): FloatArray {
+        val extractor = MediaExtractor()
+        var codec: MediaCodec? = null
+        val pcm = ByteArrayOutputStream()
+        var channels = 1
+        try {
+            extractor.setDataSource(file.absolutePath)
+            var fmt: MediaFormat? = null
+            for (i in 0 until extractor.trackCount) {
+                val f = extractor.getTrackFormat(i)
+                if (f.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
+                    extractor.selectTrack(i)
+                    fmt = f
+                    break
+                }
+            }
+            if (fmt == null) throw IOException("No audio in that recording")
+            val dec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+            codec = dec
+            dec.configure(fmt, null, null, 0)
+            dec.start()
+            val info = MediaCodec.BufferInfo()
+            var inputDone = false
+            while (true) {
+                if (!inputDone) {
+                    val inIdx = dec.dequeueInputBuffer(10_000)
+                    if (inIdx >= 0) {
+                        val n = extractor.readSampleData(dec.getInputBuffer(inIdx)!!, 0)
+                        if (n < 0) {
+                            dec.queueInputBuffer(inIdx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            dec.queueInputBuffer(inIdx, 0, n, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                val outIdx = dec.dequeueOutputBuffer(info, 10_000)
+                when {
+                    outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED ->
+                        channels = dec.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+                    outIdx >= 0 -> {
+                        if (info.size > 0) {
+                            val buf = dec.getOutputBuffer(outIdx)!!
+                            val chunk = ByteArray(info.size)
+                            buf.position(info.offset)
+                            buf.get(chunk)
+                            pcm.write(chunk)
+                        }
+                        dec.releaseOutputBuffer(outIdx, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                    }
+                }
+            }
+        } finally {
+            codec?.let { runCatching { it.stop() }; it.release() }
+            extractor.release()
+        }
+        // The decoder hands back 16-bit PCM. We only ever save mono, but take the first channel to be safe.
+        val shorts = ByteBuffer.wrap(pcm.toByteArray()).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        return FloatArray(shorts.remaining() / channels) { shorts.get(it * channels) / 32768f }
     }
 
     private fun encode(samples: FloatArray, dest: File) {

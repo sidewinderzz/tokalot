@@ -1,7 +1,6 @@
 package com.tokalot.app
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
@@ -11,6 +10,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -96,13 +96,14 @@ class DictionaryScreen(private val a: MainActivity) {
             val c = card()
             words.sortedBy { it.lowercase() }.forEachIndexed { i, w ->
                 if (i > 0) c.addView(divider())
-                val remove = icon(R.drawable.ic_close, 20, C.SUB).apply {
-                    setOnClickListener { prefs.words = prefs.words - w; render() }
+                val remove = iconButton(R.drawable.ic_close, "Remove $w", 20, C.SUB) {
+                    prefs.words = prefs.words - w; render()
                 }
+                // The X is a full 48dp target, so the row's own padding shrinks to keep its height.
                 c.addView(row(
                     text(w, 17f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
                     remove
-                ).apply { setPadding(dp(20), dp(16), dp(20), dp(16)) })
+                ).apply { setPadding(dp(20), dp(4), dp(6), dp(4)) })
             }
             col.addView(c)
         }
@@ -145,28 +146,29 @@ class SnippetsScreen(private val a: MainActivity) {
         val body = field("Text to insert", existing?.text ?: "", multiLine = true)
         val form = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), 0)
             addView(trig)
             addView(body, lp().margins(this@with, t = 12))
         }
-        val dlg = AlertDialog.Builder(this)
-            .setTitle(if (existing == null) "New snippet" else "Edit snippet")
-            .setView(form)
-            .setPositiveButton("Save") { _, _ ->
-                val t = trig.text.toString().trim()
-                val x = body.text.toString()
-                if (t.isNotEmpty() && x.isNotBlank()) {
-                    val rest = prefs.snippets.filter { it != existing && !it.trigger.equals(t, true) }
-                    prefs.snippets = rest + Snippet(t, x)
+        sheet(
+            if (existing == null) "New snippet" else "Edit snippet", form,
+            positive = "Save",
+            neutral = if (existing != null) "Delete" else null,
+            onNeutral = {
+                if (existing != null) {
+                    prefs.snippets = prefs.snippets - existing
                     render()
                 }
+            },
+        ) {
+            val t = trig.text.toString().trim()
+            val x = body.text.toString()
+            if (t.isNotEmpty() && x.isNotBlank()) {
+                val rest = prefs.snippets.filter { it != existing && !it.trigger.equals(t, true) }
+                prefs.snippets = rest + Snippet(t, x)
+                render()
             }
-            .setNegativeButton("Cancel", null)
-        if (existing != null) dlg.setNeutralButton("Delete") { _, _ ->
-            prefs.snippets = prefs.snippets - existing
-            render()
         }
-        dlg.show()
+        Unit
     }
 }
 
@@ -237,11 +239,9 @@ class StyleScreen(private val a: MainActivity) {
                     setPadding(dp(20), dp(15), dp(20), dp(15))
                     setOnClickListener {
                         val cats = AppCategory.values()
-                        AlertDialog.Builder(this@with)
-                            .setTitle(AppContext.label(this@with, pkg))
-                            .setSingleChoiceItems(cats.map { it.label }.toTypedArray(), cats.indexOf(cat)) { d, which ->
-                                prefs.setAppOverride(pkg, cats[which]); d.dismiss(); render()
-                            }.show()
+                        choose(AppContext.label(this@with, pkg), cats.map { it.label }, cats.indexOf(cat)) { which ->
+                            prefs.setAppOverride(pkg, cats[which]); render()
+                        }
                     }
                 })
             }
@@ -290,12 +290,12 @@ class SettingsScreen(private val a: MainActivity) {
             return status
         }
         setupRow("Microphone", micGranted(), "Allowed", "Allow") {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            askPermission(Manifest.permission.RECORD_AUDIO, 1)
         }
         if (Build.VERSION.SDK_INT >= 33) {
             val ok = checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
             setupRow("Notifications (recording indicator)", ok, "Allowed", "Allow") {
-                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2)
+                askPermission(Manifest.permission.POST_NOTIFICATIONS, 2)
             }
         }
         setupRow("Accessibility switch", serviceEnabled(), "On", "Set up") { openAccessibilitySetup() }
@@ -318,7 +318,7 @@ class SettingsScreen(private val a: MainActivity) {
         listOf("system" to "Match phone", "light" to "Light", "dark" to "Dark").forEachIndexed { i, (id, label) ->
             if (i > 0) ap.addView(divider())
             ap.addView(choiceRow(label, "", prefs.theme == id) {
-                if (prefs.theme != id) { prefs.theme = id; recreate() }
+                if (prefs.theme != id) { prefs.theme = id; applyTheme() } // in place: stays on Settings
             })
         }
         col.addView(ap)
@@ -326,21 +326,24 @@ class SettingsScreen(private val a: MainActivity) {
         val swatches = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         Accents.all.forEach { (name, color) ->
             val on = prefs.accent == color
-            swatches.addView(View(this).apply {
-                // A dark disc with the color as a thick ring, like the button itself.
+            // The disc stays 34dp; the frame around it makes the tap target a full 48dp.
+            val disc = View(this).apply {
                 background = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.OVAL
                     setColor(color)
                     setStroke(dp(if (on) 4 else 1), if (on) C.TEXT else C.PILL)
                 }
-                contentDescription = name
+            }
+            swatches.addView(FrameLayout(this).apply {
+                addView(disc, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
+                contentDescription = if (on) "$name, selected" else name
                 setOnClickListener { prefs.accent = color; render() }
-            }, LinearLayout.LayoutParams(dp(34), dp(34)).margins(this, r = 10))
+            }, LinearLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP)))
         }
         col.addView(android.widget.HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             addView(swatches)
-        }, lp().margins(this, l = 4))
+        }, lp())
 
         // --- Recording
         section(col, "Recording")
@@ -410,7 +413,7 @@ class SettingsScreen(private val a: MainActivity) {
             keys.addView(f, lp().margins(this, t = 6))
         }
         col.addView(keys)
-        col.addView(text("Keys are saved only on this phone, in Tokalot's private storage. Nothing is synced anywhere. Uninstalling the app deletes them.", 13f, C.SUB), lp().margins(this, t = 8))
+        col.addView(text("Keys are saved only on this phone, encrypted, in Tokalot's private storage. Nothing is synced anywhere. Uninstalling the app deletes them.", 13f, C.SUB), lp().margins(this, t = 8))
 
         // --- Recordings
         section(col, "Recordings")
@@ -425,46 +428,50 @@ class SettingsScreen(private val a: MainActivity) {
                         render()
                     }
                     if (days < prefs.audioKeepDays && AudioStore.totalBytes(this) > 0) {
-                        AlertDialog.Builder(this)
-                            .setMessage(if (days == 0) "Delete all saved recordings now? Transcripts stay."
-                                else "Delete recordings older than $days days now? Transcripts stay.")
-                            .setPositiveButton("Delete") { _, _ -> keep() }
-                            .setNegativeButton("Cancel", null).show()
+                        confirm(
+                            if (days == 0) "Delete all saved recordings now? Transcripts stay."
+                            else "Delete recordings older than $days days now? Transcripts stay.",
+                            "Delete"
+                        ) { keep() }
                     } else keep()
                 })
             }
         col.addView(rec)
+        col.addView(text("A recording that failed or was cancelled is always kept until you transcribe or delete it.", 13f, C.SUB), lp().margins(this, t = 8))
         val mb = AudioStore.totalBytes(this) / 1_048_576.0
         col.addView(row(
             text("Using ${String.format(java.util.Locale.US, "%.1f", mb)} MB", 14f, C.SUB).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             },
             pill("Delete all") {
-                AlertDialog.Builder(this).setMessage("Delete all saved recordings? Transcripts stay.")
-                    .setPositiveButton("Delete") { _, _ -> AudioStore.prune(this, 0); render() }
-                    .setNegativeButton("Cancel", null).show()
+                confirm("Delete all saved recordings? Transcripts stay.", "Delete") { AudioStore.deleteAll(this); render() }
             }
         ), lp().margins(this, t = 8))
 
         // --- Backup
         section(col, "Backup")
         val bc = card()
-        var withAudio = false
-        var withKeys = false
-        bc.addView(switchRow("Include recordings", "Makes the file much bigger.", false) { withAudio = it })
+        // The choices live on the activity, so a redraw (or rotating the phone) can't reset them.
+        bc.addView(switchRow("Include recordings", "Makes the file much bigger.", backupAudio) { backupAudio = it })
         bc.addView(divider())
-        bc.addView(switchRow("Include API keys", "Only if you'll keep the file somewhere private. Anyone with the file could use your keys.", false) { withKeys = it })
+        bc.addView(switchRow("Include API keys", "Only if you'll keep the file somewhere private. Anyone with the file could use your keys.", backupKeys) { backupKeys = it })
         col.addView(bc)
-        col.addView(row(
-            pill("Back up…", filled = true) { startBackup(withAudio, withKeys) },
-            spacer(wDp = 10),
-            pill("Restore…") {
-                AlertDialog.Builder(this).setTitle("Restore from backup?")
-                    .setMessage("This replaces your current settings, dictionary, snippets and history with the backup's. API keys on this phone are kept unless the backup includes keys.")
-                    .setPositiveButton("Choose file") { _, _ -> startRestore() }
-                    .setNegativeButton("Cancel", null).show()
-            }
-        ), lp().margins(this, t = 10))
+        val busy = MainActivity.backupBusy
+        if (busy != null) {
+            // Runs in the background; the buttons come back when it's done.
+            col.addView(text(busy, 15f, C.SUB).apply { minHeight = dp(TOUCH_DP); gravity = Gravity.CENTER_VERTICAL }, lp().margins(this, t = 10, l = 4))
+        } else {
+            col.addView(row(
+                pill("Back up…", filled = true) { startBackup() },
+                spacer(wDp = 10),
+                pill("Restore…") {
+                    confirm(
+                        "This replaces your current settings, dictionary, snippets and history with the backup's. API keys on this phone are kept unless the backup includes keys.",
+                        "Choose file", title = "Restore from backup?"
+                    ) { startRestore() }
+                }
+            ), lp().margins(this, t = 10))
+        }
         col.addView(text("Saves one .zip file wherever you choose: Downloads, Google Drive, etc.", 13f, C.SUB), lp().margins(this, t = 8))
 
         // --- Usage
@@ -500,26 +507,29 @@ class SettingsScreen(private val a: MainActivity) {
         val about = card(18)
         about.addView(text("Tokalot ${Updater.currentVersion(this)}", 17f, bold = true))
         about.addView(text("Your recordings, history and keys stay on this phone. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking.", 14f, C.SUB), lp().margins(this, t = 4))
-        about.addView(text("Source code: github.com/${Updater.REPO}", 14f, C.LINK).apply {
-            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/${Updater.REPO}"))) }
-        }, lp().margins(this, t = 8))
+        about.addView(link("Source code: github.com/${Updater.REPO}") {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/${Updater.REPO}")))
+        }, lp())
         val status = text("", 14f, C.SUB)
         about.addView(row(pill("Check for updates") {
             status.text = "Checking…"
             val app = applicationContext
             Thread {
                 Updater.check(app, force = true)
+                val failed = Updater.lastCheckFailed
                 val r = Updater.available(app)
-                runOnUiThread { status.text = if (r != null) "Version ${r.version} is available. See the banner on Home." else "You're up to date." }
+                runOnUiThread {
+                    status.text = when {
+                        r != null -> "Version ${r.version} is available. See the banner on Home."
+                        // Not the same as "up to date": we simply don't know.
+                        failed -> "Couldn't check for updates. Check your connection and try again."
+                        else -> "You're up to date."
+                    }
+                }
             }.start()
-        }), lp().margins(this, t = 12))
-        about.addView(status, lp().margins(this, t = 6))
-        about.addView(text("Open-source licenses", 14f, C.LINK).apply {
-            setOnClickListener {
-                AlertDialog.Builder(this@with).setTitle("Open-source licenses")
-                    .setMessage(Licenses.TEXT).setPositiveButton("OK", null).show()
-            }
-        }, lp().margins(this, t = 12))
+        }), lp())
+        about.addView(status, lp().margins(this, t = 2))
+        about.addView(link("Open-source licenses") { info("Open-source licenses", Licenses.TEXT) }, lp().margins(this, t = 4))
         col.addView(about)
 
         scroll(col)

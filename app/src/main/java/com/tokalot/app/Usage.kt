@@ -45,10 +45,14 @@ object Usage {
     private fun sp(ctx: Context) = ctx.applicationContext.getSharedPreferences("usage", Context.MODE_PRIVATE)
     private fun monthKey(t: Long = System.currentTimeMillis()) = SimpleDateFormat("yyyy-MM", Locale.US).format(Date(t))
 
+    /** A month's counters; anything unreadable (wrong type, bad JSON) counts as empty rather than crashing. */
+    private fun read(ctx: Context, key: String): JSONObject =
+        runCatching { JSONObject(sp(ctx).safeString(key, "{}") ?: "{}") }.getOrElse { JSONObject() }
+
     @Synchronized
     private fun edit(ctx: Context, block: (JSONObject) -> Unit) {
         val key = monthKey()
-        val o = JSONObject(sp(ctx).getString(key, "{}") ?: "{}")
+        val o = read(ctx, key)
         block(o)
         sp(ctx).edit().putString(key, o.toString()).apply()
     }
@@ -73,7 +77,7 @@ object Usage {
     }
 
     fun month(ctx: Context, key: String = monthKey()): Month {
-        val o = JSONObject(sp(ctx).getString(key, "{}") ?: "{}")
+        val o = read(ctx, key)
         val label = runCatching {
             SimpleDateFormat("MMMM yyyy", Locale.US).format(SimpleDateFormat("yyyy-MM", Locale.US).parse(key)!!)
         }.getOrDefault(key)
