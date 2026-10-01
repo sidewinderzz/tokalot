@@ -10,6 +10,7 @@ public sealed class Recorder : IDisposable
     public const int SampleRate = 16000;
     private const int MaxSamples = SampleRate * 600; // 10 minute cap
     private const float VoiceRms = 0.015f;            // above this counts as "someone is talking"
+    private const float SpeechRms = 0.008f;           // lower bar for "was anything said at all" (quiet mics)
 
     private WaveInEvent? wave;
     private readonly List<short> samples = new();
@@ -21,6 +22,11 @@ public sealed class Recorder : IDisposable
     /** When speech was last heard, and where it ended in the audio (for auto-stop trimming). */
     public DateTime LastVoiceAt { get; private set; }
     public int LastVoiceSample { get; private set; }
+    /** How many 50 ms chunks had sound in them, and how many of those came after the start tone. */
+    public int SpeechChunks { get; private set; }
+    public int LateSpeechChunks { get; private set; }
+    /** Audio this early may just be the start tone coming back through the speakers. */
+    public int CueSamples { get; set; }
 
     /** Returns false if no microphone could be opened. */
     public bool Start()
@@ -31,6 +37,8 @@ public sealed class Recorder : IDisposable
             lock (gate) samples.Clear();
             LastVoiceAt = DateTime.UtcNow;
             LastVoiceSample = 0;
+            SpeechChunks = 0;
+            LateSpeechChunks = 0;
             wave = new WaveInEvent { WaveFormat = new WaveFormat(SampleRate, 16, 1), BufferMilliseconds = 50 };
             wave.DataAvailable += OnData;
             wave.StartRecording();
@@ -60,6 +68,11 @@ public sealed class Recorder : IDisposable
                 if (samples.Count < MaxSamples) samples.Add(s);
             }
             Level = (float)Math.Sqrt(sum / n);
+            if (Level > SpeechRms)
+            {
+                SpeechChunks++;
+                if (samples.Count - n >= CueSamples) LateSpeechChunks++;
+            }
             if (Level > VoiceRms)
             {
                 LastVoiceAt = DateTime.UtcNow;

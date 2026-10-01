@@ -15,6 +15,15 @@ public static class TextTools
     /** Removes Whisper's sound tags like [BLANK_AUDIO] or (music). */
     public static string StripNoise(string s) => Spaces.Replace(Noise.Replace(s, " "), " ").Trim();
 
+    private static readonly Regex NotLetters = new(@"[^a-z ]");
+    private static readonly HashSet<string> Phantoms = new()
+    {
+        "thank you", "thank you very much", "thank you for watching", "thanks for watching", "you", "bye", "beep",
+    };
+
+    /** Whisper invents these for silence or a lone beep. Only trusted as "nothing said" when barely any sound was heard. */
+    public static bool IsPhantom(string s) => Phantoms.Contains(Spaces.Replace(NotLetters.Replace(s.ToLowerInvariant(), " "), " ").Trim());
+
     /** The fallback when AI cleanup is off or unreachable. */
     public static string BasicClean(string s)
     {

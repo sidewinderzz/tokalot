@@ -63,6 +63,8 @@ public sealed class Settings
     /** Keep a slim bar on screen between dictations (click it to dictate, drag it to move it). */
     public bool ShowIdleIndicator { get; set; } = true;
     public bool LaunchAtStartup { get; set; } = true;
+    /** The "Hold to talk" card in the sidebar was closed. */
+    public bool HideShortcutTip { get; set; }
     /** Encrypted (DPAPI, base64) keys by service id. */
     public Dictionary<string, string> EncryptedKeys { get; set; } = new();
 

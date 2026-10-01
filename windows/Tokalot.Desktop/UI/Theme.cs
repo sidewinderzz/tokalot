@@ -2,6 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Markup;
 using System.Windows.Media;
 using Microsoft.Win32;
 
@@ -243,6 +244,52 @@ public static class Ui
             s.Children.Add(rows[i]);
         }
         return Card(s);
+    }
+
+    /** Slim rounded scroll bar in the theme's colors, with no arrows or track (the stock one is wide and white). */
+    public static Style ScrollBarStyle()
+    {
+        var thumb = ((SolidColorBrush)C.Pill).Color.ToString();
+        return (Style)XamlReader.Parse($@"
+<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='ScrollBar'>
+  <Setter Property='Width' Value='10'/>
+  <Setter Property='MinWidth' Value='10'/>
+  <Setter Property='Background' Value='Transparent'/>
+  <Setter Property='Template'>
+    <Setter.Value>
+      <ControlTemplate TargetType='ScrollBar'>
+        <Grid Background='Transparent'>
+          <Track x:Name='PART_Track' IsDirectionReversed='True'>
+            <Track.DecreaseRepeatButton><RepeatButton Command='ScrollBar.PageUpCommand' Opacity='0' Focusable='False'/></Track.DecreaseRepeatButton>
+            <Track.IncreaseRepeatButton><RepeatButton Command='ScrollBar.PageDownCommand' Opacity='0' Focusable='False'/></Track.IncreaseRepeatButton>
+            <Track.Thumb>
+              <Thumb>
+                <Thumb.Template>
+                  <ControlTemplate TargetType='Thumb'>
+                    <Border Background='{thumb}' CornerRadius='3' Margin='2'/>
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
+            </Track.Thumb>
+          </Track>
+        </Grid>
+        <ControlTemplate.Triggers>
+          <Trigger Property='Orientation' Value='Horizontal'>
+            <Setter TargetName='PART_Track' Property='IsDirectionReversed' Value='False'/>
+          </Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter.Value>
+  </Setter>
+  <Style.Triggers>
+    <Trigger Property='Orientation' Value='Horizontal'>
+      <Setter Property='Width' Value='Auto'/>
+      <Setter Property='MinWidth' Value='0'/>
+      <Setter Property='Height' Value='10'/>
+      <Setter Property='MinHeight' Value='10'/>
+    </Trigger>
+  </Style.Triggers>
+</Style>");
     }
 
     public static string Money(double v) => v == 0 ? "$0" : v < 0.01 ? "<$0.01" : $"${v:0.00}";

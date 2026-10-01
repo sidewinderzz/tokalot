@@ -12,6 +12,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
+using System.Windows.Shell;
 using Tokalot.Desktop.Core;
 using Tokalot.Desktop.Platform;
 
@@ -44,6 +45,11 @@ public sealed class MainWindow : Window
 
     private static Settings S => Settings.Current;
 
+    /** The strip at the top you drag the window by; the minimize and close buttons sit in its right end. */
+    private const double CaptionHeight = 32;
+    /** Sizes were carried over from the phone app and read large on a monitor, so the whole window is drawn a bit smaller. */
+    private const double UiScale = 0.9;
+
     public MainWindow()
     {
         Title = "Tokalot";
@@ -52,6 +58,12 @@ public sealed class MainWindow : Window
         Background = C.Bg;
         FontFamily = C.Sans;
         try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/icon.png")); } catch { }
+        // No system title bar: the app draws to the top edge. Resizing, snapping and double-click to maximize still work.
+        WindowChrome.SetWindowChrome(this, new WindowChrome
+        {
+            CaptionHeight = CaptionHeight * UiScale, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(0), UseAeroCaptionButtons = false,
+        });
 
         (searchBox, search) = Ui.Field("", "Search your dictations");
         search.TextChanged += (_, _) => FillHistory();
@@ -65,16 +77,22 @@ public sealed class MainWindow : Window
         });
 
         // Sidebar | content
-        var root = new Grid { Background = C.Bg };
+        var root = new Grid { Background = C.Bg, LayoutTransform = new ScaleTransform(UiScale, UiScale) };
+        root.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] = Ui.ScrollBarStyle();
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(232) });
         root.ColumnDefinitions.Add(new ColumnDefinition());
         root.Children.Add(Sidebar());
-        var contentGrid = new Grid();
+        var contentGrid = new Grid { Margin = new Thickness(0, CaptionHeight, 0, 0) };
         contentGrid.Children.Add(scroller);
         contentGrid.Children.Add(toast);
         Grid.SetColumn(contentGrid, 1);
         root.Children.Add(contentGrid);
+        var caption = CaptionButtons();
+        Grid.SetColumn(caption, 1);
+        root.Children.Add(caption);
         Content = root;
+        // A maximized window hangs a few pixels past the screen edge; pull the content back in.
+        StateChanged += (_, _) => root.Margin = new Thickness(WindowState == WindowState.Maximized ? 7 : 0);
 
         onHistory = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Home) FillHistory(); });
         onPlayer = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Home) FillHistory(); });
@@ -88,6 +106,30 @@ public sealed class MainWindow : Window
 
     // ---------- frame ----------
 
+    private UIElement CaptionButtons()
+    {
+        Border Button(string path, string tip, Brush hover, Brush hoverGlyph, Action onClick)
+        {
+            var glyph = new System.Windows.Shapes.Path
+            {
+                Data = Geometry.Parse(path), Stroke = C.Text, StrokeThickness = 1, Width = 10, Height = 10, SnapsToDevicePixels = true,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            };
+            var b = new Border { Width = 46, Height = CaptionHeight, Background = Brushes.Transparent, Child = glyph, ToolTip = tip };
+            WindowChrome.SetIsHitTestVisibleInChrome(b, true);
+            b.MouseEnter += (_, _) => { b.Background = hover; glyph.Stroke = hoverGlyph; };
+            b.MouseLeave += (_, _) => { b.Background = Brushes.Transparent; glyph.Stroke = C.Text; };
+            b.MouseLeftButtonUp += (_, _) => onClick();
+            return b;
+        }
+        var row = Ui.Row(
+            Button("M0,5.5 H10", "Minimize", C.Hover, C.Text, () => WindowState = WindowState.Minimized),
+            Button("M0,0 L10,10 M10,0 L0,10", "Close", C.Hex("#C42B1C"), Brushes.White, Close));
+        row.HorizontalAlignment = HorizontalAlignment.Right;
+        row.VerticalAlignment = VerticalAlignment.Top;
+        return row;
+    }
+
     private UIElement Sidebar()
     {
         var logo = new Bars { Width = 34, Height = 34, BarBrush = C.Text, AccentBrush = C.Argb(S.Accent) };
@@ -95,13 +137,22 @@ public sealed class MainWindow : Window
         var head = Ui.Row(logo, title);
         head.Margin = new Thickness(22, 26, 0, 4);
 
+        var dismiss = new Border
+        {
+            Width = 22, Height = 22, CornerRadius = new CornerRadius(11), Background = Brushes.Transparent, Cursor = Cursors.Hand,
+            Child = Icons.Get("close", 14, C.Sub), ToolTip = "Hide this tip",
+        };
         var hint = Ui.Card(Ui.Stack(
-            Ui.Text("Hold to talk", 13, C.Sub),
+            Spread(Ui.Text("Hold to talk", 13, C.Sub), dismiss),
             Ui.Row(KeyCap("Ctrl"), new TextBlock { Text = "+", FontSize = 14, Foreground = C.Sub, Margin = new Thickness(7, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center }, KeyCap("Win")),
             Ui.Text("Tap once for hands-free. Esc cancels.", 12.5, C.Sub)), 16);
         ((StackPanel)hint.Child).Children[1].SetValue(MarginProperty, new Thickness(0, 8, 0, 8));
         hint.Margin = new Thickness(14, 0, 14, 18);
         hint.VerticalAlignment = VerticalAlignment.Bottom;
+        if (S.HideShortcutTip) hint.Visibility = Visibility.Collapsed;
+        dismiss.MouseEnter += (_, _) => dismiss.Background = C.Hover;
+        dismiss.MouseLeave += (_, _) => dismiss.Background = Brushes.Transparent;
+        dismiss.MouseLeftButtonUp += (_, _) => { S.HideShortcutTip = true; S.Save(); hint.Visibility = Visibility.Collapsed; };
 
         var g = new Grid();
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -167,7 +218,7 @@ public sealed class MainWindow : Window
     {
         var offset = scroller.VerticalOffset;
         RenderNav();
-        var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 28, 36, 48) };
+        var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 10, 36, 48) };
         switch (CurrentPage)
         {
             case Page.Home: BuildHome(col); break;
@@ -193,7 +244,7 @@ public sealed class MainWindow : Window
     private bool wideLayout;
     /** Screenshot mode renders without a real window, so it sets the width here. */
     internal double? ForcedWidth { get; set; }
-    private double ContentWidth => Math.Max(0, (ForcedWidth ?? ActualWidth) - 232 - 72 - 20);
+    private double ContentWidth => Math.Max(0, (ForcedWidth ?? ActualWidth / UiScale) - 232 - 72 - 20);
     private bool IsWide => ContentWidth >= WideAt;
 
     private static StackPanel StripMarkers(StackPanel col)
@@ -352,7 +403,13 @@ public sealed class MainWindow : Window
         FrameworkElement Stat(string value, string label) => Ui.Stack(Ui.Heading(value, 32), Ui.Text(label, 13, C.Sub));
         var stats = new Grid { Margin = new Thickness(0, 10, 0, 0) };
         for (int i = 0; i < 3; i++) stats.ColumnDefinitions.Add(new ColumnDefinition());
-        var cells = new[] { Stat(Ui.Compact(m.Words), "words"), Stat(m.Dictations.ToString(CultureInfo.InvariantCulture), "dictations"), Stat(Ui.Money(m.Total), "est. cost") };
+        // Speaking pace: words Whisper heard per minute of recording this month. (Cost lives in Settings > Usage.)
+        var now = DateTime.Now;
+        var monthStart = new DateTimeOffset(new DateTime(now.Year, now.Month, 1)).ToUnixTimeMilliseconds();
+        var spoken = History.All().Where(e => e.Time >= monthStart && e.DurationMs > 0 && e.Raw.Length > 0).ToList();
+        var minutes = spoken.Sum(e => e.DurationMs) / 60000.0;
+        var pace = minutes > 0 ? Math.Round(spoken.Sum(e => TextTools.WordCount(e.Raw)) / minutes).ToString(CultureInfo.InvariantCulture) : "\u2013";
+        var cells = new[] { Stat(Ui.Compact(m.Words), "words"), Stat(m.Dictations.ToString(CultureInfo.InvariantCulture), "dictations"), Stat(pace, "words a minute") };
         for (int i = 0; i < 3; i++) { Grid.SetColumn(cells[i], i); stats.Children.Add(cells[i]); }
         var statCard = Ui.Stack(Ui.Text(DateTime.Now.ToString("MMMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant(), 12, C.Sub, bold: true), stats);
         if (m.Fillers + m.Corrections > 0)
@@ -467,8 +524,10 @@ public sealed class MainWindow : Window
         var row = Ui.Row(actions.ToArray());
         foreach (FrameworkElement a in row.Children) a.Margin = new Thickness(0, 0, 8, 0);
 
-        var more = Ui.Button("", () => { }, icon: "more");
         var menu = new ContextMenu();
+        // The button marks its click handled, so the menu has to open from the button's own action.
+        Border more = null!;
+        more = Ui.Button("", () => { menu.PlacementTarget = more; menu.IsOpen = true; }, icon: "more");
         var copyOrig = new MenuItem { Header = "Copy original" };
         copyOrig.Click += (_, _) => { _ = TextInjector.Copy(e.Raw.Length > 0 ? e.Raw : e.Text); Toast("Copied"); };
         var del = new MenuItem { Header = "Delete" };
@@ -481,7 +540,6 @@ public sealed class MainWindow : Window
         menu.Items.Add(copyOrig);
         menu.Items.Add(del);
         more.ContextMenu = menu;
-        more.MouseLeftButtonUp += (_, _) => { menu.PlacementTarget = more; menu.IsOpen = true; };
         box.Children.Add(Spread(row, more));
         return box;
     }
@@ -1053,8 +1111,15 @@ public sealed class MainWindow : Window
     {
         try
         {
+            var hwnd = new WindowInteropHelper(this).Handle;
             int on = C.Dark ? 1 : 0;
-            DwmSetWindowAttribute(new WindowInteropHelper(this).Handle, 20, ref on, sizeof(int));
+            DwmSetWindowAttribute(hwnd, 20, ref on, sizeof(int));
+            // Windows 11: rounded corners, and a window border that matches the app instead of the system accent.
+            int round = 2;
+            DwmSetWindowAttribute(hwnd, 33, ref round, sizeof(int));
+            var c = ((SolidColorBrush)C.Line).Color;
+            int border = c.R | c.G << 8 | c.B << 16;
+            DwmSetWindowAttribute(hwnd, 34, ref border, sizeof(int));
         }
         catch { }
     }

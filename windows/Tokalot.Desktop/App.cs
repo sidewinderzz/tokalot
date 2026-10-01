@@ -18,7 +18,9 @@ namespace Tokalot.Desktop;
  */
 public sealed class App : Application
 {
-    private const string ShowSignal = "Tokalot.Desktop.ShowWindow";
+    // A copy started with its own TOKALOT_DATA folder (for testing) runs beside the installed one.
+    private static readonly string Instance = Environment.GetEnvironmentVariable("TOKALOT_DATA") is { Length: > 0 } ? ".Test" : "";
+    private static readonly string ShowSignal = "Tokalot.Desktop.ShowWindow" + Instance;
 
     [STAThread]
     public static void Main(string[] args)
@@ -34,7 +36,7 @@ public sealed class App : Application
             return;
         }
 
-        using var single = new Mutex(true, "Tokalot.Desktop.SingleInstance", out var first);
+        using var single = new Mutex(true, "Tokalot.Desktop.SingleInstance" + Instance, out var first);
         if (!first)
         {
             // Already running (probably in the tray): ask it to show its window instead.
@@ -319,6 +321,7 @@ public sealed class Controller : IDisposable
     private bool Begin(bool handsFreeMode)
     {
         app = AppDetect.Detect();
+        recorder.CueSamples = Settings.Current.Sounds ? Recorder.SampleRate * 6 / 10 : 0;
         if (!recorder.Start())
         {
             Sounds.Play(Sounds.Kind.Error);
@@ -390,6 +393,7 @@ public sealed class Controller : IDisposable
     {
         if (state != State.Recording) return;
         var lastVoice = recorder.LastVoiceSample;
+        int speech = recorder.SpeechChunks, lateSpeech = recorder.LateSpeechChunks;
         var samples = recorder.Stop();
         hook.Listening = false;
         tick.Stop();
@@ -420,13 +424,24 @@ public sealed class Controller : IDisposable
             return;
         }
 
+        // A quick press with nothing said: only the start tone or room noise got in, and Whisper
+        // would turn that into "Thank you." Six chunks is 300 ms of sound.
+        var heard = lateSpeech >= 2 || speech >= 6;
+        if (!heard && samples.Length < Recorder.SampleRate * 5 / 2)
+        {
+            state = State.Idle;
+            indicator.SetMode(IndicatorView.Mode.Idle);
+            Say("Didn't catch anything", 1800);
+            return;
+        }
+
         state = State.Processing;
         Sounds.Play(Sounds.Kind.Stop);
         indicator.SetMode(IndicatorView.Mode.Working);
         var target = app;
         try
         {
-            var outcome = await Task.Run(() => dictation.Process(samples, target));
+            var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6));
             if (outcome.Text.Length > 0)
             {
                 await TextInjector.Paste(outcome.Text);

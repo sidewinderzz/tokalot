@@ -39,7 +39,8 @@ public sealed class Dictation : IDisposable
         });
     }
 
-    public async Task<Outcome> Process(float[] samples, ActiveApp? app)
+    /** sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence. */
+    public async Task<Outcome> Process(float[] samples, ActiveApp? app, bool sparse = false)
     {
         var s = Settings.Current;
         var warnings = new List<string>();
@@ -82,7 +83,7 @@ public sealed class Dictation : IDisposable
             usedLocal = true;
         }
         var baseText = TextTools.StripNoise(raw);
-        if (baseText.Length == 0) return new Outcome("", warnings.FirstOrDefault(), null);
+        if (baseText.Length == 0 || (sparse && TextTools.IsPhantom(baseText))) return new Outcome("", warnings.FirstOrDefault(), null);
 
         // 2-4. Snippets + cleanup
         var (protectedText, map) = TextTools.Protect(baseText, s.Snippets);
