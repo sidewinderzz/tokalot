@@ -25,7 +25,8 @@ jobs:
 
       - name: Read version
         run: |
-          VERSION=$(grep -oP '<Version>\K[^<]+' Tokalot.Desktop.csproj)
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Tokalot.Desktop.csproj | tr -d '\r')
+          [ -n "$VERSION" ] || { echo "No <Version> in the csproj"; exit 1; }
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Building Tokalot for Windows $VERSION"
 
