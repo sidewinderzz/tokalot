@@ -1,6 +1,10 @@
 #include <jni.h>
+#include <atomic>
 #include <string>
 #include "whisper.h"
+
+// Set from Kotlin when the user cancels; whisper polls it while it decodes.
+static std::atomic<bool> g_abort{false};
 
 extern "C" {
 
@@ -35,6 +39,8 @@ Java_com_tokalot_app_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/, jlo
     wp.no_timestamps = true;
     wp.suppress_blank = true;
     wp.greedy.best_of = 1;  // fastest decode; accuracy is fine for dictation
+    wp.abort_callback = [](void *) { return g_abort.load(); };
+    wp.abort_callback_user_data = nullptr;
 
     // Dictionary words go in as Whisper's "initial prompt", which biases spelling toward them.
     const char *pr = env->GetStringUTFChars(prompt, nullptr);
@@ -58,6 +64,11 @@ JNIEXPORT void JNICALL
 Java_com_tokalot_app_WhisperBridge_free(JNIEnv * /*env*/, jobject /*thiz*/, jlong handle) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx != nullptr) whisper_free(ctx);
+}
+
+JNIEXPORT void JNICALL
+Java_com_tokalot_app_WhisperBridge_setAbort(JNIEnv * /*env*/, jobject /*thiz*/, jboolean on) {
+    g_abort.store(on == JNI_TRUE);
 }
 
 }  // extern "C"

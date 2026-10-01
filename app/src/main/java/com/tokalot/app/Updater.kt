@@ -23,6 +23,8 @@ object Updater {
 
     @Volatile var progress: Int? = null   // download %, null when not downloading
     @Volatile var error: String? = null
+    /** True when the last check() couldn't reach GitHub, so "no update" isn't the same as "up to date". */
+    @Volatile var lastCheckFailed = false
 
     fun currentVersion(ctx: Context): String =
         runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "0"
@@ -45,14 +47,17 @@ object Updater {
         val s = sp(ctx)
         val now = System.currentTimeMillis()
         if (!force && now - s.getLong("checked", 0) < CHECK_EVERY_MS) return false
+        lastCheckFailed = false
         return try {
             val conn = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
             conn.connectTimeout = 5000
             conn.readTimeout = 8000
             conn.setRequestProperty("Accept", "application/vnd.github+json")
-            if (conn.responseCode != 200) {
+            val code = conn.responseCode
+            if (code != 200) {
                 s.edit().putLong("checked", now).apply()
-                return false // 404 = no releases yet, or the repo is private
+                lastCheckFailed = code != 404 // 404 = no releases yet, or the repo is private
+                return false
             }
             val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             val version = o.getString("tag_name").removePrefix("v")
@@ -71,6 +76,7 @@ object Updater {
                 .putLong("size", size).putString("notes", o.optString("body").take(500)).apply()
             changed
         } catch (_: Exception) {
+            lastCheckFailed = true
             false
         }
     }

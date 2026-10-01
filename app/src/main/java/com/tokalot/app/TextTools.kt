@@ -25,6 +25,16 @@ object TextTools {
         .trim()
         .replaceFirstChar { it.uppercaseChar() }
 
+    /**
+     * Adds the spaces a dictated piece needs so it doesn't glue onto what's around the cursor.
+     * [before] / [after] are the characters on either side of the cursor (null at the ends of the field).
+     */
+    fun pad(text: String, before: Char?, after: Char?): String {
+        val spaceBefore = before != null && !before.isWhitespace()
+        val spaceAfter = after != null && after.isLetterOrDigit()
+        return (if (spaceBefore) " " else "") + text + (if (spaceAfter) " " else "")
+    }
+
     fun wordCount(s: String) = s.split(SPACES).count { it.isNotBlank() }
 
     // ---------- snippets ----------

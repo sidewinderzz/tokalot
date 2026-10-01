@@ -7,18 +7,20 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import android.content.res.Configuration
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -30,6 +32,8 @@ import java.util.Locale
 /**
  * The whole app UI: a header, a content area and a bottom tab bar
  * (Home, Dictionary, Style, Snippets). The menu button opens Settings.
+ * Rotation, dark-mode switches and the like are handled in place (see the manifest's
+ * configChanges), so they never reset the screen you're on.
  */
 class MainActivity : Activity() {
 
@@ -53,36 +57,57 @@ class MainActivity : Activity() {
     private var bannerText: TextView? = null
     private var logoBars: BarsView? = null
     private var historyBox: LinearLayout? = null
-    private val searchField by lazy {
-        field("Search your dictations").apply {
-            background = rounded(C.CARD, 16, C.PILL, 1)
-            setPadding(dp(18), dp(14), dp(18), dp(14))
-            addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
-                override fun afterTextChanged(e: android.text.Editable?) {
-                    query = e?.toString()?.trim() ?: ""
-                    fillHistory()
-                }
-            })
-        }
-    }
+    private var searchField: EditText? = null
     private var player: MediaPlayer? = null
     private var playingId: Long? = null
+    private var density = 0f
+    private var fontScale = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         prefs = Prefs(this)
         // Pick light or dark before any views exist (dialogs and switches follow the theme too).
-        val systemDark = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-        val dark = when (prefs.theme) { "dark" -> true; "light" -> false; else -> systemDark }
+        applyColors()
+        super.onCreate(savedInstanceState)
+        savedInstanceState?.let { s ->
+            tab = Tab.values().getOrElse(s.getInt("tab")) { Tab.HOME }
+            inSettings = s.getBoolean("settings")
+            backupAudio = s.getBoolean("backupAudio")
+            backupKeys = s.getBoolean("backupKeys")
+        }
+        buildRoot()
+        // A fresh launch can itself be the installer reporting back (the old task was gone).
+        // Not when reopened from Recents, which replays the old intent.
+        val replayed = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !replayed) handleInstallStatus(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("tab", tab.ordinal)
+        outState.putBoolean("settings", inSettings)
+        outState.putBoolean("backupAudio", backupAudio)
+        outState.putBoolean("backupKeys", backupKeys)
+    }
+
+    private fun wantDark(): Boolean {
+        val systemDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        return when (prefs.theme) { "dark" -> true; "light" -> false; else -> systemDark }
+    }
+
+    private fun applyColors() {
+        val dark = wantDark()
         C.apply(dark)
         setTheme(if (dark) android.R.style.Theme_DeviceDefault_NoActionBar else android.R.style.Theme_DeviceDefault_Light_NoActionBar)
-        super.onCreate(savedInstanceState)
+    }
+
+    /** Builds the frame every screen sits in. Called again when the theme or text size changes. */
+    private fun buildRoot() {
+        density = resources.displayMetrics.density
+        fontScale = resources.configuration.fontScale
         window.statusBarColor = C.BG
         window.navigationBarColor = C.BG
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = if (dark) 0 else
+        window.decorView.systemUiVisibility = if (C.dark) 0 else
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
 
         val root = LinearLayout(this).apply {
@@ -97,8 +122,9 @@ class MainActivity : Activity() {
         val logo = row(
             BarsView(this).apply {
                 barColor = C.TEXT
-                accentColor = prefs.accent
+                accentColor = C.visible(prefs.accent)
                 layoutParams = LinearLayout.LayoutParams(dp(34), dp(34))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 logoBars = this
             },
             text("Tokalot", 26f, bold = true).apply { setPadding(dp(8), 0, 0, 0) }
@@ -116,6 +142,28 @@ class MainActivity : Activity() {
         }
         root.addView(nav, lp())
         setContentView(root)
+    }
+
+    /**
+     * Re-reads the theme and redraws everything in place: same tab, same scroll position.
+     * Used when the theme setting or the phone's dark mode changes, and after a restore.
+     */
+    fun applyTheme() {
+        val scroll = (content.getChildAt(0) as? ScrollView)?.scrollY ?: 0
+        prefs = Prefs(this)
+        applyColors()
+        searchField = null // holds the old colors
+        buildRoot()
+        render()
+        if (scroll > 0) (content.getChildAt(0) as? ScrollView)?.let { it.post { it.scrollTo(0, scroll) } }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Rotation and keyboard changes need nothing: the views just lay out again.
+        // Colors and sizes are baked into the views, so those changes need a rebuild.
+        val changed = wantDark() != C.dark || resources.displayMetrics.density != density || newConfig.fontScale != fontScale
+        if (changed) applyTheme()
     }
 
     override fun onResume() {
@@ -165,31 +213,36 @@ class MainActivity : Activity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        if (intent.action == ACTION_INSTALL_STATUS) {
-            when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -999)) {
-                PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                    @Suppress("DEPRECATION")
-                    val next = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-                    if (next != null && next.action in INSTALL_CONFIRM_ACTIONS) {
-                        next.flags = next.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
-                            Intent.FLAG_GRANT_PREFIX_URI_PERMISSION).inv()
-                        startActivity(next)
-                    }
+        handleInstallStatus(intent)
+    }
+
+    /** The installer's answer to Updater.install(): usually "ask the user", which means launching its prompt. */
+    private fun handleInstallStatus(intent: Intent?) {
+        if (intent?.action != ACTION_INSTALL_STATUS) return
+        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -999)) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                @Suppress("DEPRECATION")
+                val next = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                if (next != null && next.action in INSTALL_CONFIRM_ACTIONS) {
+                    next.flags = next.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PREFIX_URI_PERMISSION).inv()
+                    startActivity(next)
                 }
-                PackageInstaller.STATUS_SUCCESS -> {}
-                else -> toast("Update not installed: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "cancelled"}")
             }
+            PackageInstaller.STATUS_SUCCESS -> {}
+            else -> toast("Update not installed: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "cancelled"}")
         }
     }
 
     // ---------- backup (Android's "Save to…" / "Open" pickers) ----------
 
-    private var backupAudio = false
-    private var backupKeys = false
+    /** The two backup switches. Kept here (and across restarts) so a redraw can't silently flip them off. */
+    var backupAudio = false
+    var backupKeys = false
 
-    fun startBackup(includeAudio: Boolean, includeKeys: Boolean) {
-        backupAudio = includeAudio; backupKeys = includeKeys
+    fun startBackup() {
+        if (backupBusy != null) return
         val name = "tokalot-backup-" + SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()) + ".zip"
         @Suppress("DEPRECATION")
         startActivityForResult(
@@ -199,6 +252,7 @@ class MainActivity : Activity() {
     }
 
     fun startRestore() {
+        if (backupBusy != null) return
         @Suppress("DEPRECATION")
         startActivityForResult(
             Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_RESTORE
@@ -210,27 +264,33 @@ class MainActivity : Activity() {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data ?: return
-        if (resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK || (requestCode != REQ_BACKUP && requestCode != REQ_RESTORE)) return
+        if (backupBusy != null) return
         val app = applicationContext
+        val withAudio = backupAudio
+        val withKeys = backupKeys
+        // Zipping or unzipping recordings can take a while; Settings shows this instead of the buttons.
+        backupBusy = if (requestCode == REQ_BACKUP) "Backing up…" else "Restoring…"
+        render()
         Thread {
             val msg = try {
-                when (requestCode) {
-                    REQ_BACKUP -> {
-                        val s = contentResolver.openOutputStream(uri)!!.use { Backup.write(app, it, backupAudio, backupKeys) }
-                        "Backed up ${s.entries} dictations" + (if (s.recordings > 0) " and ${s.recordings} recordings" else "") +
-                            (if (s.keys) " (with API keys)" else "")
-                    }
-                    REQ_RESTORE -> {
-                        val s = contentResolver.openInputStream(uri)!!.use { Backup.restore(app, it) }
-                        "Restored ${s.entries} dictations" + (if (s.recordings > 0) " and ${s.recordings} recordings" else "") +
-                            (if (!s.keys) ". Your existing API keys were kept." else "")
-                    }
-                    else -> return@Thread
+                if (requestCode == REQ_BACKUP) {
+                    val s = contentResolver.openOutputStream(uri)!!.use { Backup.write(app, it, withAudio, withKeys) }
+                    "Backed up ${s.entries} dictations" + (if (s.recordings > 0) " and ${s.recordings} recordings" else "") +
+                        (if (s.keys) " (with API keys)" else "")
+                } else {
+                    val s = contentResolver.openInputStream(uri)!!.use { Backup.restore(app, it) }
+                    "Restored ${s.entries} dictations" + (if (s.recordings > 0) " and ${s.recordings} recordings" else "") +
+                        (if (!s.keys) ". Your existing API keys were kept." else "")
                 }
             } catch (e: Exception) {
                 "Failed: ${e.message}"
             }
-            runOnUiThread { prefs = Prefs(this); render(); toast(msg) }
+            runOnUiThread {
+                backupBusy = null
+                if (!isDestroyed) applyTheme() // a restore can change the theme along with everything else
+                Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
+            }
         }.start()
     }
 
@@ -238,11 +298,7 @@ class MainActivity : Activity() {
 
     /** Plain-language explanation shown before sending the user to Android's accessibility settings. */
     fun openAccessibilitySetup() {
-        val pad = dp(22)
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(pad, dp(8), pad, 0)
-        }
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         fun point(title: String, detail: String) {
             body.addView(text(title, 16f, bold = true), lp().margins(this, t = 12))
             body.addView(text(detail, 15f, C.SUB))
@@ -256,16 +312,36 @@ class MainActivity : Activity() {
             "Everything stays on this phone. The only thing that leaves is your dictation, sent directly to the speech and cleanup services you picked, using your own API keys. No Tokalot server, account or tracking.")
         point("Check it yourself",
             "Tokalot's code is open for anyone to read or have scanned.")
-        body.addView(text("github.com/${Updater.REPO}", 15f, C.LINK).apply {
-            setOnClickListener { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/${Updater.REPO}"))) }
+        body.addView(link("github.com/${Updater.REPO}", 15f) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/${Updater.REPO}")))
         })
-        body.addView(text("On the next screen: tap Tokalot › turn it on › Allow. If it's greyed out, open this phone's Settings › Apps › Tokalot › ⋮ › Allow restricted settings first.", 14f, C.SUB), lp().margins(this, t = 16, b = 8))
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Before you turn this on")
-            .setView(ScrollView(this).apply { addView(body) })
-            .setPositiveButton("Continue") { _, _ -> startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-            .setNegativeButton("Not now", null)
-            .show()
+        body.addView(text("On the next screen: tap Tokalot › turn it on › Allow. If it's greyed out, open this phone's Settings › Apps › Tokalot › ⋮ › Allow restricted settings first.", 14f, C.SUB), lp().margins(this, t = 4, b = 8))
+        sheet("Before you turn this on", body, positive = "Continue", negative = "Not now") {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+    }
+
+    // ---------- permissions ----------
+
+    private var permissionAskedAt = 0L
+
+    /** Asks for a runtime permission; if Android no longer shows its dialog, opens the app's settings page instead. */
+    fun askPermission(permission: String, code: Int) {
+        permissionAskedAt = SystemClock.elapsedRealtime()
+        requestPermissions(arrayOf(permission), code)
+    }
+
+    override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
+        val permission = perms.firstOrNull()
+        val denied = results.firstOrNull() == PackageManager.PERMISSION_DENIED
+        // After "Don't allow" twice, Android answers "denied" instantly without showing anything,
+        // which made the Allow button look dead. An answer this fast can't have come from a person.
+        val instant = SystemClock.elapsedRealtime() - permissionAskedAt < 600
+        if (permission != null && denied && instant && !shouldShowRequestPermissionRationale(permission)) {
+            toast("Allow it under Permissions on the next screen")
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
+        render()
     }
 
     override fun onPause() {
@@ -299,6 +375,55 @@ class MainActivity : Activity() {
         if (redraw && was != null) render()
     }
 
+    // ---------- transcribing a saved recording again ----------
+
+    /**
+     * Runs a failed or cancelled recording through the pipeline again. There's no text field
+     * to type into here, so the result replaces the history entry and goes to the clipboard.
+     */
+    private fun retry(e: Entry) {
+        if (retryingId != null) return
+        retryingId = e.id
+        if (playingId == e.id) stopPlayback(redraw = false)
+        render()
+        val app = applicationContext
+        Thread {
+            val samples = runCatching { AudioStore.decode(AudioStore.file(app, e.id)) }.getOrNull()
+            runOnUiThread {
+                if (retryingId != e.id) return@runOnUiThread // cancelled while the file was being read
+                if (samples == null || samples.isEmpty()) {
+                    retryingId = null
+                    toast("Couldn't read that recording")
+                    if (!isDestroyed) render()
+                    return@runOnUiThread
+                }
+                val d = retryDictation ?: Dictation(app).also { retryDictation = it }
+                d.process(samples, e.app.ifEmpty { null }, retry = e) { outcome, err ->
+                    retryingId = null
+                    val msg = when {
+                        err == Dictation.CANCELLED -> "Cancelled"
+                        err != null -> err
+                        outcome == null || outcome.text.isEmpty() -> "Didn't catch anything"
+                        else -> {
+                            (app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                                .setPrimaryClip(ClipData.newPlainText("Tokalot", outcome.text))
+                            outcome.warning ?: "Transcribed and copied"
+                        }
+                    }
+                    Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
+                    if (!isDestroyed && !inSettings && tab == Tab.HOME) render()
+                }
+            }
+        }.start()
+    }
+
+    private fun cancelRetry() {
+        val d = retryDictation
+        retryingId = null // covers the moment before the pipeline has started
+        d?.cancel()
+        render()
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
@@ -308,20 +433,17 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onRequestPermissionsResult(code: Int, perms: Array<out String>, results: IntArray) {
-        render()
-    }
-
     fun openSettings() { inSettings = true; render() }
 
     /** Rebuilds the visible screen. Screens are cheap to build, so we just redraw. */
     fun render() {
-        logoBars?.accentColor = prefs.accent // follows the button color picked in Settings
+        logoBars?.accentColor = C.visible(prefs.accent) // follows the button color picked in Settings
         headerLeft.removeAllViews()
         val leftIcon = if (inSettings) R.drawable.ic_back else R.drawable.ic_menu
         headerLeft.addView(icon(leftIcon, 28).apply {
             setPadding(dp(10), dp(10), dp(10), dp(10))
             layoutParams = FrameLayout.LayoutParams(dp(48), dp(48))
+            contentDescription = if (inSettings) "Back" else "Settings"
             setOnClickListener { if (inSettings) { inSettings = false; render() } else openSettings() }
         })
         renderNav()
@@ -359,6 +481,7 @@ class MainActivity : Activity() {
                     gravity = Gravity.CENTER
                     setPadding(0, dp(4), 0, 0)
                 })
+                contentDescription = if (active) "${t.label}, selected" else t.label
                 setOnClickListener { tab = t; render() }
             }
             nav.addView(item, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -398,6 +521,21 @@ class MainActivity : Activity() {
 
     // ---------- Home ----------
 
+    /** The search box stays the same view across redraws so typing isn't interrupted. */
+    private fun searchBox(): EditText = searchField ?: field("Search your dictations", query).apply {
+        background = rounded(C.CARD, 16, C.PILL, 1)
+        setPadding(dp(18), dp(14), dp(18), dp(14))
+        addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(e: android.text.Editable?) {
+                query = e?.toString()?.trim() ?: ""
+                fillHistory()
+            }
+        })
+        searchField = this
+    }
+
     private fun buildHome(): View {
         val col = column()
 
@@ -410,14 +548,12 @@ class MainActivity : Activity() {
             val banner = row(
                 label,
                 if (pct == null) pill("Update", filled = true) { startUpdate(r) } else spacer(),
-                if (pct == null) icon(R.drawable.ic_close, 20, C.SUB).apply {
-                    setPadding(dp(4), dp(4), dp(4), dp(4))
-                    layoutParams = LinearLayout.LayoutParams(dp(32), dp(32)).margins(this@MainActivity, l = 8)
-                    setOnClickListener { Updater.dismiss(this@MainActivity, r.version); render() }
+                if (pct == null) iconButton(R.drawable.ic_close, "Dismiss", 20, C.SUB) {
+                    Updater.dismiss(this@MainActivity, r.version); render()
                 } else spacer()
             ).apply {
                 background = rounded(C.CARD, 18)
-                setPadding(dp(18), dp(10), dp(12), dp(10))
+                setPadding(dp(18), dp(6), dp(4), dp(6))
             }
             col.addView(banner, lp().margins(this, b = 12))
         }
@@ -454,9 +590,9 @@ class MainActivity : Activity() {
         stats.setOnClickListener { openSettings() }
         col.addView(stats, lp().margins(this, b = 16))
 
-        // Search stays the same view across redraws so typing isn't interrupted.
-        (searchField.parent as? ViewGroup)?.removeView(searchField)
-        col.addView(searchField, lp())
+        val search = searchBox()
+        (search.parent as? ViewGroup)?.removeView(search)
+        col.addView(search, lp())
 
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         historyBox = box
@@ -479,7 +615,7 @@ class MainActivity : Activity() {
             box.addView(heading(if (q.isEmpty()) "Today" else "No matches"), lp().margins(this, t = 24, b = 12))
             val c = card(24)
             c.addView(text(
-                if (q.isEmpty()) "Nothing yet. Tap any text field in any app and hit the button." else "Nothing matches \u201C$query\u201D.",
+                if (q.isEmpty()) "Nothing yet. Tap any text field in any app and hit the button." else "Nothing matches “$query”.",
                 17f, C.SUB
             ))
             box.addView(c)
@@ -510,10 +646,11 @@ class MainActivity : Activity() {
     private fun entryView(e: Entry): View {
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(18))
+            setPadding(dp(20), dp(20), dp(20), dp(14))
         }
         val isOpen = e.id in expanded
-        val body = text(e.text, 18f).apply {
+        // An entry without a transcript (failed or cancelled) shows its status in the quieter color.
+        val body = text(e.text, 18f, if (e.pending) C.SUB else C.TEXT).apply {
             if (!isOpen) {
                 maxLines = 6
                 ellipsize = TextUtils.TruncateAt.END
@@ -541,14 +678,26 @@ class MainActivity : Activity() {
             if (secs > 0) append(" · ${secs}s")
             if (e.cleaned) append(" · AI")
         }
-        box.addView(text(meta, 14f, C.SUB), lp().margins(this, t = 10, b = 12))
+        box.addView(text(meta, 14f, C.SUB), lp().margins(this, t = 10, b = 8))
 
+        val hasAudio = AudioStore.exists(this, e.id)
         val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        actions.addView(pill("Copy", R.drawable.ic_copy) { copy(e.text) })
-        if (AudioStore.exists(this, e.id)) {
+        if (e.pending) {
+            // The recording was kept: run it through speech-to-text again.
+            when {
+                retryingId == e.id -> actions.addView(pill("Transcribing… Cancel", filled = true) { cancelRetry() })
+                hasAudio -> actions.addView(pill("Transcribe", filled = true) { retry(e) })
+            }
+        } else {
+            actions.addView(pill("Copy", R.drawable.ic_copy) { copy(e.text) })
+        }
+        if (hasAudio) {
             val playing = playingId == e.id
-            actions.addView(spacer(wDp = 8))
-            actions.addView(pill(null, if (playing) R.drawable.ic_stop else R.drawable.ic_play, filled = playing) {
+            if (actions.childCount > 0) actions.addView(spacer(wDp = 8))
+            actions.addView(pill(
+                null, if (playing) R.drawable.ic_stop else R.drawable.ic_play, filled = playing,
+                desc = if (playing) "Stop playback" else "Play recording"
+            ) {
                 if (playing) stopPlayback() else play(e.id)
             })
         }
@@ -558,23 +707,17 @@ class MainActivity : Activity() {
         }
         actions.addView(weightSpacer())
         lateinit var more: View
-        more = pill(null, R.drawable.ic_more) {
-            PopupMenu(this, more).apply {
-                menu.add(0, 1, 0, "Copy original")
-                menu.add(0, 2, 1, "Delete")
-                setOnMenuItemClickListener {
-                    when (it.itemId) {
-                        1 -> copy(e.raw.ifBlank { e.text })
-                        2 -> {
-                            if (playingId == e.id) stopPlayback(redraw = false)
-                            History.delete(this@MainActivity, e.id)
-                            AudioStore.delete(this@MainActivity, e.id)
-                            render()
-                        }
-                    }
-                    true
-                }
-            }.show()
+        more = pill(null, R.drawable.ic_more, desc = "More") {
+            val items = ArrayList<Pair<String, () -> Unit>>()
+            if (!e.pending) items.add("Copy original" to { copy(e.raw.ifBlank { e.text }) })
+            items.add("Delete" to {
+                if (playingId == e.id) stopPlayback(redraw = false)
+                if (retryingId == e.id) cancelRetry()
+                History.delete(this@MainActivity, e.id)
+                AudioStore.delete(this@MainActivity, e.id)
+                render()
+            })
+            popupMenu(more, items)
         }
         actions.addView(more)
         box.addView(actions)
@@ -604,6 +747,13 @@ class MainActivity : Activity() {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
         private const val REQ_BACKUP = 41
         private const val REQ_RESTORE = 42
+
+        /** "Backing up…" / "Restoring…" while one runs in the background, else null. Outlives a redraw of the screen. */
+        @Volatile var backupBusy: String? = null
+
+        // A retry keeps running if the screen is rebuilt, so its state lives here (main thread only).
+        private var retryDictation: Dictation? = null
+        private var retryingId: Long? = null
 
         fun compact(n: Int): String = when {
             n >= 1_000_000 -> String.format(Locale.US, "%.1fM", n / 1e6)

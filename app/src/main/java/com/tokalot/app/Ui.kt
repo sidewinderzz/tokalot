@@ -1,8 +1,11 @@
 package com.tokalot.app
 
+import android.app.Dialog
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.RippleDrawable
@@ -11,10 +14,15 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
+import android.view.WindowManager
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.PopupWindow
+import android.widget.ScrollView
 import android.widget.TextView
+import kotlin.math.pow
 
 /** Colors and small view builders shared by every screen. Plain Android views, no libraries. */
 object C {
@@ -33,11 +41,34 @@ object C {
             LINE = 0xFF2C2C2E.toInt(); PILL = 0xFF3A3A3C.toInt(); NAV_ACTIVE = 0xFF2C2C2E.toInt(); FIELD = 0xFF2C2C2E.toInt()
             GOOD = 0xFF66BB6A.toInt(); WARN = 0xFFFFB74D.toInt(); LINK = 0xFF6EA8FE.toInt(); RIPPLE = 0x33FFFFFF
         } else {
-            BG = 0xFFEFEFF1.toInt(); CARD = 0xFFFFFFFF.toInt(); TEXT = 0xFF1C1C1E.toInt(); SUB = 0xFF8E8E93.toInt()
+            // SUB is dark enough for 4.5:1 on a white card (WCAG AA for small text).
+            BG = 0xFFEFEFF1.toInt(); CARD = 0xFFFFFFFF.toInt(); TEXT = 0xFF1C1C1E.toInt(); SUB = 0xFF6B6B70.toInt()
             LINE = 0xFFE4E4E7.toInt(); PILL = 0xFFCDCDD2.toInt(); NAV_ACTIVE = 0xFFDEDEE2.toInt(); FIELD = 0xFFF4F4F6.toInt()
             GOOD = 0xFF2E7D32.toInt(); WARN = 0xFFB26A00.toInt(); LINK = 0xFF2F6FDB.toInt(); RIPPLE = 0x22000000
         }
     }
+
+    /** WCAG relative luminance of an RGB color, 0 (black) to 1 (white). */
+    fun luminance(color: Int): Double {
+        fun channel(shift: Int): Double {
+            val c = ((color shr shift) and 0xFF) / 255.0
+            return if (c <= 0.03928) c / 12.92 else ((c + 0.055) / 1.055).pow(2.4)
+        }
+        return 0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+    }
+
+    /** WCAG contrast ratio between two colors, 1 to 21. */
+    fun contrast(a: Int, b: Int): Double {
+        val hi = maxOf(luminance(a), luminance(b))
+        val lo = minOf(luminance(a), luminance(b))
+        return (hi + 0.05) / (lo + 0.05)
+    }
+
+    /**
+     * The accent as it should be drawn on the app's own surfaces: a near-white accent would
+     * vanish on the light theme's white cards, so there it becomes the text color instead.
+     */
+    fun visible(accent: Int): Int = if (!dark && luminance(accent) > 0.85) TEXT else accent
 }
 
 object Fonts {
@@ -46,6 +77,9 @@ object Fonts {
         Typeface.createFromAsset(ctx.assets, "fonts/serif.ttf")
     }.getOrDefault(Typeface.SERIF).also { serif = it }
 }
+
+/** Android's minimum comfortable touch target, in dp. */
+const val TOUCH_DP = 48
 
 fun Context.dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 fun Context.dpf(v: Int) = v * resources.displayMetrics.density
@@ -68,6 +102,13 @@ fun Context.text(s: CharSequence, sizeSp: Float = 16f, color: Int = C.TEXT, bold
     setLineSpacing(0f, 1.15f)
 }
 
+/** Tappable link-colored text, padded out to a full-size touch target. */
+fun Context.link(s: CharSequence, sizeSp: Float = 14f, onClick: () -> Unit) = text(s, sizeSp, C.LINK).apply {
+    minHeight = dp(TOUCH_DP)
+    gravity = Gravity.CENTER_VERTICAL
+    setOnClickListener { onClick() }
+}
+
 fun Context.heading(s: String, sizeSp: Float = 40f) = TextView(this).apply {
     text = s
     textSize = sizeSp
@@ -80,6 +121,21 @@ fun Context.icon(res: Int, sizeDp: Int = 22, tint: Int = C.TEXT) = ImageView(thi
     setImageResource(res)
     setColorFilter(tint)
     layoutParams = LinearLayout.LayoutParams(dp(sizeDp), dp(sizeDp))
+}
+
+/**
+ * An icon that is a button on its own: the glyph stays [sizeDp] but the tappable area is a
+ * full 48dp square, and [desc] is what a screen reader says for it.
+ */
+fun Context.iconButton(res: Int, desc: String, sizeDp: Int = 20, tint: Int = C.TEXT, onClick: () -> Unit) = ImageView(this).apply {
+    setImageResource(res)
+    setColorFilter(tint)
+    val pad = dp((TOUCH_DP - sizeDp) / 2)
+    setPadding(pad, pad, pad, pad)
+    layoutParams = LinearLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP))
+    background = RippleDrawable(ColorStateList.valueOf(C.RIPPLE), null, null)
+    contentDescription = desc
+    setOnClickListener { onClick() }
 }
 
 /**
@@ -97,15 +153,16 @@ fun Context.themedSwitch(on: Boolean, accent: Int): android.widget.Switch {
         GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color); setSize(trackH - inset * 2, trackH - inset * 2) },
         inset
     )
-    val lightAccent = (0.299 * android.graphics.Color.red(accent) + 0.587 * android.graphics.Color.green(accent) +
-        0.114 * android.graphics.Color.blue(accent)) / 255.0 > 0.6
-    val thumbOn = if (lightAccent) 0xFF1C1C1E.toInt() else 0xFFFFFFFF.toInt()
+    // A white accent on the light theme would be a white track on a white card.
+    val trackOn = C.visible(accent)
+    val lightTrack = (0.299 * Color.red(trackOn) + 0.587 * Color.green(trackOn) + 0.114 * Color.blue(trackOn)) / 255.0 > 0.6
+    val thumbOn = if (lightTrack) 0xFF1C1C1E.toInt() else 0xFFFFFFFF.toInt()
     val thumbOff = if (C.dark) 0xFFB5B5BA.toInt() else 0xFFFFFFFF.toInt()
     val trackOff = if (C.dark) 0xFF48484A.toInt() else 0xFFC7C7CC.toInt()
 
     return android.widget.Switch(this).apply {
         trackDrawable = StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_checked), track(accent))
+            addState(intArrayOf(android.R.attr.state_checked), track(trackOn))
             addState(intArrayOf(), track(trackOff))
         }
         thumbDrawable = StateListDrawable().apply {
@@ -117,16 +174,26 @@ fun Context.themedSwitch(on: Boolean, accent: Int): android.widget.Switch {
     }
 }
 
-/** Outlined pill button, used for Copy / Play / Original and similar actions. */
-fun Context.pill(label: String?, iconRes: Int? = null, filled: Boolean = false, onClick: () -> Unit): LinearLayout =
+/**
+ * Outlined pill button, used for Copy / Play / Original and similar actions.
+ * The pill is drawn 4dp short of the view at top and bottom, so it looks the same size as
+ * before while the tappable area is a full 48dp. Icon-only pills need [desc] for screen readers.
+ */
+fun Context.pill(
+    label: String?, iconRes: Int? = null, filled: Boolean = false, desc: String? = null, onClick: () -> Unit,
+): LinearLayout =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER
-        val hp = if (label == null) dp(12) else dp(16)
-        setPadding(hp, dp(10), hp, dp(10))
-        background = pressable(
-            if (filled) rounded(C.TEXT, 100) else rounded(C.CARD, 100, C.PILL, 1)
+        val gap = dp(4)
+        background = InsetDrawable(
+            pressable(if (filled) rounded(C.TEXT, 100) else rounded(C.CARD, 100, C.PILL, 1)),
+            0, gap, 0, gap
         )
+        val hp = if (label == null) dp(14) else dp(16)
+        setPadding(hp, dp(10) + gap, hp, dp(10) + gap)
+        minimumHeight = dp(TOUCH_DP)
+        minimumWidth = dp(TOUCH_DP)
         val fg = if (filled) C.CARD else C.TEXT
         if (iconRes != null) addView(icon(iconRes, 20, fg))
         if (label != null) {
@@ -134,7 +201,9 @@ fun Context.pill(label: String?, iconRes: Int? = null, filled: Boolean = false, 
                 if (iconRes != null) setPadding(dp(8), 0, 0, 0)
             })
         }
+        if (desc != null) contentDescription = desc
         isClickable = true
+        isFocusable = true
         setOnClickListener { onClick() }
     }
 
@@ -186,4 +255,110 @@ fun lp(w: Int = ViewGroup.LayoutParams.MATCH_PARENT, h: Int = ViewGroup.LayoutPa
 
 fun LinearLayout.LayoutParams.margins(ctx: Context, l: Int = 0, t: Int = 0, r: Int = 0, b: Int = 0) = apply {
     setMargins(ctx.dp(l), ctx.dp(t), ctx.dp(r), ctx.dp(b))
+}
+
+// ---------- dialogs and menus, drawn as the app's own cards so they follow light/dark ----------
+
+/**
+ * The one dialog everything else is built on: an optional serif title, a scrolling body and
+ * up to three pill buttons. Any button closes it. Needs an Activity context.
+ */
+fun Context.sheet(
+    title: String?, body: View?,
+    positive: String? = null, negative: String? = "Cancel", neutral: String? = null,
+    onNeutral: () -> Unit = {}, onYes: () -> Unit = {},
+): Dialog {
+    val d = Dialog(this)
+    d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+    val box = card().apply {
+        background = rounded(C.CARD, 28, C.LINE, 1) // the hairline keeps it apart from a dark screen behind
+        setPadding(dp(22), dp(22), dp(22), dp(12))
+    }
+    if (title != null) box.addView(heading(title, 26f), lp().margins(this, b = 10))
+    if (body != null) {
+        // Weighted so a long body scrolls instead of pushing the buttons off screen.
+        box.addView(
+            ScrollView(this).apply { addView(body) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        )
+    }
+    val buttons = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.END or Gravity.CENTER_VERTICAL
+    }
+    if (neutral != null) {
+        buttons.addView(pill(neutral) { d.dismiss(); onNeutral() })
+        buttons.addView(weightSpacer())
+    }
+    if (negative != null) buttons.addView(pill(negative) { d.dismiss() })
+    if (positive != null) {
+        if (negative != null) buttons.addView(spacer(wDp = 8))
+        buttons.addView(pill(positive, filled = true) { d.dismiss(); onYes() })
+    }
+    box.addView(buttons, lp().margins(this, t = 12))
+    d.setContentView(box)
+    d.window?.apply {
+        setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        setLayout(minOf(resources.displayMetrics.widthPixels - dp(40), dp(460)), ViewGroup.LayoutParams.WRAP_CONTENT)
+        @Suppress("DEPRECATION") // still what keeps the buttons above the keyboard for the snippet form
+        setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+    }
+    d.show()
+    return d
+}
+
+/** "Are you sure?" with Cancel and one action. */
+fun Context.confirm(message: String, positiveLabel: String, title: String? = null, onYes: () -> Unit): Dialog =
+    sheet(title, text(message, 16f), positive = positiveLabel, onYes = onYes)
+
+/** Read-only text with a single button to close it. */
+fun Context.info(title: String, message: CharSequence, button: String = "OK"): Dialog =
+    sheet(title, text(message, 14f, C.SUB), positive = button, negative = null)
+
+/** Pick one from a short list; the current one has a filled dot. Picking closes the dialog. */
+fun Context.choose(title: String, items: List<String>, selected: Int, onPick: (Int) -> Unit): Dialog {
+    val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val d = sheet(title, list)
+    items.forEachIndexed { i, label ->
+        val dot = View(this).apply {
+            background = if (i == selected) rounded(C.TEXT, 100) else rounded(C.CARD, 100, C.PILL, 2)
+        }
+        list.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(TOUCH_DP + 4)
+            background = RippleDrawable(ColorStateList.valueOf(C.RIPPLE), null, ColorDrawable(Color.WHITE))
+            addView(dot, LinearLayout.LayoutParams(dp(20), dp(20)))
+            addView(
+                text(label, 17f, bold = i == selected),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).margins(this@choose, l = 14)
+            )
+            setOnClickListener { d.dismiss(); onPick(i) }
+        })
+    }
+    return d
+}
+
+/** A small menu that drops down from [anchor] (the "..." button). Tapping outside closes it. */
+fun Context.popupMenu(anchor: View, items: List<Pair<String, () -> Unit>>) {
+    val box = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(C.CARD, 18, C.PILL, 1)
+        clipToOutline = true
+        setPadding(0, dp(6), 0, dp(6))
+    }
+    val pop = PopupWindow(box, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, true)
+    items.forEach { (label, action) ->
+        box.addView(text(label, 16f).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            minHeight = dp(TOUCH_DP)
+            minWidth = dp(168)
+            setPadding(dp(20), 0, dp(24), 0)
+            background = RippleDrawable(ColorStateList.valueOf(C.RIPPLE), null, ColorDrawable(Color.WHITE))
+            setOnClickListener { pop.dismiss(); action() }
+        }, lp())
+    }
+    pop.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT)) // also what makes outside taps dismiss it
+    pop.isOutsideTouchable = true
+    pop.showAsDropDown(anchor, 0, 0, Gravity.END)
 }

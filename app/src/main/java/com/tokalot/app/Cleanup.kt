@@ -55,7 +55,7 @@ object Cleanup {
     /** Blocking network call. Throws on any failure so the caller can fall back. */
     fun run(
         prefs: Prefs, choice: CleanupChoice, text: String, hasSnippets: Boolean,
-        category: AppCategory = AppCategory.OTHER, appLabel: String? = null,
+        category: AppCategory = AppCategory.OTHER, appLabel: String? = null, call: Call? = null,
     ): Result {
         val key = prefs.key(choice.service)
         val model = prefs.cleanupModel(choice)
@@ -74,7 +74,7 @@ object Cleanup {
             val res = Net.postJson(
                 "${choice.baseUrl}/messages",
                 mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01"),
-                body
+                body, call = call
             )
             res.optJSONObject("usage")?.let {
                 inTok = it.optLong("input_tokens"); outTok = it.optLong("output_tokens")
@@ -100,7 +100,7 @@ object Cleanup {
             val res = Net.postJson(
                 "${choice.baseUrl}/chat/completions",
                 mapOf("Authorization" to "Bearer $key"),
-                body
+                body, call = call
             )
             res.optJSONObject("usage")?.let {
                 inTok = it.optLong("prompt_tokens"); outTok = it.optLong("completion_tokens")

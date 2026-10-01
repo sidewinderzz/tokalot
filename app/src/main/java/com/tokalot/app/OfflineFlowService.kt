@@ -12,13 +12,16 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.TextUtils
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -33,6 +36,7 @@ import kotlin.math.abs
 /**
  * Floats a small waveform button above the keyboard whenever the keyboard is open on an
  * editable (non-password) field in any app. Tap to start/stop, long-press to cancel,
+ * tap again while it's transcribing to cancel that too (the recording stays in history),
  * drag to move (the spot is remembered). Drag it into the red zone at the top of the screen
  * to dismiss it; it comes back the next time an input field is focused or the keyboard
  * reopens. If the field or keyboard closes while you talk,
@@ -49,6 +53,8 @@ class OfflineFlowService : AccessibilityService() {
         private const val IDLE_ALPHA = 0.75f
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
+        private const val CANCEL_GUARD_MS = 600L
+        private const val AROUND = 64 // characters read either side of the cursor before typing
         /** Placeholders apps show in empty boxes, for apps that don't flag them as hints. */
         private val COMMON_PLACEHOLDERS = setOf(
             "message", "type a message", "text message", "write a message", "send a message",
@@ -65,6 +71,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private var button: FrameLayout? = null
     private var bars: BarsView? = null
+    private var cancelIcon: ImageView? = null
     private var buttonBg: GradientDrawable? = null
     private var params: WindowManager.LayoutParams? = null
     private var attached = false
@@ -79,6 +86,7 @@ class OfflineFlowService : AccessibilityService() {
     private var pendingStop = false       // released (hold mode) before the mic finished starting
     private var pendingCancel = false
     private var autoStopped = false
+    private var workingSince = 0L         // when transcribing began, to ignore a double-tap on "stop"
 
     private val silenceCheck = object : Runnable {
         override fun run() {
@@ -144,15 +152,34 @@ class OfflineFlowService : AccessibilityService() {
             shape = GradientDrawable.OVAL
             setColor(COLOR_IDLE)
         }
-        val b = BarsView(this).apply { level = { recorder.level } }
+        val b = BarsView(this).apply {
+            level = { recorder.level }
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO // the frame speaks for it
+        }
+        // Shown over the dimmed bars while transcribing, when a tap cancels.
+        val x = ImageView(this).apply {
+            setImageDrawable(this@OfflineFlowService.getDrawable(R.drawable.ic_close)?.mutate()?.apply { setTint(Color.WHITE) })
+            visibility = View.GONE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
         val frame = FrameLayout(this).apply {
             background = bg
             alpha = IDLE_ALPHA
             addView(b, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
+            addView(x, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+            // For screen readers: one labelled, clickable button. Their "activate" arrives as a
+            // click rather than a touch, so it is routed to the same tap action (start / stop /
+            // cancel, whatever the hold-to-talk setting, since a screen reader can't hold).
+            isClickable = true
+            isFocusable = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            contentDescription = describe(State.IDLE)
+            setOnClickListener { onTap() }
         }
         frame.setOnTouchListener(DragTouch())
         button = frame
         bars = b
+        cancelIcon = x
         buttonBg = bg
         params = overlayParams(sizePx, sizePx)
         buildDropZone()
@@ -176,6 +203,7 @@ class OfflineFlowService : AccessibilityService() {
                 intArrayOf(Color.parseColor("#F2D93A3A"), Color.parseColor("#00D93A3A"))
             )
             alpha = 0f
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS // drag-only decoration
             addView(icon, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = dp(48)
             })
@@ -219,7 +247,7 @@ class OfflineFlowService : AccessibilityService() {
      * Hold mode: hold = talk, release = finish, slide away then release = cancel,
      *            move right away (before the hold kicks in) = drag.
      */
-    private inner class DragTouch : android.view.View.OnTouchListener {
+    private inner class DragTouch : View.OnTouchListener {
         private val slop = ViewConfiguration.get(this@OfflineFlowService).scaledTouchSlop
         private var downX = 0f
         private var downY = 0f
@@ -242,7 +270,7 @@ class OfflineFlowService : AccessibilityService() {
             }
         }
 
-        override fun onTouch(v: android.view.View, e: MotionEvent): Boolean {
+        override fun onTouch(v: View, e: MotionEvent): Boolean {
             val p = params ?: return false
             val holdMode = Prefs(this@OfflineFlowService).holdToTalk
             when (e.actionMasked) {
@@ -416,8 +444,8 @@ class OfflineFlowService : AccessibilityService() {
     private fun targetPosition(): Pair<Int, Int> {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
-        val x = sp.getInt("x", dm.widthPixels - sizePx - dp(12)).coerceIn(0, dm.widthPixels - sizePx)
-        val y = (anchor() - sizePx - sp.getInt("above", dp(8))).coerceIn(dp(24), dm.heightPixels - sizePx)
+        val x = sp.safeInt("x", dm.widthPixels - sizePx - dp(12)).coerceIn(0, dm.widthPixels - sizePx)
+        val y = (anchor() - sizePx - sp.safeInt("above", dp(8))).coerceIn(dp(24), dm.heightPixels - sizePx)
         return x to y
     }
 
@@ -446,8 +474,19 @@ class OfflineFlowService : AccessibilityService() {
         }
     }
 
+    /** What a screen reader says for the button: the action a tap would take right now. */
+    private fun describe(s: State) = when (s) {
+        State.IDLE -> "Start dictation"
+        State.STARTING, State.RECORDING -> "Stop and transcribe"
+        State.WORKING -> "Cancel transcription"
+    }
+
     private fun setState(s: State) {
         state = s
+        button?.contentDescription = describe(s)
+        // Transcribing: an X over the dimmed ripple shows that a tap now cancels.
+        cancelIcon?.visibility = if (s == State.WORKING) View.VISIBLE else View.GONE
+        bars?.alpha = if (s == State.WORKING) 0.35f else 1f
         buttonBg?.setColor(
             when (s) {
                 State.IDLE -> COLOR_IDLE
@@ -526,7 +565,10 @@ class OfflineFlowService : AccessibilityService() {
         when (state) {
             State.IDLE -> startRecording()
             State.RECORDING -> stopAndTranscribe()
-            State.STARTING, State.WORKING -> {}
+            // A tap while transcribing cancels (the callback in stopAndTranscribe() does the rest),
+            // but not the second half of a double-tap on "stop".
+            State.WORKING -> if (SystemClock.elapsedRealtime() - workingSince > CANCEL_GUARD_MS) dictation.cancel()
+            State.STARTING -> {}
         }
     }
 
@@ -601,6 +643,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun cancel() {
         if (state == State.STARTING) { pendingCancel = true; return }
+        if (state == State.WORKING) { dictation.cancel(); return }
         if (state != State.RECORDING) return
         handler.removeCallbacks(silenceCheck)
         Haptics.play(this, Haptics.Kind.CANCEL)
@@ -647,9 +690,15 @@ class OfflineFlowService : AccessibilityService() {
             return
         }
         setState(State.WORKING)
+        workingSince = SystemClock.elapsedRealtime()
         dictation.process(samples, targetApp, sparse = !heard) { outcome, err ->
             setState(State.IDLE)
             when {
+                // Nothing is typed; the recording is in the app's history with a Transcribe button.
+                err == Dictation.CANCELLED -> { Haptics.play(this, Haptics.Kind.CANCEL); toast("Cancelled") }
+                err == Dictation.TIMED_OUT -> {
+                    Haptics.play(this, Haptics.Kind.ERROR); toast("Timed out. Open Tokalot to try it again.")
+                }
                 err != null -> { Haptics.play(this, Haptics.Kind.ERROR); toast(err) }
                 outcome == null || outcome.text.isEmpty() -> {
                     Haptics.play(this, Haptics.Kind.ERROR); toast("Didn't catch anything")
@@ -677,32 +726,84 @@ class OfflineFlowService : AccessibilityService() {
         }
     }
 
-    /** What the field looked like before the last insert, so Undo can put it back. */
-    private class LastInsert(val node: AccessibilityNodeInfo, val before: String, val caret: Int)
+    /** What the last insert did, so Undo can reverse exactly that. */
+    private sealed class LastInsert {
+        /** Typed at the cursor; [replaced] is the selection it overwrote, if any. */
+        class Typed(val piece: String, val replaced: String) : LastInsert()
+        /** The whole field was rewritten; [before] is what it held. */
+        class Rewritten(val node: AccessibilityNodeInfo, val before: String, val caret: Int) : LastInsert()
+    }
     private var lastInsert: LastInsert? = null
 
     private fun undoInsert() {
         val li = lastInsert ?: return
         lastInsert = null
-        li.node.refresh()
-        val args = Bundle().apply {
-            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, li.before)
+        val ok = when (li) {
+            is LastInsert.Typed -> undoTyped(li)
+            is LastInsert.Rewritten -> undoRewritten(li)
         }
-        if (li.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-            val sel = Bundle().apply {
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, li.caret)
-                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, li.caret)
-            }
-            li.node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
-        } else {
-            toast("Couldn't undo here")
+        if (!ok) toast("Couldn't undo here")
+    }
+
+    /**
+     * Three ways in, best first:
+     *  1. Android 13+: type at the cursor through the field's own input connection, the way a
+     *     keyboard does. Nothing else in the field is touched, so rich editors keep their
+     *     formatting (a Gmail signature, mentions, links).
+     *  2. Read the field, splice the text in and write the whole thing back (plain text only).
+     *  3. Paste at the cursor, for fields that refuse 2.
+     */
+    private fun insert(node: AccessibilityNodeInfo, text: String): Boolean {
+        lastInsert = null
+        return typeAtCursor(text) || rewriteField(node, text)
+    }
+
+    /** False means "not available here" (older Android, or no connection to the field): nothing was typed. */
+    private fun typeAtCursor(text: String): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        return try {
+            val ic = inputMethod?.currentInputConnection ?: return false
+            // A little text either side of the cursor is enough to decide about spaces.
+            val around = ic.getSurroundingText(AROUND, AROUND, 0) ?: return false
+            val chars = around.text
+            val start = minOf(around.selectionStart, around.selectionEnd)
+            val end = maxOf(around.selectionStart, around.selectionEnd)
+            if (start < 0 || end > chars.length) return false
+            val piece = TextTools.pad(
+                text,
+                before = if (start > 0) chars[start - 1] else null,
+                after = if (end < chars.length) chars[end] else null,
+            )
+            ic.commitText(piece, 1, null) // replaces the selection, if there is one
+            lastInsert = LastInsert.Typed(piece, chars.subSequence(start, end).toString())
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 
-    private fun insert(node: AccessibilityNodeInfo, text: String): Boolean {
+    private fun undoTyped(li: LastInsert.Typed): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        return try {
+            val ic = inputMethod?.currentInputConnection ?: return false
+            val n = li.piece.length
+            val around = ic.getSurroundingText(n, 0, 0) ?: return false
+            val caret = around.selectionStart
+            // Only when the cursor still sits right after what was typed; anything else
+            // (the user typed on, moved, or sent the message) and this would delete the wrong text.
+            if (caret != around.selectionEnd || caret < n) return false
+            if (around.text.subSequence(caret - n, caret).toString() != li.piece) return false
+            ic.deleteSurroundingText(n, 0)
+            if (li.replaced.isNotEmpty()) ic.commitText(li.replaced, 1, null)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun rewriteField(node: AccessibilityNodeInfo, text: String): Boolean {
         // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
         // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
-        lastInsert = null
         val raw = node.text?.toString() ?: ""
         val hintText = node.hintText?.toString()
         val caretAtStart = node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
@@ -717,16 +818,18 @@ class OfflineFlowService : AccessibilityService() {
         start = start.coerceAtMost(current.length)
         end = end.coerceAtMost(current.length)
 
-        val needsSpace = start > 0 && !current[start - 1].isWhitespace()
-        val needsSpaceAfter = end < current.length && current[end].isLetterOrDigit()
-        val piece = (if (needsSpace) " " else "") + text + (if (needsSpaceAfter) " " else "")
+        val piece = TextTools.pad(
+            text,
+            before = if (start > 0) current[start - 1] else null,
+            after = if (end < current.length) current[end] else null,
+        )
         val updated = current.substring(0, start) + piece + current.substring(end)
 
         val args = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
         }
         if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-            lastInsert = LastInsert(node, current, start)
+            lastInsert = LastInsert.Rewritten(node, current, start)
             val caret = start + piece.length
             val sel = Bundle().apply {
                 putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, caret)
@@ -736,8 +839,36 @@ class OfflineFlowService : AccessibilityService() {
             return true
         }
         // Some fields refuse SET_TEXT; try pasting at the cursor instead.
+        return paste(node, piece)
+    }
+
+    private fun undoRewritten(li: LastInsert.Rewritten): Boolean {
+        li.node.refresh()
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, li.before)
+        }
+        if (!li.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return false
+        val sel = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, li.caret)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, li.caret)
+        }
+        li.node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
+        return true
+    }
+
+    /**
+     * Pastes [piece] at the cursor, then gives the clipboard back what it held. Android only
+     * lets a background service read the clipboard in some situations; when it can't be read
+     * there is nothing to restore and the dictated text stays on it.
+     */
+    private fun paste(node: AccessibilityNodeInfo, piece: String): Boolean {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val previous = runCatching { cm.primaryClip }.getOrNull()
         copyToClipboard(piece)
-        return node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return false
+        // The paste is handled by the other app a moment later, so don't swap it back too soon.
+        if (previous != null) handler.postDelayed({ runCatching { cm.setPrimaryClip(previous) } }, 800)
+        return true
     }
 
     private fun copyToClipboard(text: String) {
