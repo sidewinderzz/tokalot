@@ -116,6 +116,7 @@ class OfflineFlowService : AccessibilityService() {
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         dictation = Dictation(applicationContext)
         buildButton()
+        Sync.request(this) // picks up dictionary and snippet changes made on another device
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
