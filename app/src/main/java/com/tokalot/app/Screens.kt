@@ -353,6 +353,11 @@ class SettingsScreen(private val a: MainActivity) {
             prefs.autoStop = it
         })
         rc.addView(divider())
+        rc.addView(switchRow("Haptics", "A small buzz when recording starts, stops, finishes or fails.", prefs.haptics) {
+            prefs.haptics = it
+            if (it) Haptics.play(this, Haptics.Kind.DONE)
+        })
+        rc.addView(divider())
         rc.addView(switchRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.", prefs.autoLanguage) {
             prefs.autoLanguage = it
         })

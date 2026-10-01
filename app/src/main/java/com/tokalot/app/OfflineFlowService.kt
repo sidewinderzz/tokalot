@@ -166,7 +166,6 @@ class OfflineFlowService : AccessibilityService() {
         private val holdStart = Runnable {
             if (!dragging && state == State.IDLE) {
                 holding = true
-                button?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                 startRecording()
             }
         }
@@ -192,7 +191,7 @@ class OfflineFlowService : AccessibilityService() {
                         if (far != inCancelZone) {
                             inCancelZone = far
                             v.alpha = if (far) 0.35f else 1f
-                            if (far) v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                            Haptics.play(this@OfflineFlowService, Haptics.Kind.TICK)
                         }
                     } else {
                         if (!dragging && (abs(dx) > slop || abs(dy) > slop)) {
@@ -384,7 +383,6 @@ class OfflineFlowService : AccessibilityService() {
     // ---------- dictation flow ----------
 
     private fun onTap() {
-        button?.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
         when (state) {
             State.IDLE -> startRecording()
             State.RECORDING -> stopAndTranscribe()
@@ -410,6 +408,7 @@ class OfflineFlowService : AccessibilityService() {
         val micOk = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val sttOk = prefs.cloudSttReady || ModelManager.isReady(this)
         if (!micOk || !sttOk) {
+            Haptics.play(this, Haptics.Kind.ERROR)
             toast("Finish setup in the Tokalot app first")
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
@@ -427,6 +426,7 @@ class OfflineFlowService : AccessibilityService() {
                 began = true
                 if (recorder.start()) {
                     setState(State.RECORDING)
+                    Haptics.play(this, Haptics.Kind.START)
                     when {
                         pendingCancel -> cancel()
                         pendingStop -> stopAndTranscribe()
@@ -435,6 +435,7 @@ class OfflineFlowService : AccessibilityService() {
                 } else {
                     RecordingService.stop(this)
                     setState(State.IDLE)
+                    Haptics.play(this, Haptics.Kind.ERROR)
                     toast("Couldn't open the microphone")
                     updateButton()
                 }
@@ -454,7 +455,7 @@ class OfflineFlowService : AccessibilityService() {
         if (state == State.STARTING) { pendingCancel = true; return }
         if (state != State.RECORDING) return
         handler.removeCallbacks(silenceCheck)
-        button?.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        Haptics.play(this, Haptics.Kind.CANCEL)
         recorder.stop()
         RecordingService.stop(this)
         setState(State.IDLE)
@@ -464,6 +465,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun stopAndTranscribe() {
         handler.removeCallbacks(silenceCheck)
+        Haptics.play(this, Haptics.Kind.STOP)
         val voiceEnd = recorder.lastVoiceSample
         var samples = recorder.stop()
         // After an auto-stop, drop the trailing 30 s of silence: less to upload, and Whisper
@@ -482,6 +484,7 @@ class OfflineFlowService : AccessibilityService() {
         val peak = samples.maxOf { abs(it) }
         if (peak < 0.0005f) {
             setState(State.IDLE)
+            Haptics.play(this, Haptics.Kind.ERROR)
             toast("The mic only picked up silence. Android may have blocked it.")
             updateButton()
             return
@@ -490,10 +493,13 @@ class OfflineFlowService : AccessibilityService() {
         dictation.process(samples, targetApp) { outcome, err ->
             setState(State.IDLE)
             when {
-                err != null -> toast(err)
-                outcome == null || outcome.text.isEmpty() -> toast("Didn't catch anything")
+                err != null -> { Haptics.play(this, Haptics.Kind.ERROR); toast(err) }
+                outcome == null || outcome.text.isEmpty() -> {
+                    Haptics.play(this, Haptics.Kind.ERROR); toast("Didn't catch anything")
+                }
                 else -> {
                     deliver(outcome.text)
+                    Haptics.play(this, Haptics.Kind.DONE)
                     outcome.warning?.let { toast(it) }
                 }
             }

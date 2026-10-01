@@ -151,6 +151,11 @@ class Prefs(ctx: Context) {
         get() = sp.getBoolean("hold", false)
         set(v) = sp.edit().putBoolean("hold", v).apply()
 
+    /** Vibration feedback from the floating button. */
+    var haptics: Boolean
+        get() = sp.getBoolean("haptics", true)
+        set(v) = sp.edit().putBoolean("haptics", v).apply()
+
     /** Stop automatically after 30 s of silence (tap mode only). */
     var autoStop: Boolean
         get() = sp.getBoolean("autostop", true)

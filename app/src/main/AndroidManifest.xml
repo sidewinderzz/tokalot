@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Haptic feedback from the floating button. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Cloud speech/cleanup when a key is set, and the one-time on-device model download. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Keeps the mic alive while recording even if the text field closes. -->
