@@ -17,6 +17,7 @@ public sealed class Entry
     public bool Cleaned { get; set; }        // true if an AI model rewrote it
     public string AppKey { get; set; } = "";
     public string AppLabel { get; set; } = "";
+    public bool Pending { get; set; }        // recording kept but not transcribed (it failed or was cancelled)
 }
 
 internal static class Files
@@ -86,6 +87,19 @@ public static class History
             var l = Load();
             l.Insert(0, e);
             while (l.Count > Max) l.RemoveAt(l.Count - 1);
+            Save();
+        }
+        Changed?.Invoke();
+    }
+
+    /** Swaps in a new version of the entry with the same id (a retried transcription); adds it if it's gone. */
+    public static void Replace(Entry e)
+    {
+        lock (Gate)
+        {
+            var l = Load();
+            var i = l.FindIndex(x => x.Id == e.Id);
+            if (i >= 0) l[i] = e; else l.Insert(0, e);
             Save();
         }
         Changed?.Invoke();

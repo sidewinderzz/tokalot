@@ -37,6 +37,21 @@ internal static class Shots
         PillShots(dir);
         IndicatorShots(dir);
         MenuShot(dir);
+        AudioRoundTrip(dir);
+    }
+
+    /** Saves two seconds of tone and reads it back, the path "Transcribe" on a failed entry relies on. */
+    private static void AudioRoundTrip(string dir)
+    {
+        var probe = new float[Recorder.SampleRate * 2];
+        for (int i = 0; i < probe.Length; i++) probe[i] = (float)(0.3 * Math.Sin(i * 2 * Math.PI * 440 / Recorder.SampleRate));
+        AudioStore.Save(1, probe);
+        var back = AudioStore.Load(1);
+        float peak = 0;
+        if (back != null) foreach (var v in back) peak = Math.Max(peak, Math.Abs(v));
+        File.WriteAllText(Path.Combine(dir, "audio-roundtrip.txt"),
+            $"{probe.Length} samples saved as {Path.GetExtension(AudioStore.FileFor(1))}, {back?.Length} read back, peak {peak:0.00}");
+        AudioStore.Delete(1);
     }
 
     /** The pop-up menu (history's three dots, the app list on Style) in the dark theme. */

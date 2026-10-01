@@ -26,18 +26,25 @@ public static class Net
         Http.DefaultRequestHeaders.UserAgent.ParseAdd("Tokalot-Desktop/1.0");
     }
 
-    public static async Task<JsonNode> PostJson(string url, IDictionary<string, string> headers, JsonObject body, int timeoutMs = 15000)
+    /** ct cancels on the user's say-so; running past timeoutMs throws TimeoutException instead. */
+    public static async Task<JsonNode> PostJson(string url, IDictionary<string, string> headers, JsonObject body, int timeoutMs = 15000,
+        CancellationToken ct = default)
     {
-        using var cts = new CancellationTokenSource(timeoutMs);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(timeoutMs);
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json"),
         };
         foreach (var (k, v) in headers) req.Headers.TryAddWithoutValidation(k, v);
-        using var res = await Http.SendAsync(req, cts.Token);
-        var text = await res.Content.ReadAsStringAsync(cts.Token);
-        if (!res.IsSuccessStatusCode) throw new IOException($"HTTP {(int)res.StatusCode}: {ErrorMessage(text)}");
-        return JsonNode.Parse(text) ?? throw new IOException("Empty response");
+        try
+        {
+            using var res = await Http.SendAsync(req, cts.Token);
+            var text = await res.Content.ReadAsStringAsync(cts.Token);
+            if (!res.IsSuccessStatusCode) throw new IOException($"HTTP {(int)res.StatusCode}: {ErrorMessage(text)}");
+            return JsonNode.Parse(text) ?? throw new IOException("Empty response");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Timed out"); }
     }
 
     /** Tiny authenticated request so the TLS connection is already open when the real upload starts. */
@@ -89,9 +96,12 @@ public static class Net
 /** Cloud speech-to-text through the OpenAI-compatible endpoint (Groq and OpenAI both speak it). */
 public static class CloudStt
 {
-    public static async Task<string> Transcribe(string baseUrl, string key, string model, float[] samples, string prompt, bool english)
+    public static async Task<string> Transcribe(string baseUrl, string key, string model, float[] samples, string prompt, bool english,
+        CancellationToken ct = default)
     {
-        using var cts = new CancellationTokenSource(25000);
+        // Long recordings are bigger uploads and take longer to transcribe: allow half their length on top.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(25000 + samples.Length / (Recorder.SampleRate / 500));
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent(model), "model");
         if (english) form.Add(new StringContent("en"), "language"); // omitted = the model detects it
@@ -103,9 +113,13 @@ public static class CloudStt
 
         using var req = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/audio/transcriptions") { Content = form };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        using var res = await Net.Http.SendAsync(req, cts.Token);
-        var text = await res.Content.ReadAsStringAsync(cts.Token);
-        if (!res.IsSuccessStatusCode) throw new IOException($"HTTP {(int)res.StatusCode}: {Net.ErrorMessage(text)}");
-        return JsonNode.Parse(text)?["text"]?.ToString() ?? "";
+        try
+        {
+            using var res = await Net.Http.SendAsync(req, cts.Token);
+            var text = await res.Content.ReadAsStringAsync(cts.Token);
+            if (!res.IsSuccessStatusCode) throw new IOException($"HTTP {(int)res.StatusCode}: {Net.ErrorMessage(text)}");
+            return JsonNode.Parse(text)?["text"]?.ToString() ?? "";
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Timed out"); }
     }
 }

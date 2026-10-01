@@ -68,6 +68,14 @@ public static class Backup
 
         var old = Settings.Current;
         var restored = manifest["settings"].Deserialize<Settings>(Settings.Json) ?? new Settings();
+        // Check the rest of the zip reads cleanly before replacing anything, so a damaged backup changes nothing.
+        foreach (var name in new[] { "history.json", "usage.json" })
+            if (zip.GetEntry(name) is { } je)
+            {
+                using var r = new StreamReader(je.Open());
+                try { JsonNode.Parse(r.ReadToEnd()); }
+                catch (JsonException) { throw new InvalidDataException($"The backup's {name} is damaged"); }
+            }
         var hasKeys = manifest["includesKeys"]?.GetValue<bool>() == true && manifest["keys"] is JsonObject;
         if (hasKeys)
             foreach (var (id, val) in manifest["keys"]!.AsObject()) restored.SetKey(id, val?.ToString() ?? "");
@@ -79,7 +87,11 @@ public static class Backup
         foreach (var e in zip.Entries)
         {
             if (e.FullName is "history.json" or "usage.json")
-                e.ExtractToFile(Paths.File(e.FullName), true);
+            {
+                var tmp = Paths.File(e.FullName + ".restore");
+                e.ExtractToFile(tmp, true);
+                File.Move(tmp, Paths.File(e.FullName), true);
+            }
             else if (e.FullName.StartsWith("audio/") && Regex.IsMatch(e.Name, @"^\d+\.(wma|m4a|wav)$"))
             {
                 e.ExtractToFile(Path.Combine(Paths.Dir("audio"), e.Name), true);

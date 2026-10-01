@@ -163,6 +163,16 @@ public sealed class App : Application
 
     public void Refresh() => window?.Render();
 
+    /** After a restore: the theme, indicator and start-up setting all follow the restored settings. */
+    public void AfterRestore(string message)
+    {
+        ApplyTheme();
+        Controller?.RefreshIndicator();
+        if (Updater.CanUpdate) Platform.Startup.Apply(Settings.Current.LaunchAtStartup);
+        window?.Render();
+        window?.ShowToast(message);
+    }
+
     /** Home shows the new entry and stats. Other pages are left alone so a half-typed snippet or word list isn't wiped. */
     public void RefreshAfterDictation()
     {
@@ -185,7 +195,7 @@ public sealed class App : Application
         menu.Items.Add("Open Tokalot", null, (_, _) => ShowWindow());
         menu.Items.Add("Copy last dictation", null, (_, _) =>
         {
-            var last = History.All().FirstOrDefault();
+            var last = History.All().FirstOrDefault(e => !e.Pending);
             if (last != null) _ = TextInjector.Copy(last.Text);
         });
         updateItem = new System.Windows.Forms.ToolStripMenuItem("Update available", null, (_, _) => { ShowWindow(); }) { Visible = false };
@@ -247,7 +257,7 @@ public sealed class App : Application
         {
             UpdateProgress = null;
             Log("Update failed: " + e.Message);
-            MessageBox.Show("The update couldn't be installed: " + e.Message, "Tokalot");
+            Ui.Dialog(window, "The update couldn't be installed: " + e.Message, cancel: null);
             Refresh();
         }
     }
@@ -284,6 +294,8 @@ public sealed class Controller : IDisposable
     private bool ignoreNextRelease;
     private DateTime pressedAt;
     private ActiveApp? app;
+    private CancellationTokenSource? work; // the transcription in progress, so Esc can stop it
+    private bool userCancelled;
 
     public Controller(Dispatcher ui)
     {
@@ -295,7 +307,7 @@ public sealed class Controller : IDisposable
         hook.Pressed += () => ui.BeginInvoke(OnPressed);
         hook.Released += () => ui.BeginInvoke(OnReleased);
         hook.KeyWhileHeld += vk => ui.BeginInvoke(() => OnOtherKey(vk));
-        hook.Escape += () => ui.BeginInvoke(() => Cancel(true));
+        hook.Escape += () => ui.BeginInvoke(() => { if (state == State.Processing) CancelWork(); else Cancel(true); });
         tick = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal, (_, _) => Tick(), ui);
         tick.Stop();
     }
@@ -323,6 +335,7 @@ public sealed class Controller : IDisposable
     private void OnClicked()
     {
         if (state == State.Recording) { Finish(); return; }
+        if (state == State.Processing) { CancelWork(); return; }
         if (state != State.Idle) return;
         if (Begin(handsFreeMode: true)) Say("Listening · click again or press Ctrl+Win to finish", 2200);
     }
@@ -388,13 +401,85 @@ public sealed class Controller : IDisposable
     public void Cancel(bool audible)
     {
         if (state != State.Recording) return;
-        recorder.Stop();
+        var samples = recorder.Stop();
         Reset();
         indicator.SetMode(IndicatorView.Mode.Idle);
         if (audible)
         {
             Sounds.Play(Sounds.Kind.Cancel);
+            // Esc may have been meant for another app: anything longer than a few seconds is kept so it can still be transcribed.
+            if (samples.Length >= Recorder.SampleRate * 3)
+            {
+                dictation.KeepAudio(samples, null, "Cancelled", app, cancelled: true);
+                Say("Cancelled · the recording is in history", 2400);
+            }
+            else Say("Cancelled", 1200);
+        }
+    }
+
+    /** Stops a transcription in progress (Esc, or clicking the indicator). */
+    private void CancelWork()
+    {
+        if (work == null) return;
+        userCancelled = true;
+        try { work.Cancel(); } catch { }
+    }
+
+    /** Gives up after a while even on a dead connection: a minute plus twice the recording's length. */
+    private CancellationToken StartWork(int sampleCount)
+    {
+        work = new CancellationTokenSource();
+        userCancelled = false;
+        work.CancelAfter(TimeSpan.FromSeconds(60 + 2.0 * sampleCount / Recorder.SampleRate));
+        hook.Listening = true; // so Esc is reported while working
+        return work.Token;
+    }
+
+    private void EndWork()
+    {
+        hook.Listening = false;
+        work?.Dispose();
+        work = null;
+    }
+
+    /** Transcribes a saved recording again (one that failed or was cancelled) and copies the result. */
+    public async void Retry(Entry e)
+    {
+        if (state != State.Idle) return;
+        state = State.Processing;
+        indicator.SetMode(IndicatorView.Mode.Working);
+        try
+        {
+            var samples = await Task.Run(() => AudioStore.Load(e.Id));
+            if (samples == null || samples.Length == 0) throw new InvalidOperationException("That recording couldn't be read");
+            var ct = StartWork(samples.Length);
+            var target = e.AppKey.Length > 0 ? new ActiveApp(e.AppKey, e.AppLabel) : null;
+            var outcome = await Task.Run(() => dictation.Process(samples, target, ct: ct, entryId: e.Id));
+            indicator.SetMode(IndicatorView.Mode.Idle);
+            if (outcome.Text.Length > 0)
+            {
+                await TextInjector.Copy(outcome.Text);
+                Sounds.Play(Sounds.Kind.Done);
+                Say("Transcribed · copied to the clipboard", 2600);
+            }
+            else Say("Didn't catch anything", 1800);
+        }
+        catch (OperationCanceledException) when (userCancelled)
+        {
+            indicator.SetMode(IndicatorView.Mode.Idle);
             Say("Cancelled", 1200);
+        }
+        catch (Exception ex)
+        {
+            indicator.SetMode(IndicatorView.Mode.Idle);
+            Sounds.Play(Sounds.Kind.Error);
+            Say(ex is OperationCanceledException ? "Timed out" : ex.Message, 4500);
+        }
+        finally
+        {
+            EndWork();
+            state = State.Idle;
+            App.Current.RefreshAfterDictation();
         }
     }
 
@@ -456,9 +541,11 @@ public sealed class Controller : IDisposable
         Sounds.Play(Sounds.Kind.Stop);
         indicator.SetMode(IndicatorView.Mode.Working);
         var target = app;
+        var ct = StartWork(samples.Length);
         try
         {
-            var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6));
+            var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct));
+            hook.Listening = false;
             if (outcome.Text.Length > 0)
             {
                 await TextInjector.Paste(outcome.Text);
@@ -469,16 +556,25 @@ public sealed class Controller : IDisposable
             else if (outcome.Text.Length == 0) Say("Didn't catch anything", 1800);
             dictation.KeepAudio(samples, outcome.EntryId, null, target);
         }
+        catch (OperationCanceledException) when (userCancelled)
+        {
+            indicator.SetMode(IndicatorView.Mode.Idle);
+            Sounds.Play(Sounds.Kind.Cancel);
+            Say("Cancelled · the recording is in history", 2400);
+            dictation.KeepAudio(samples, null, "Cancelled", target, cancelled: true);
+        }
         catch (Exception e)
         {
+            var message = e is OperationCanceledException ? "Timed out" : e.Message;
             App.Log("Dictation failed: " + e);
             indicator.SetMode(IndicatorView.Mode.Idle);
             Sounds.Play(Sounds.Kind.Error);
-            Say(e.Message, 4500);
-            dictation.KeepAudio(samples, null, e.Message, target);
+            Say(message + " · the recording is in history", 4500);
+            dictation.KeepAudio(samples, null, message, target);
         }
         finally
         {
+            EndWork();
             state = State.Idle;
             App.Current.RefreshAfterDictation();
         }

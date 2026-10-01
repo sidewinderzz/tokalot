@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Tokalot.Desktop.Core;
@@ -40,7 +41,8 @@ public sealed class Dictation : IDisposable
     }
 
     /** sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence. */
-    public async Task<Outcome> Process(float[] samples, ActiveApp? app, bool sparse = false)
+    /** ct: the user cancelled. entryId: re-transcribing a saved recording, so update that history entry instead of adding one. */
+    public async Task<Outcome> Process(float[] samples, ActiveApp? app, bool sparse = false, CancellationToken ct = default, long? entryId = null)
     {
         var s = Settings.Current;
         var warnings = new List<string>();
@@ -63,11 +65,12 @@ public sealed class Dictation : IDisposable
         {
             try
             {
-                raw = await CloudStt.Transcribe(c.BaseUrl, s.Key(c.Service), s.SttModel(c), samples, hint.ToString(), !s.AutoLanguage);
+                raw = await CloudStt.Transcribe(c.BaseUrl, s.Key(c.Service), s.SttModel(c), samples, hint.ToString(), !s.AutoLanguage, ct);
                 Usage.RecordStt(c.Id, seconds);
                 if (c.Id != s.Stt) warnings.Add($"{s.SttOption.Label} unavailable, used {c.Label}");
                 break;
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception e)
             {
                 if (warnings.Count == 0) warnings.Add($"{c.Label} failed: {Short(e.Message)}");
@@ -79,7 +82,7 @@ public sealed class Dictation : IDisposable
                 throw new InvalidOperationException(warnings.Count == 0
                     ? "No speech model: add a Groq key or download the offline model in Settings"
                     : warnings[0] + ", and the offline model isn't downloaded");
-            raw = await local.Transcribe(samples, hint.ToString(), !s.AutoLanguage);
+            raw = await local.Transcribe(samples, hint.ToString(), !s.AutoLanguage, ct);
             usedLocal = true;
         }
         var baseText = TextTools.StripNoise(raw);
@@ -94,13 +97,14 @@ public sealed class Dictation : IDisposable
         {
             try
             {
-                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label);
+                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label, ct);
                 Usage.RecordLlm(c.Id, r.InTokens, r.OutTokens);
                 cleaned = true;
                 final = TextTools.Restore(r.Text, map);
                 if (c.Id != s.Cleanup) warnings.Add($"{s.CleanupOption.Label} unavailable, cleaned with {c.Label}");
                 break;
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception e)
             {
                 cleanupErr ??= "Cleanup failed: " + Short(e.Message);
@@ -109,15 +113,17 @@ public sealed class Dictation : IDisposable
         if (!cleaned && cleanupErr != null) warnings.Add(cleanupErr);
         final ??= TextTools.Restore(TextTools.BasicClean(protectedText), map);
 
-        var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        ct.ThrowIfCancellationRequested();
+        var now = entryId ?? DateTimeOffset.Now.ToUnixTimeMilliseconds();
         // A history file that's briefly locked must not stop the text from being pasted.
         try
         {
-            History.Add(new Entry
+            var entry = new Entry
             {
                 Id = now, Time = now, Text = final, Raw = baseText, DurationMs = (long)(seconds * 1000),
                 Cleaned = cleaned, AppKey = app?.Key ?? "", AppLabel = app?.Label ?? "",
-            });
+            };
+            if (entryId != null) History.Replace(entry); else History.Add(entry);
         }
         catch { }
         Usage.RecordDictation(TextTools.WordCount(final), usedLocal);
@@ -126,23 +132,27 @@ public sealed class Dictation : IDisposable
     }
 
     /** Keeps the audio for playback (after the text is delivered). Failed runs still get an entry. */
-    public void KeepAudio(float[] samples, long? entryId, string? error, ActiveApp? app)
+    public void KeepAudio(float[] samples, long? entryId, string? error, ActiveApp? app, bool cancelled = false)
     {
         var s = Settings.Current;
         Task.Run(() =>
         {
             var id = entryId;
+            var pending = false;
             if (id == null && error != null)
             {
                 var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
                 History.Add(new Entry
                 {
-                    Id = now, Time = now, Text = "Transcription failed: " + error,
+                    Id = now, Time = now, Pending = true,
+                    Text = cancelled ? "Cancelled before it was transcribed." : "Transcription failed: " + error,
                     DurationMs = samples.Length * 1000L / Recorder.SampleRate, AppKey = app?.Key ?? "", AppLabel = app?.Label ?? "",
                 });
                 id = now;
+                pending = true;
             }
-            if (id != null && s.AudioKeepDays > 0)
+            // A recording that still needs transcribing is kept even when "Don't save audio" is on, so it can be retried.
+            if (id != null && (s.AudioKeepDays > 0 || pending))
             {
                 AudioStore.Save(id.Value, samples);
                 History.NotifyChanged();

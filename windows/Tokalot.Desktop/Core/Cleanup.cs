@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Tokalot.Desktop.Core;
@@ -57,8 +58,9 @@ public static class Cleanup
 
     /** Throws on any failure so the caller can fall back. */
     public static async Task<Result> Run(Settings s, CleanupOption choice, string text, bool hasSnippets,
-        AppCategory category, string? appLabel)
+        AppCategory category, string? appLabel, CancellationToken ct = default)
     {
+        var timeoutMs = 15000 + text.Length * 5; // long dictations take longer to rewrite
         var key = s.Key(choice.Service);
         var model = s.CleanupModel(choice);
         var system = SystemPrompt(s.StyleFor(category), category, appLabel, s.Words, s.CustomInstructions, hasSnippets, s.AutoLanguage);
@@ -77,7 +79,7 @@ public static class Cleanup
                 ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = user }),
             };
             var res = await Net.PostJson(choice.BaseUrl + "/messages",
-                new Dictionary<string, string> { ["x-api-key"] = key, ["anthropic-version"] = "2023-06-01" }, body);
+                new Dictionary<string, string> { ["x-api-key"] = key, ["anthropic-version"] = "2023-06-01" }, body, timeoutMs, ct);
             if (res["stop_reason"]?.ToString() == "max_tokens") throw new System.InvalidOperationException("Cleanup was cut off");
             inTok = (long?)res["usage"]?["input_tokens"] ?? 0;
             outTok = (long?)res["usage"]?["output_tokens"] ?? 0;
@@ -99,7 +101,7 @@ public static class Cleanup
             if (model.Contains("gpt-oss")) body["reasoning_effort"] = "low";
             if (choice.Id == "GROQ") body["temperature"] = 0;
             var res = await Net.PostJson(choice.BaseUrl + "/chat/completions",
-                new Dictionary<string, string> { ["Authorization"] = "Bearer " + key }, body);
+                new Dictionary<string, string> { ["Authorization"] = "Bearer " + key }, body, timeoutMs, ct);
             if (res["choices"]?[0]?["finish_reason"]?.ToString() == "length") throw new System.InvalidOperationException("Cleanup was cut off");
             inTok = (long?)res["usage"]?["prompt_tokens"] ?? 0;
             outTok = (long?)res["usage"]?["completion_tokens"] ?? 0;

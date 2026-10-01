@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using NAudio.MediaFoundation;
@@ -32,8 +33,38 @@ public static class AudioStore
     {
         if (days == int.MaxValue) return;
         var cutoff = DateTime.Now.AddDays(-Math.Max(days, 0));
+        // A recording that still needs transcribing is kept until it's retried or deleted.
+        var pending = History.All().Where(e => e.Pending).Select(e => e.Id.ToString()).ToHashSet();
         foreach (var f in new DirectoryInfo(Dir).GetFiles())
+        {
+            if (pending.Contains(Path.GetFileNameWithoutExtension(f.Name))) continue;
             if (days <= 0 || f.LastWriteTime < cutoff) { try { f.Delete(); } catch { } }
+        }
+    }
+
+    /** Reads a saved recording back as 16 kHz mono samples (to transcribe it again). Blocking. */
+    public static float[]? Load(long id)
+    {
+        var f = FileFor(id);
+        if (f == null) return null;
+        try
+        {
+            using WaveStream reader = f.EndsWith(".wav") ? new WaveFileReader(f) : new MediaFoundationReader(f);
+            var sp = reader.ToSampleProvider();
+            int rate = sp.WaveFormat.SampleRate, ch = sp.WaveFormat.Channels;
+            var all = new List<float>();
+            var buf = new float[rate * ch];
+            int n;
+            while ((n = sp.Read(buf, 0, buf.Length)) > 0)
+                for (int i = 0; i + ch <= n; i += ch) all.Add(buf[i]);
+            // AAC files were saved at 48 kHz by repeating each sample three times; take every third back.
+            int step = Math.Max(1, rate / Recorder.SampleRate);
+            if (step == 1) return all.ToArray();
+            var outp = new float[all.Count / step];
+            for (int i = 0; i < outp.Length; i++) outp[i] = all[i * step];
+            return outp;
+        }
+        catch { return null; }
     }
 
     /** Blocking; call off the UI thread. */

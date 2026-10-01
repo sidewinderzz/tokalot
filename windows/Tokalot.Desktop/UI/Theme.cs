@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Markup;
@@ -63,6 +64,71 @@ public static class Ui
     {
         b.SizeChanged += (_, e) => b.CornerRadius = new CornerRadius(e.NewSize.Height / 2);
         return b;
+    }
+
+    /**
+     * Makes a hand-built control reachable with Tab and usable with Enter or Space, with a focus ring
+     * (shown only for keyboard focus) and a name for screen readers.
+     */
+    public static T Keys<T>(T e, Action act, string? name = null) where T : FrameworkElement
+    {
+        var ring = new FrameworkElementFactory(typeof(System.Windows.Shapes.Rectangle));
+        ring.SetValue(System.Windows.Shapes.Shape.StrokeProperty, C.Link);
+        ring.SetValue(System.Windows.Shapes.Shape.StrokeThicknessProperty, 2.0);
+        ring.SetValue(System.Windows.Shapes.Rectangle.RadiusXProperty, 12.0);
+        ring.SetValue(System.Windows.Shapes.Rectangle.RadiusYProperty, 12.0);
+        ring.SetValue(FrameworkElement.MarginProperty, new Thickness(-3));
+        var style = new Style();
+        style.Setters.Add(new Setter(Control.TemplateProperty, new ControlTemplate { VisualTree = ring }));
+        e.Focusable = true;
+        e.FocusVisualStyle = style;
+        if (!string.IsNullOrEmpty(name)) AutomationProperties.SetName(e, name);
+        e.KeyDown += (_, k) => { if (k.Key is Key.Enter or Key.Space) { k.Handled = true; act(); } };
+        return e;
+    }
+
+    /**
+     * A small modal in the app's own style (the stock message box is white and square).
+     * Returns true for the main button. cancel: null shows a single button.
+     */
+    public static bool Dialog(Window? owner, string message, string ok = "OK", string? cancel = "Cancel", string? title = null)
+    {
+        var result = false;
+        var w = new Window
+        {
+            WindowStyle = WindowStyle.None, AllowsTransparency = true, Background = Brushes.Transparent, ShowInTaskbar = false,
+            SizeToContent = SizeToContent.WidthAndHeight, ResizeMode = ResizeMode.NoResize, Title = "Tokalot",
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+        };
+        if (owner is { IsVisible: true }) { w.Owner = owner; w.WindowStartupLocation = WindowStartupLocation.CenterOwner; }
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 20, 0, 0) };
+        if (cancel != null)
+        {
+            var c = Button(cancel, () => w.Close());
+            c.Margin = new Thickness(0, 0, 8, 0);
+            buttons.Children.Add(c);
+        }
+        var main = Button(ok, () => { result = true; w.Close(); }, filled: true);
+        buttons.Children.Add(main);
+        var body = new StackPanel();
+        if (title != null)
+        {
+            var h = Heading(title, 26);
+            h.Margin = new Thickness(0, 0, 0, 8);
+            body.Children.Add(h);
+        }
+        body.Children.Add(Text(message, 15));
+        body.Children.Add(buttons);
+        w.Content = new Border
+        {
+            Background = C.Card, BorderBrush = C.Pill, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(24, 22, 24, 20), Margin = new Thickness(18), MinWidth = 300, MaxWidth = 440, Child = body,
+            Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.35 },
+        };
+        w.KeyDown += (_, e) => { if (e.Key == Key.Escape) w.Close(); };
+        w.Loaded += (_, _) => main.Focus();
+        w.ShowDialog();
+        return result;
     }
 
     public static TextBlock Text(string s, double size = 15, Brush? color = null, bool bold = false) => new()
@@ -133,7 +199,7 @@ public static class Ui
         b.MouseEnter += (_, _) => b.Opacity = 0.82;
         b.MouseLeave += (_, _) => b.Opacity = 1;
         b.MouseLeftButtonUp += (_, e) => { e.Handled = true; onClick(); };
-        return b;
+        return Keys(b, onClick, label.Length > 0 ? label : icon);
     }
 
     /** Text field inside a rounded box. */
@@ -191,8 +257,9 @@ public static class Ui
             knob.HorizontalAlignment = on ? HorizontalAlignment.Right : HorizontalAlignment.Left;
         }
         Paint();
-        track.MouseLeftButtonUp += (_, e) => { e.Handled = true; on = !on; Paint(); changed(on); };
-        return track;
+        void Toggle() { on = !on; Paint(); changed(on); }
+        track.MouseLeftButtonUp += (_, e) => { e.Handled = true; Toggle(); };
+        return Keys(track, Toggle);
     }
 
     /** Title + subtitle on the left, a control on the right. */
@@ -204,7 +271,12 @@ public static class Ui
         var texts = Stack(Text(title, 15));
         if (sub.Length > 0) texts.Children.Add(Text(sub, 13, C.Sub));
         g.Children.Add(texts);
-        if (right is FrameworkElement fe) { fe.VerticalAlignment = VerticalAlignment.Center; fe.Margin = new Thickness(16, 0, 0, 0); }
+        if (right is FrameworkElement fe)
+        {
+            fe.VerticalAlignment = VerticalAlignment.Center;
+            fe.Margin = new Thickness(16, 0, 0, 0);
+            if (string.IsNullOrEmpty(AutomationProperties.GetName(fe))) AutomationProperties.SetName(fe, title);
+        }
         Grid.SetColumn(right, 1);
         g.Children.Add(right);
         return g;
@@ -231,7 +303,7 @@ public static class Ui
         b.MouseEnter += (_, _) => b.Background = C.Hover;
         b.MouseLeave += (_, _) => b.Background = Brushes.Transparent;
         b.MouseLeftButtonUp += (_, e) => { e.Handled = true; onPick(); };
-        return b;
+        return Keys(b, onPick, title);
     }
 
     /** A card whose children are separated by thin lines. */

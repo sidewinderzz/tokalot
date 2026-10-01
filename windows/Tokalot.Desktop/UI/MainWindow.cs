@@ -104,6 +104,17 @@ public sealed class MainWindow : Window
         Player.Changed += onPlayer;
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); };
         SourceInitialized += (_, _) => DarkTitleBar();
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                e.Handled = true;
+                if (CurrentPage != Page.Home) Go(Page.Home);
+                search.Focus();
+            }
+            else if (e.Key == Key.Escape && (editing != null || editingNew)) { e.Handled = true; editing = null; editingNew = false; Render(); }
+            else if (e.Key == Key.Escape && CurrentPage == Page.Home && search.Text.Length > 0) { e.Handled = true; search.Text = ""; }
+        };
         SizeChanged += (_, _) => { if (IsLoaded && IsWide != wideLayout) Render(); };
         Render();
     }
@@ -124,7 +135,7 @@ public sealed class MainWindow : Window
             b.MouseEnter += (_, _) => { b.Background = hover; glyph.Stroke = hoverGlyph; };
             b.MouseLeave += (_, _) => { b.Background = Brushes.Transparent; glyph.Stroke = C.Text; };
             b.MouseLeftButtonUp += (_, _) => onClick();
-            return b;
+            return Ui.Keys(b, onClick, tip);
         }
         var row = Ui.Row(
             Button("M0,5.5 H10", "Minimize", C.Hover, C.Text, () => WindowState = WindowState.Minimized),
@@ -136,7 +147,7 @@ public sealed class MainWindow : Window
 
     private UIElement Sidebar()
     {
-        var logo = new Bars { Width = 34, Height = 34, BarBrush = C.Text, AccentBrush = C.Argb(S.Accent) };
+        var logo = new Bars { Width = 34, Height = 34, BarBrush = C.Text, AccentBrush = !C.Dark && S.Accent == 0xFFFFFFFF ? C.Text : C.Argb(S.Accent) };
         var title = new TextBlock { Text = "Tokalot", FontFamily = C.Sans, FontWeight = FontWeights.Bold, FontSize = 23, Foreground = C.Text, Margin = new Thickness(8, 0, 0, 1), VerticalAlignment = VerticalAlignment.Center };
         var head = Ui.Row(logo, title);
         head.Margin = new Thickness(22, 26, 0, 4);
@@ -156,7 +167,9 @@ public sealed class MainWindow : Window
         if (S.HideShortcutTip) hint.Visibility = Visibility.Collapsed;
         dismiss.MouseEnter += (_, _) => dismiss.Background = C.Hover;
         dismiss.MouseLeave += (_, _) => dismiss.Background = Brushes.Transparent;
-        dismiss.MouseLeftButtonUp += (_, _) => { S.HideShortcutTip = true; S.Save(); hint.Visibility = Visibility.Collapsed; };
+        void HideTip() { S.HideShortcutTip = true; S.Save(); hint.Visibility = Visibility.Collapsed; }
+        dismiss.MouseLeftButtonUp += (_, _) => HideTip();
+        Ui.Keys(dismiss, HideTip, "Hide this tip");
 
         var g = new Grid();
         g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -193,7 +206,7 @@ public sealed class MainWindow : Window
             b.MouseEnter += (_, _) => { if (!active) b.Background = C.Hover; };
             b.MouseLeave += (_, _) => { if (!active) b.Background = Brushes.Transparent; };
             b.MouseLeftButtonUp += (_, _) => Go(p);
-            nav.Children.Add(b);
+            nav.Children.Add(Ui.Keys(b, () => Go(p), label));
         }
         Item(Page.Home, "home", "Home");
         Item(Page.Dictionary, "book", "Dictionary");
@@ -344,7 +357,7 @@ public sealed class MainWindow : Window
         var t = Ui.Text(text, 14, C.Link);
         t.Cursor = Cursors.Hand;
         t.MouseLeftButtonUp += (_, _) => onClick();
-        return t;
+        return Ui.Keys(t, onClick, text);
     }
 
     /** A row that stretches its first child and right-aligns the rest. */
@@ -493,6 +506,7 @@ public sealed class MainWindow : Window
             t.Cursor = Cursors.Hand;
             t.MouseLeftButtonUp += (_, _) => { expanded.Add(e.Id); FillHistory(); };
             box.Children.Add(t);
+            t.Focusable = false;
         }
 
         if (showOriginal.Contains(e.Id))
@@ -517,6 +531,8 @@ public sealed class MainWindow : Window
         box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
 
         var actions = new List<UIElement> { Ui.Button("Copy", () => { _ = TextInjector.Copy(e.Text); Toast("Copied"); }, icon: "copy") };
+        if (e.Pending && AudioStore.Exists(e.Id))
+            actions.Insert(0, Ui.Button("Transcribe", () => App.Current.Controller?.Retry(e), filled: true));
         if (AudioStore.Exists(e.Id))
         {
             var playing = Player.PlayingId == e.Id;
@@ -629,7 +645,7 @@ public sealed class MainWindow : Window
             item.MouseEnter += (_, _) => item.Background = C.Hover;
             item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
             item.MouseLeftButtonUp += (_, _) => { editing = sn; editingNew = false; Render(); scroller.ScrollToTop(); };
-            return (UIElement)item;
+            return (UIElement)Ui.Keys(item, () => { editing = sn; editingNew = false; Render(); scroller.ScrollToTop(); }, sn.Trigger);
         }).ToArray();
         col.Children.Add(Ui.List(rows));
     }
@@ -687,7 +703,7 @@ public sealed class MainWindow : Window
             });
             var id = c.Id;
             t.MouseLeftButtonUp += (_, _) => { styleTab = id; Render(); };
-            tabs.Children.Add(t);
+            tabs.Children.Add(Ui.Keys(t, () => { styleTab = id; Render(); }, c.Label));
         }
         col.Children.Add(Spaced(tabs, 0, 0, 0, 4));
         var cat = Catalog.CategoryById(styleTab);
@@ -732,7 +748,7 @@ public sealed class MainWindow : Window
                 }
                 row.ContextMenu = menu;
                 row.MouseLeftButtonUp += (_, _) => { menu.PlacementTarget = row; menu.IsOpen = true; };
-                return (UIElement)row;
+                return (UIElement)Ui.Keys(row, () => { menu.PlacementTarget = row; menu.IsOpen = true; }, e.AppLabel);
             }).ToArray();
             col.Children.Add(Ui.List(rows));
         }
@@ -798,7 +814,7 @@ public sealed class MainWindow : Window
                 BorderBrush = on ? C.Text : C.Pill, BorderThickness = new Thickness(on ? 3 : 1), Cursor = Cursors.Hand, ToolTip = name,
             };
             dot.MouseLeftButtonUp += (_, _) => { S.Accent = argb; S.Save(); Render(); };
-            swatches.Children.Add(dot);
+            swatches.Children.Add(Ui.Keys(dot, () => { S.Accent = argb; S.Save(); Render(); }, name + " accent"));
         }
         col.Children.Add(swatches);
 
@@ -890,10 +906,9 @@ public sealed class MainWindow : Window
         col.Children.Add(Ui.List(new[] { (0, "Don't save audio"), (7, "Keep 7 days"), (30, "Keep 30 days"), (int.MaxValue, "Keep forever") }
             .Select(t => (UIElement)Ui.Choice(t.Item2, "", S.AudioKeepDays == t.Item1, () =>
             {
-                if (t.Item1 < S.AudioKeepDays && AudioStore.TotalBytes() > 0 && MessageBox.Show(this,
+                if (t.Item1 < S.AudioKeepDays && AudioStore.TotalBytes() > 0 && !Ui.Dialog(this,
                         t.Item1 == 0 ? "Delete all saved recordings now? Transcripts stay."
-                            : $"Delete recordings older than {t.Item1} days now? Transcripts stay.",
-                        "Tokalot", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+                            : $"Delete recordings older than {t.Item1} days now? Transcripts stay.", "Delete")) return;
                 S.AudioKeepDays = t.Item1; S.Save();
                 Task.Run(() => AudioStore.Prune(t.Item1)).ContinueWith(_ => Dispatcher.BeginInvoke(Render));
                 Render();
@@ -901,7 +916,7 @@ public sealed class MainWindow : Window
         var mb = AudioStore.TotalBytes() / 1_048_576.0;
         col.Children.Add(Spaced(Spread(Ui.Text($"Using {mb:0.0} MB", 14, C.Sub), Ui.Button("Delete all", () =>
         {
-            if (MessageBox.Show(this, "Delete all saved recordings? Transcripts stay.", "Tokalot", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+            if (!Ui.Dialog(this, "Delete all saved recordings? Transcripts stay.", "Delete")) return;
             Player.Stop(false);
             AudioStore.Prune(0);
             Render();
@@ -1020,14 +1035,15 @@ public sealed class MainWindow : Window
         var row = new Border { Padding = new Thickness(20, 12, 20, 12), Child = g, Background = Brushes.Transparent, Cursor = Cursors.Hand };
         row.MouseEnter += (_, _) => row.Background = C.Hover;
         row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
-        row.MouseLeftButtonUp += (_, _) =>
+        void Pick()
         {
             S.IndicatorStyle = id;
             S.Save();
             App.Current.Controller?.RefreshIndicator();
             Render();
-        };
-        return row;
+        }
+        row.MouseLeftButtonUp += (_, _) => Pick();
+        return Ui.Keys(row, Pick, name);
     }
 
     private static UIElement ModelField(string value, Action<string> save)
@@ -1072,43 +1088,55 @@ public sealed class MainWindow : Window
         }));
     }
 
-    private void DoBackup(bool withAudio, bool withKeys)
+    internal void ShowToast(string msg) => Toast(msg);
+
+    private bool busy; // a backup or restore is running
+
+    private async void DoBackup(bool withAudio, bool withKeys)
     {
+        if (busy) return;
         var dlg = new Microsoft.Win32.SaveFileDialog
         {
             FileName = $"tokalot-desktop-backup-{DateTime.Now:yyyy-MM-dd}.zip", Filter = "Zip file|*.zip", DefaultExt = ".zip",
         };
         if (dlg.ShowDialog(this) != true) return;
+        busy = true;
+        Toast("Backing up…");
         try
         {
-            var s = Backup.Write(dlg.FileName, withAudio, withKeys);
+            // Zipping recordings can take a while; keep the window (and Ctrl+Win) responsive.
+            var s = await Task.Run(() => Backup.Write(dlg.FileName, withAudio, withKeys));
             Toast($"Backed up {s.Entries} dictations" + (s.Recordings > 0 ? $" and {s.Recordings} recordings" : ""));
         }
         catch (Exception e)
         {
-            MessageBox.Show(this, "Backup failed: " + e.Message, "Tokalot");
+            Ui.Dialog(this, "Backup failed: " + e.Message, cancel: null);
         }
+        finally { busy = false; }
     }
 
-    private void DoRestore()
+    private async void DoRestore()
     {
-        if (MessageBox.Show(this,
+        if (busy) return;
+        if (!Ui.Dialog(this,
                 "This replaces your current settings, dictionary, snippets and history with the backup's. API keys on this PC are kept unless the backup includes keys.",
-                "Restore from backup?", MessageBoxButton.OKCancel) != MessageBoxResult.OK) return;
+                "Restore", title: "Restore from backup?")) return;
         var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Tokalot backup|*.zip" };
         if (dlg.ShowDialog(this) != true) return;
+        busy = true;
+        Toast("Restoring…");
         try
         {
             Player.Stop(false);
-            var s = Backup.Restore(dlg.FileName);
-            App.Current.ApplyTheme();
-            Render();
-            Toast($"Restored {s.Entries} dictations");
+            var s = await Task.Run(() => Backup.Restore(dlg.FileName));
+            // The theme may have changed, which rebuilds the window: finish up on the app, not on this (old) window.
+            App.Current.AfterRestore($"Restored {s.Entries} dictations");
         }
         catch (Exception e)
         {
-            MessageBox.Show(this, "Restore failed: " + e.Message, "Tokalot");
+            Ui.Dialog(this, "Restore failed: " + e.Message, cancel: null);
         }
+        finally { busy = false; }
     }
 
     // ---------- dark title bar ----------
