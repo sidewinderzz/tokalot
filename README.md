@@ -110,6 +110,13 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 > [!NOTE]
 > Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Click **More info → Run anyway**. Every release is built by GitHub Actions from this code.
 
+### Linux (beta)
+
+A port of the Windows app, for X11 and Wayland desktops on 64-bit Intel/AMD: hold **Ctrl+Super** and talk. Download the newest `Tokalot-linux-x64` build from [Releases](https://github.com/sidewinderzz/tokalot/releases) (tagged `linux-v…`, marked pre-release) and follow [linux/README.md](linux/README.md). It needs two one-time permissions, which the app shows you with a Copy button.
+
+> [!WARNING]
+> The Linux build has only been run under WSL so far, not on a real Linux desktop. Recording, pasting, the tray icon and the on-screen indicator may need fixes on your setup. If you try it, please open an issue with your distro, desktop and the output of `Tokalot --diagnose`.
+
 ## What it costs
 
 Tokalot is free. You pay your AI providers directly, at their rates:
@@ -150,13 +157,21 @@ dotnet publish windows/Tokalot.Desktop -c Release -r win-x64 --self-contained
 
 To release, bump `<Version>` in `Tokalot.Desktop.csproj` and push to `main`. The workflow publishes `desktop-v<version>` and refreshes the rolling `desktop` release that the installer link and the in-app updater use. `Tokalot.exe --screenshots <folder>` renders every page with sample data, which is how the screenshots here are made.
 
+**Linux** (`linux/Tokalot.Linux`, which also compiles the shared code in `windows/Tokalot.Desktop/Core`). Requirements: the .NET 10 SDK. Then:
+
+```sh
+dotnet publish linux/Tokalot.Linux -c Release -r linux-x64 --self-contained
+```
+
+To release, bump `<Version>` in `Tokalot.Linux.csproj` and push to `main`. The workflow publishes `linux-v<version>` as a pre-release.
+
 GitHub Actions builds every push and runs the Android unit tests.
 
 </details>
 
 ## Credits
 
-On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT), through [Whisper.net](https://github.com/sandrohanea/whisper.net) on Windows. Audio on Windows uses [NAudio](https://github.com/naudio/NAudio), and installs and updates use [Velopack](https://github.com/velopack/velopack). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License).
+On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT), through [Whisper.net](https://github.com/sandrohanea/whisper.net) on Windows and Linux. The Linux interface uses [Avalonia](https://github.com/AvaloniaUI/Avalonia). Audio on Windows uses [NAudio](https://github.com/naudio/NAudio), and installs and updates use [Velopack](https://github.com/velopack/velopack). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License).
 
 ## License
 

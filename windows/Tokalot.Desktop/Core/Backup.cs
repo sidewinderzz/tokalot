@@ -53,6 +53,9 @@ public static class Backup
                     recordings++;
                 }
         }
+        // On Linux and macOS a new file is readable by other users by default; a backup holding keys must not be.
+        if (includeKeys && !OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         return new Summary(History.All().Count, recordings, includeKeys);
     }
 

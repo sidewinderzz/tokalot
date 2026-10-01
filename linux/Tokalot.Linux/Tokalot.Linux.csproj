@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <!-- Same assembly name and namespaces as the Windows app, so the shared Core files compile unchanged. -->
+    <AssemblyName>Tokalot</AssemblyName>
+    <RootNamespace>Tokalot.Desktop</RootNamespace>
+    <Product>Tokalot</Product>
+    <Company>sidewinderzz</Company>
+    <Version>0.1.0</Version>
+    <!-- linux-x64 unless another one is asked for (-r linux-arm64; -r win-x64 runs the screenshot mode on Windows). -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">linux-x64</RuntimeIdentifier>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- No libicu needed on the user's machine. All formatting in the app uses the invariant culture anyway. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UI toolkit (X11; Wayland sessions run it through XWayland). Fluent supplies the base control templates. -->
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <!-- Body-text font with real regular/semibold/bold files (system variable fonts render at a single weight in Avalonia 11). -->
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <!-- Only used by the screenshots mode: renders the pages to PNGs without a display. -->
+    <PackageReference Include="Avalonia.Headless" Version="11.3.22" />
+    <!-- Offline speech recognition (whisper.cpp), the same engine as the Windows and Android apps. -->
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+  </ItemGroup>
+
+  <!-- The platform-neutral core is shared with the Windows app, not copied. -->
+  <ItemGroup>
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Backup.cs" Link="Core\Backup.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Catalog.cs" Link="Core\Catalog.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Cleanup.cs" Link="Core\Cleanup.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Dictation.cs" Link="Core\Dictation.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\History.cs" Link="Core\History.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\LocalWhisper.cs" Link="Core\LocalWhisper.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Net.cs" Link="Core\Net.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\TextTools.cs" Link="Core\TextTools.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\EBGaramond.ttf" />
+    <AvaloniaResource Include="Assets\icon.png" />
+    <!-- Also as plain files: the app-menu entry and the tray point at the icon on disk. -->
+    <Content Include="Assets\icon.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\OFL.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
