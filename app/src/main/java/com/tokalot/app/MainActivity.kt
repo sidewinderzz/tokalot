@@ -580,7 +580,15 @@ class MainActivity : Activity() {
         }
         statRow.addView(stat(compact(m.words), "words"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         statRow.addView(stat(m.dictations.toString(), "dictations"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        statRow.addView(stat(money(m.total), "est. cost"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // Speaking pace: words heard per minute of recording this month. (Cost lives in Settings › Usage.)
+        val monthStart = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.DAY_OF_MONTH, 1); set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val spoken = History.all(this).filter { it.time >= monthStart && it.durationMs > 0 && it.raw.isNotEmpty() && !it.pending }
+        val minutes = spoken.sumOf { it.durationMs } / 60000.0
+        val pace = if (minutes > 0) Math.round(spoken.sumOf { TextTools.wordCount(it.raw) } / minutes).toString() else "–"
+        statRow.addView(stat(pace, "words a minute"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         stats.addView(statRow)
         if (m.fillers + m.corrections > 0) {
             stats.addView(text("Cleaned up ${m.fillers} filler word${if (m.fillers == 1) "" else "s"} and ${m.corrections} self-correction${if (m.corrections == 1) "" else "s"}", 13f, C.SUB).apply {
