@@ -300,6 +300,7 @@ fun Context.sheet(
     d.window?.apply {
         setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
         setLayout(minOf(resources.displayMetrics.widthPixels - dp(40), dp(460)), ViewGroup.LayoutParams.WRAP_CONTENT)
+        @Suppress("DEPRECATION") // still what keeps the buttons above the keyboard for the snippet form
         setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
     }
     d.show()

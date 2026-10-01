@@ -152,11 +152,15 @@ class OfflineFlowService : AccessibilityService() {
             shape = GradientDrawable.OVAL
             setColor(COLOR_IDLE)
         }
-        val b = BarsView(this).apply { level = { recorder.level } }
+        val b = BarsView(this).apply {
+            level = { recorder.level }
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO // the frame speaks for it
+        }
         // Shown over the dimmed bars while transcribing, when a tap cancels.
         val x = ImageView(this).apply {
             setImageDrawable(this@OfflineFlowService.getDrawable(R.drawable.ic_close)?.mutate()?.apply { setTint(Color.WHITE) })
             visibility = View.GONE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         val frame = FrameLayout(this).apply {
             background = bg

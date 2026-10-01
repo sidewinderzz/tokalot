@@ -76,7 +76,9 @@ class MainActivity : Activity() {
         }
         buildRoot()
         // A fresh launch can itself be the installer reporting back (the old task was gone).
-        if (savedInstanceState == null) handleInstallStatus(intent)
+        // Not when reopened from Recents, which replays the old intent.
+        val replayed = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        if (savedInstanceState == null && !replayed) handleInstallStatus(intent)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
