@@ -17,7 +17,7 @@
 
 <br>
 
-Open the keyboard in any app and a small button floats above it. Talk, and Tokalot types what you meant: filler words gone, self-corrections applied, formatted for the app you're in. It works with the keyboard you already use, and you bring your own API keys, so there's no subscription, account or Tokalot server.
+**Tokalot** *(talk-a-lot)* is voice typing that floats over your keyboard. Open the keyboard in any app and a small button floats above it. Talk, and Tokalot types what you meant: filler words gone, self-corrections applied, formatted for the app you're in. It works with the keyboard you already use, and you bring your own API keys, so there's no subscription, account or Tokalot server.
 
 <sub>Inspired by <a href="https://wisprflow.ai">Wispr Flow</a>, which is excellent and worth paying for if you want a polished product. Tokalot is an independent, open-source take for people who'd rather bring their own keys. Not affiliated with Wispr.</sub>
 
