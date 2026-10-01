@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <!-- Tray icon (NotifyIcon). -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Lets this Windows app compile on Linux/macOS too (CI and local checks). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Tokalot</AssemblyName>
+    <RootNamespace>Tokalot.Desktop</RootNamespace>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
+    <Product>Tokalot</Product>
+    <Company>sidewinderzz</Company>
+    <!-- Bump this to release a new desktop version (CI publishes desktop-v<Version>). -->
+    <Version>1.0.0</Version>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Microphone capture, playback and audio encoding. -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Offline speech recognition (whisper.cpp), the same engine as the Android app. -->
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+    <!-- Installer and auto-updates from GitHub Releases. -->
+    <PackageReference Include="Velopack" Version="1.2.161" />
+    <!-- Encrypts API keys with the Windows user account (DPAPI). -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\EBGaramond.ttf" />
+    <Resource Include="Assets\icon.png" />
+    <Content Include="Assets\icon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\OFL.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

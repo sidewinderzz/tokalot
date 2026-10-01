@@ -3,6 +3,8 @@ name: Build APK
 on:
   push:
     branches: ['**']
+    # The Windows app has its own workflow (windows.yml).
+    paths-ignore: ['windows/**', '.github/workflows/windows.yml']
   workflow_dispatch:
 
 # Needed so tagged builds can publish a GitHub Release (what the in-app updater reads).

@@ -1,0 +1,78 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: ['**']
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: windows/Tokalot.Desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version
+        run: |
+          VERSION=$(grep -oP '<Version>\K[^<]+' Tokalot.Desktop.csproj)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Building Tokalot for Windows $VERSION"
+
+      # Self-contained: the user doesn't need .NET installed.
+      - name: Publish
+        run: dotnet publish -c Release -r win-x64 --self-contained -o publish
+
+      # Velopack turns the app into an installer (TokalotSetup) plus update packages.
+      - name: Package installer
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          vpk pack --packId Tokalot --packVersion "$VERSION" --packDir publish --mainExe Tokalot.exe \
+            --packTitle Tokalot --packAuthors sidewinderzz --icon Assets/icon.ico --outputDir releases
+
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: Tokalot-windows
+          path: windows/Tokalot.Desktop/releases/*Setup.exe
+          retention-days: 3
+
+      # Bump <Version> in the .csproj and push to main to release. Desktop releases are tagged
+      # desktop-v<version> and never marked "latest", so the Android app's updater and the
+      # README's APK link keep pointing at the newest Android release.
+      - name: Publish release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="desktop-v$VERSION"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG is already released; nothing to publish."
+            exit 0
+          fi
+          mv releases/*Setup.exe releases/TokalotSetup.exe
+          NOTES="Download **TokalotSetup.exe** and run it. Windows may show \"Windows protected your PC\" because the installer isn't code-signed yet: click **More info → Run anyway**. Tokalot then lives in your tray; hold **Ctrl+Win** in any app to dictate. Installed copies update themselves."
+          gh release create "$TAG" releases/* --target "$GITHUB_SHA" --latest=false \
+            --title "Tokalot for Windows $VERSION" --notes "$NOTES"
+
+          # A rolling "desktop" release always holds the newest build. The app checks it for
+          # updates, and the README links to its installer, so neither needs a version number.
+          if ! gh release view desktop > /dev/null 2>&1; then
+            gh release create desktop --target "$GITHUB_SHA" --latest=false \
+              --title "Tokalot for Windows (newest)" --notes "$NOTES"
+          fi
+          for a in $(gh release view desktop --json assets --jq '.assets[].name'); do
+            gh release delete-asset desktop "$a" --yes
+          done
+          gh release upload desktop releases/* --clobber
+          gh release edit desktop --title "Tokalot for Windows $VERSION (newest)" --notes "$NOTES"
