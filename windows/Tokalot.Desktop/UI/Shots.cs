@@ -32,6 +32,31 @@ internal static class Shots
             Page(dir, theme, "6-settings", w => w.Go(MainWindow.Page.Settings));
         }
         PillShots(dir);
+        IndicatorShots(dir);
+    }
+
+    /** Every indicator style in each state, plus the ripple pill on the side edges. */
+    private static void IndicatorShots(string dir)
+    {
+        C.Apply("dark");
+        var row = new System.Windows.Controls.WrapPanel { Width = 900, Background = C.Hex("#1F2023") };
+        void Add(string look, string dock, IndicatorView.Mode mode)
+        {
+            var v = new IndicatorView { Look = look, Dock = dock, Scale = 1.3, CurrentMode = mode, Level = () => 0.06f, Margin = new Thickness(12) };
+            row.Children.Add(new System.Windows.Controls.Border { Child = v, BorderBrush = C.Hex("#141416"), BorderThickness = new Thickness(0, 0, 0, 0) });
+        }
+        foreach (var look in IndicatorView.Styles)
+            foreach (var mode in new[] { IndicatorView.Mode.Idle, IndicatorView.Mode.Listening, IndicatorView.Mode.Working })
+                Add(look, "bottom", mode);
+        Add("ripple", "left", IndicatorView.Mode.Listening);
+        Add("ripple", "right", IndicatorView.Mode.Listening);
+        Add("bars", "left", IndicatorView.Mode.Listening);
+        for (int i = 0; i < 20; i++)
+        {
+            foreach (var c in row.Children) ((FrameworkElement)((System.Windows.Controls.Border)c).Child).InvalidateVisual();
+            Layout(row, 900, double.NaN);
+        }
+        Save(row, Path.Combine(dir, "indicators.png"));
     }
 
     private static void Page(string dir, string theme, string name, Action<MainWindow> setup)

@@ -265,7 +265,8 @@ public sealed class Controller : IDisposable
     private readonly HotkeyHook hook;
     private readonly Recorder recorder = new();
     private readonly Dictation dictation = new();
-    private readonly Pill pill;
+    private readonly Pill pill;               // short messages, shown next to the indicator
+    private readonly IndicatorWindow indicator;
     private readonly DispatcherTimer tick;
     private State state = State.Idle;
     private bool handsFree;
@@ -276,7 +277,9 @@ public sealed class Controller : IDisposable
     public Controller(Dispatcher ui)
     {
         this.ui = ui;
-        pill = new Pill(() => recorder.Level);
+        pill = new Pill(() => 0);
+        indicator = new IndicatorWindow(() => recorder.Level);
+        indicator.Clicked += OnClicked;
         hook = new HotkeyHook();
         hook.Pressed += () => ui.BeginInvoke(OnPressed);
         hook.Released += () => ui.BeginInvoke(OnReleased);
@@ -288,7 +291,10 @@ public sealed class Controller : IDisposable
 
     public bool HotkeyWorks => hook.Installed;
 
-    private System.Windows.Media.Brush Accent => C.Argb(Settings.Current.Accent);
+    /** Re-reads the indicator's style, edge and idle visibility (after a Settings change). */
+    public void RefreshIndicator() => indicator.ApplySettings();
+
+    private void Say(string text, int ms) => pill.FlashNear(text, indicator.Bounds, indicator.Dock, ms);
 
     private void OnPressed()
     {
@@ -299,22 +305,35 @@ public sealed class Controller : IDisposable
             return;
         }
         if (state != State.Idle) return;
+        Begin(handsFreeMode: false);
+    }
 
+    /** Clicking the indicator: start hands-free, or finish. Focus stays in your app. */
+    private void OnClicked()
+    {
+        if (state == State.Recording) { Finish(); return; }
+        if (state != State.Idle) return;
+        if (Begin(handsFreeMode: true)) Say("Listening · click again or press Ctrl+Win to finish", 2200);
+    }
+
+    private bool Begin(bool handsFreeMode)
+    {
         app = AppDetect.Detect();
         if (!recorder.Start())
         {
             Sounds.Play(Sounds.Kind.Error);
-            pill.Flash("No microphone found. Check Windows sound settings.", 4000);
-            return;
+            Say("No microphone found. Check Windows sound settings.", 4000);
+            return false;
         }
         state = State.Recording;
-        handsFree = false;
+        handsFree = handsFreeMode;
         pressedAt = DateTime.UtcNow;
         hook.Listening = true;
         dictation.WarmUp();
         Sounds.Play(Sounds.Kind.Start);
-        pill.Show(Bars.Mode.Listening, Accent);
+        indicator.SetMode(IndicatorView.Mode.Listening);
         tick.Start();
+        return true;
     }
 
     private void OnReleased()
@@ -324,7 +343,7 @@ public sealed class Controller : IDisposable
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < TapMs)
         {
             handsFree = true;
-            pill.Show(Bars.Mode.Listening, Accent, "Hands-free · Ctrl+Win to finish · Esc to cancel");
+            Say("Hands-free · Ctrl+Win to finish · Esc to cancel", 2600);
             return;
         }
         Finish();
@@ -351,12 +370,12 @@ public sealed class Controller : IDisposable
         if (state != State.Recording) return;
         recorder.Stop();
         Reset();
+        indicator.SetMode(IndicatorView.Mode.Idle);
         if (audible)
         {
             Sounds.Play(Sounds.Kind.Cancel);
-            pill.Flash("Cancelled", 1200);
+            Say("Cancelled", 1200);
         }
-        else pill.FadeOut();
     }
 
     private void Reset()
@@ -386,7 +405,8 @@ public sealed class Controller : IDisposable
         if (samples.Length < Recorder.SampleRate * 3 / 10)
         {
             state = State.Idle;
-            pill.Flash("Too short. Hold Ctrl+Win while you talk.", 2200);
+            indicator.SetMode(IndicatorView.Mode.Idle);
+            Say("Too short. Hold Ctrl+Win while you talk.", 2200);
             return;
         }
         float peak = 0;
@@ -394,14 +414,15 @@ public sealed class Controller : IDisposable
         if (peak < 0.0005f)
         {
             state = State.Idle;
+            indicator.SetMode(IndicatorView.Mode.Idle);
             Sounds.Play(Sounds.Kind.Error);
-            pill.Flash("The mic heard nothing. Check Settings › Privacy › Microphone.", 4500);
+            Say("The mic heard nothing. Check Settings › Privacy › Microphone.", 4500);
             return;
         }
 
         state = State.Processing;
         Sounds.Play(Sounds.Kind.Stop);
-        pill.Show(Bars.Mode.Working, System.Windows.Media.Brushes.White);
+        indicator.SetMode(IndicatorView.Mode.Working);
         var target = app;
         try
         {
@@ -411,16 +432,17 @@ public sealed class Controller : IDisposable
                 await TextInjector.Paste(outcome.Text);
                 Sounds.Play(Sounds.Kind.Done);
             }
-            if (outcome.Warning != null) pill.Flash(outcome.Warning, 3500);
-            else if (outcome.Text.Length == 0) pill.Flash("Didn't catch anything", 1800);
-            else pill.FadeOut();
+            indicator.SetMode(IndicatorView.Mode.Idle);
+            if (outcome.Warning != null) Say(outcome.Warning, 3500);
+            else if (outcome.Text.Length == 0) Say("Didn't catch anything", 1800);
             dictation.KeepAudio(samples, outcome.EntryId, null, target);
         }
         catch (Exception e)
         {
             App.Log("Dictation failed: " + e);
+            indicator.SetMode(IndicatorView.Mode.Idle);
             Sounds.Play(Sounds.Kind.Error);
-            pill.Flash(e.Message, 4500);
+            Say(e.Message, 4500);
             dictation.KeepAudio(samples, null, e.Message, target);
         }
         finally
@@ -437,5 +459,6 @@ public sealed class Controller : IDisposable
         dictation.Dispose();
         Player.Stop(false);
         pill.Close();
+        indicator.Close();
     }
 }

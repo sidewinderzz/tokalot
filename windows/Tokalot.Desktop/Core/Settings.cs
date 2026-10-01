@@ -56,6 +56,12 @@ public sealed class Settings
     public string Theme { get; set; } = "system";
     public uint Accent { get; set; } = Catalog.Accents[0].Argb;
     public int AudioKeepDays { get; set; } = 30;
+    /** Recording indicator: style (ripple, half, bars, edge, disc), screen edge, spot along it (0..1). */
+    public string IndicatorStyle { get; set; } = "ripple";
+    public string IndicatorDock { get; set; } = "bottom";
+    public double IndicatorAlong { get; set; } = 0.5;
+    /** Keep a slim bar on screen between dictations (click it to dictate, drag it to move it). */
+    public bool ShowIdleIndicator { get; set; } = true;
     public bool LaunchAtStartup { get; set; } = true;
     /** Encrypted (DPAPI, base64) keys by service id. */
     public Dictionary<string, string> EncryptedKeys { get; set; } = new();

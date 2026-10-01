@@ -150,6 +150,17 @@ public sealed class Pill : Window
         Fade(1);
     }
 
+    /** Shows a short message next to the recording indicator, then hides. */
+    public void FlashNear(string text, Rect anchor, string dock, int ms = 2600)
+    {
+        anchorRect = anchor;
+        anchorDock = dock;
+        Flash(text, ms);
+    }
+
+    private Rect? anchorRect;
+    private string anchorDock = "bottom";
+
     /** Shows a short message, then hides. */
     public void Flash(string text, int ms = 2600)
     {
@@ -185,9 +196,19 @@ public sealed class Pill : Window
         BeginAnimation(OpacityProperty, a);
     }
 
-    /** Bottom-center of the monitor you're working on, just above the taskbar. */
+    /** Next to the indicator when there is one; else bottom-center of the monitor you're working on. */
     private void Place()
     {
+        if (anchorRect is { } a)
+        {
+            switch (anchorDock)
+            {
+                case "left": Left = a.Right - 8; Top = a.Top + a.Height / 2 - ActualHeight / 2; break;
+                case "right": Left = a.Left - ActualWidth + 8; Top = a.Top + a.Height / 2 - ActualHeight / 2; break;
+                default: Left = a.Left + a.Width / 2 - ActualWidth / 2; Top = a.Top - ActualHeight + 12; break;
+            }
+            return;
+        }
         var mon = MonitorFromWindow(GetForegroundWindow(), 2);
         var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
         double scale = VisualTreeHelper.GetDpi(this).DpiScaleX;

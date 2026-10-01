@@ -123,11 +123,11 @@ public sealed class MainWindow : Window
     private void RenderNav()
     {
         nav.Children.Clear();
-        void Item(Page p, string glyph, string label)
+        void Item(Page p, string icon, string label)
         {
             var active = p == CurrentPage;
             var row = Ui.Row(
-                new TextBlock { Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 17, Foreground = C.Text, Width = 26, VerticalAlignment = VerticalAlignment.Center },
+                Spaced(Icons.Get(icon, 22, C.Text), 0, 0, 12, 0),
                 Ui.Text(label, 15, C.Text, bold: active));
             var b = new Border
             {
@@ -139,12 +139,12 @@ public sealed class MainWindow : Window
             b.MouseLeftButtonUp += (_, _) => Go(p);
             nav.Children.Add(b);
         }
-        Item(Page.Home, "", "Home");
-        Item(Page.Dictionary, "", "Dictionary");
-        Item(Page.Style, "", "Style");
-        Item(Page.Snippets, "", "Snippets");
+        Item(Page.Home, "home", "Home");
+        Item(Page.Dictionary, "book", "Dictionary");
+        Item(Page.Style, "style", "Style");
+        Item(Page.Snippets, "snippet", "Snippets");
         nav.Children.Add(new Border { Height = 14 });
-        Item(Page.Settings, "", "Settings");
+        Item(Page.Settings, "settings", "Settings");
     }
 
     /** Full height of the current page (screenshot mode). */
@@ -377,11 +377,11 @@ public sealed class MainWindow : Window
         if (e.Cleaned) meta += " · AI";
         box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
 
-        var actions = new List<UIElement> { Ui.Button("Copy", () => { _ = TextInjector.Copy(e.Text); Toast("Copied"); }, glyph: "") };
+        var actions = new List<UIElement> { Ui.Button("Copy", () => { _ = TextInjector.Copy(e.Text); Toast("Copied"); }, icon: "copy") };
         if (AudioStore.Exists(e.Id))
         {
             var playing = Player.PlayingId == e.Id;
-            actions.Add(Ui.Button("", () => { if (playing) Player.Stop(); else Player.Play(e.Id); }, filled: playing, glyph: playing ? "" : ""));
+            actions.Add(Ui.Button("", () => { if (playing) Player.Stop(); else Player.Play(e.Id); }, filled: playing, icon: playing ? "stop" : "play"));
         }
         if (e.Cleaned && e.Raw.Length > 0 && e.Raw != e.Text)
             actions.Add(Ui.Button("Original", () => { if (!showOriginal.Add(e.Id)) showOriginal.Remove(e.Id); FillHistory(); }, filled: showOriginal.Contains(e.Id)));
@@ -389,7 +389,7 @@ public sealed class MainWindow : Window
         var row = Ui.Row(actions.ToArray());
         foreach (FrameworkElement a in row.Children) a.Margin = new Thickness(0, 0, 8, 0);
 
-        var more = Ui.Button("", () => { }, glyph: "");
+        var more = Ui.Button("", () => { }, icon: "more");
         var menu = new ContextMenu();
         var copyOrig = new MenuItem { Header = "Copy original" };
         copyOrig.Click += (_, _) => { _ = TextInjector.Copy(e.Raw.Length > 0 ? e.Raw : e.Text); Toast("Copied"); };
@@ -452,7 +452,7 @@ public sealed class MainWindow : Window
         }
         var rows = S.Words.OrderBy(w => w, StringComparer.OrdinalIgnoreCase).Select(w =>
         {
-            var remove = Ui.Button("", () => { S.Words.Remove(w); S.Save(); Render(); }, glyph: "");
+            var remove = Ui.Button("", () => { S.Words.Remove(w); S.Save(); Render(); }, icon: "close");
             remove.BorderThickness = new Thickness(0);
             remove.Background = Brushes.Transparent;
             return (UIElement)Spaced(Spread(Ui.Text(w, 16), remove), 20, 8, 12, 8);
@@ -637,7 +637,7 @@ public sealed class MainWindow : Window
                 S.Theme = t.Item1; S.Save();
                 App.Current.ApplyTheme();
             })).ToArray()));
-        col.Children.Add(Spaced(Ui.Text("Recording bars color", 14, C.Sub), 4, 16, 0, 8));
+        col.Children.Add(Spaced(Ui.Text("Accent color (voice bars, disc and edge tab)", 14, C.Sub), 4, 16, 0, 8));
         var swatches = new WrapPanel { Margin = new Thickness(4, 0, 0, 0) };
         foreach (var (name, argb) in Catalog.Accents)
         {
@@ -651,6 +651,36 @@ public sealed class MainWindow : Window
             swatches.Children.Add(dot);
         }
         col.Children.Add(swatches);
+
+        // --- Recording indicator
+        Section(col, "Recording indicator");
+        col.Children.Add(Ui.List(IndicatorView.Styles.Select(id => (UIElement)IndicatorRow(id)).ToArray()));
+        var dockRow = Ui.Row(Ui.Text("Edge", 14, C.Sub));
+        ((FrameworkElement)dockRow.Children[0]).Margin = new Thickness(4, 0, 12, 0);
+        foreach (var (id, label) in new[] { ("bottom", "Bottom"), ("left", "Left"), ("right", "Right") })
+        {
+            var b = Ui.Button(label, () =>
+            {
+                S.IndicatorDock = id;
+                S.IndicatorAlong = 0.5;
+                S.Save();
+                App.Current.Controller?.RefreshIndicator();
+                Render();
+            }, filled: S.IndicatorDock == id);
+            b.Margin = new Thickness(0, 0, 8, 0);
+            dockRow.Children.Add(b);
+        }
+        if (S.IndicatorStyle != "ripple")
+            dockRow.Children.Add(Ui.Button("Reset to default", () =>
+            {
+                S.IndicatorStyle = "ripple"; S.IndicatorDock = "bottom"; S.IndicatorAlong = 0.5; S.Save();
+                App.Current.Controller?.RefreshIndicator();
+                Render();
+            }));
+        col.Children.Add(Spaced(dockRow, 0, 12, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Or drag the indicator itself to the bottom, left or right edge of your screen. On the sides it turns to face the screen.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Show when idle", "A slim bar stays on the edge between dictations. Click it to dictate, drag it to move it. Hidden while an app is full screen.",
+            Ui.Switch(S.ShowIdleIndicator, v => { S.ShowIdleIndicator = v; S.Save(); App.Current.Controller?.RefreshIndicator(); }))), 0, 12, 0, 0));
 
         // --- Recording
         Section(col, "Recording");
@@ -784,6 +814,66 @@ public sealed class MainWindow : Window
         about.Children.Add(licenses);
         about.Children.Add(Spaced(Link("Quit Tokalot", () => App.Current.Quit()), 0, 12, 0, 0));
         col.Children.Add(Ui.Card(about, 20));
+    }
+
+    /** One choosable indicator style with a live preview on a little dark "screen". */
+    private UIElement IndicatorRow(string id)
+    {
+        var (name, desc) = IndicatorView.Info(id);
+        var selected = S.IndicatorStyle == id;
+        var start = DateTime.UtcNow;
+        var view = new IndicatorView
+        {
+            Look = id, Dock = "bottom", Scale = 0.85, CurrentMode = IndicatorView.Mode.Listening,
+            VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
+            Level = () =>
+            {
+                // A made-up voice so the preview moves like real speech.
+                double t = (DateTime.UtcNow - start).TotalSeconds + id.Length;
+                double syl = Math.Max(0, Math.Sin(t * Math.PI * 2 * 2.4));
+                double talking = Math.Sin(t * Math.PI * 2 * 0.21 + 0.6) > -0.35 ? 1 : 0.06;
+                double v = (0.3 + 0.7 * syl * syl) * talking * (0.8 + 0.2 * Math.Sin(t * 7.3));
+                return (float)(v * v / 8);
+            },
+        };
+        var screen = new Grid { Width = 150, Height = 66, ClipToBounds = true };
+        screen.Children.Add(new Border { Background = C.Hex("#1F2023"), CornerRadius = new CornerRadius(10) });
+        screen.Children.Add(new Border { Background = C.Hex("#141416"), Height = 8, VerticalAlignment = VerticalAlignment.Bottom, CornerRadius = new CornerRadius(0, 0, 10, 10) });
+        screen.Children.Add(view);
+
+        var dot = new Border
+        {
+            Width = 20, Height = 20, CornerRadius = new CornerRadius(10), VerticalAlignment = VerticalAlignment.Center,
+            Background = selected ? C.Text : C.Card, BorderBrush = C.Pill, BorderThickness = new Thickness(selected ? 0 : 2), Margin = new Thickness(0, 0, 16, 0),
+        };
+        var title = Ui.Row(Ui.Text(name, 15.5, bold: selected));
+        if (id == "ripple")
+        {
+            var badge = new Border { Background = C.Field, CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 1, 8, 2), Margin = new Thickness(10, 0, 0, 0), Child = Ui.Text("Default", 11.5, C.Sub) };
+            title.Children.Add(badge);
+        }
+        var texts = Ui.Stack(title, Ui.Text(desc, 13, C.Sub));
+        texts.VerticalAlignment = VerticalAlignment.Center;
+        texts.Margin = new Thickness(18, 0, 0, 0);
+
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.Children.Add(dot);
+        Grid.SetColumn(screen, 1); g.Children.Add(screen);
+        Grid.SetColumn(texts, 2); g.Children.Add(texts);
+        var row = new Border { Padding = new Thickness(20, 12, 20, 12), Child = g, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        row.MouseEnter += (_, _) => row.Background = C.Hover;
+        row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+        row.MouseLeftButtonUp += (_, _) =>
+        {
+            S.IndicatorStyle = id;
+            S.Save();
+            App.Current.Controller?.RefreshIndicator();
+            Render();
+        };
+        return row;
     }
 
     private static UIElement ModelField(string value, Action<string> save)

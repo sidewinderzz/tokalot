@@ -104,17 +104,16 @@ public static class Ui
     public static Border Divider() => new() { Height = 1, Background = C.Line };
 
     /** Rounded pill button (outlined, or filled for primary actions). */
-    public static Border Button(string label, Action onClick, bool filled = false, string? glyph = null)
+    public static Border Button(string label, Action onClick, bool filled = false, string? icon = null)
     {
         var fg = filled ? C.Card : C.Text;
         var content = new StackPanel { Orientation = Orientation.Horizontal };
-        if (glyph != null)
-            content.Children.Add(new TextBlock
-            {
-                Text = glyph, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = 15,
-                Foreground = fg, VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, label.Length > 0 ? 8 : 0, 0),
-            });
+        if (icon != null)
+        {
+            var ic = Icons.Get(icon, 18, fg);
+            ic.Margin = new Thickness(0, 0, label.Length > 0 ? 8 : 0, 0);
+            content.Children.Add(ic);
+        }
         if (label.Length > 0)
             content.Children.Add(new TextBlock { Text = label, FontSize = 14.5, Foreground = fg, FontFamily = C.Sans, VerticalAlignment = VerticalAlignment.Center });
         var b = Stadium(new Border
