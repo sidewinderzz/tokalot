@@ -82,6 +82,7 @@ public sealed class MainWindow : Window
         Player.Changed += onPlayer;
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); };
         SourceInitialized += (_, _) => DarkTitleBar();
+        SizeChanged += (_, _) => { if (IsLoaded && IsWide != wideLayout) Render(); };
         Render();
     }
 
@@ -175,9 +176,84 @@ public sealed class MainWindow : Window
             case Page.Snippets: BuildSnippets(col); break;
             case Page.Settings: BuildSettings(col); break;
         }
-        scroller.Content = col;
+        wideLayout = IsWide;
+        scroller.Content = wideLayout ? TwoColumns(col) : StripMarkers(col);
         scroller.UpdateLayout();
         scroller.ScrollToVerticalOffset(offset);
+    }
+
+    // ---------- two columns on wide windows ----------
+
+    /** Marks the end of a page's full-width header (title and intro). */
+    private sealed class HeaderEnd : FrameworkElement { }
+    /** Marks where the second column starts; pages without one are balanced by section. */
+    private sealed class ColBreak : FrameworkElement { }
+
+    private const double ColumnGap = 32, WideAt = 1180;
+    private bool wideLayout;
+    /** Screenshot mode renders without a real window, so it sets the width here. */
+    internal double? ForcedWidth { get; set; }
+    private double ContentWidth => Math.Max(0, (ForcedWidth ?? ActualWidth) - 232 - 72 - 20);
+    private bool IsWide => ContentWidth >= WideAt;
+
+    private static StackPanel StripMarkers(StackPanel col)
+    {
+        foreach (var m in col.Children.OfType<FrameworkElement>().Where(e => e is HeaderEnd or ColBreak).ToList()) col.Children.Remove(m);
+        return col;
+    }
+
+    /** Rebuilds a one-column page as a header plus two columns. */
+    private UIElement TwoColumns(StackPanel col)
+    {
+        var items = col.Children.Cast<UIElement>().ToList();
+        col.Children.Clear();
+        var root = new StackPanel { MaxWidth = 1500, Margin = col.Margin };
+
+        int headerEnd = items.FindIndex(e => e is HeaderEnd);
+        foreach (var e in items.Take(Math.Max(0, headerEnd))) root.Children.Add(e);
+        var body = items.Skip(headerEnd + 1).ToList();
+
+        var left = new StackPanel();
+        var right = new StackPanel();
+        int brk = body.FindIndex(e => e is ColBreak);
+        if (brk >= 0)
+        {
+            foreach (var e in body.Take(brk)) left.Children.Add(e);
+            foreach (var e in body.Skip(brk + 1)) right.Children.Add(e);
+        }
+        else
+        {
+            // Settings: keep sections whole and in order, filling the left column to about half.
+            var groups = new List<List<UIElement>>();
+            foreach (var e in body)
+            {
+                if (groups.Count == 0 || (e is FrameworkElement fe && Equals(fe.Tag, "section"))) groups.Add(new List<UIElement>());
+                groups[^1].Add(e);
+            }
+            double colW = (Math.Min(1500, ContentWidth) - ColumnGap) / 2;
+            var heights = groups.Select(g => g.Sum(e => { e.Measure(new Size(colW, double.PositiveInfinity)); return e.DesiredSize.Height; })).ToList();
+            double total = heights.Sum(), acc = 0;
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var target = acc + heights[i] / 2 <= total / 2 ? left : right;
+                if (target == left) acc += heights[i];
+                foreach (var e in groups[i]) target.Children.Add(e);
+            }
+        }
+        // The first item of each column shouldn't carry a big top gap.
+        foreach (var c in new[] { left, right })
+            if (c.Children.Count > 0 && c.Children[0] is FrameworkElement f && f.Margin.Top > 8)
+                f.Margin = new Thickness(f.Margin.Left, 4, f.Margin.Right, f.Margin.Bottom);
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ColumnGap) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.Children.Add(left);
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(right);
+        root.Children.Add(grid);
+        return root;
     }
 
     private void Toast(string msg)
@@ -194,6 +270,7 @@ public sealed class MainWindow : Window
     {
         col.Children.Add(Ui.Heading(title));
         col.Children.Add(Spaced(Ui.Text(sub, 15, C.Sub), 0, 4, 0, 20));
+        col.Children.Add(new HeaderEnd());
     }
 
     private static T Spaced<T>(T e, double l, double t, double r, double b) where T : FrameworkElement
@@ -286,6 +363,7 @@ public sealed class MainWindow : Window
         col.Children.Add(Spaced(sc, 0, 0, 0, 16));
 
         (searchBox.Parent as Panel)?.Children.Remove(searchBox);
+        col.Children.Add(new ColBreak());
         col.Children.Add(searchBox);
         historyBox = new StackPanel();
         col.Children.Add(historyBox);
@@ -445,6 +523,7 @@ public sealed class MainWindow : Window
         add.HorizontalAlignment = HorizontalAlignment.Right;
         col.Children.Add(Spaced(add, 0, 10, 0, 16));
 
+        col.Children.Add(new ColBreak());
         if (S.Words.Count == 0)
         {
             col.Children.Add(Ui.Card(Ui.Text("No words yet.", 16, C.Sub), 22));
@@ -468,6 +547,7 @@ public sealed class MainWindow : Window
         if (editing == null && !editingNew)
             col.Children.Add(Spaced(Ui.Button("New snippet", () => { editingNew = true; Render(); }, filled: true), 0, 0, 0, 16));
         else col.Children.Add(Spaced(SnippetEditor(editing), 0, 0, 0, 16));
+        col.Children.Add(new ColBreak());
 
         if (S.Snippets.Count == 0)
         {
@@ -567,6 +647,7 @@ public sealed class MainWindow : Window
         var apps = History.All().Where(e => e.AppKey.Length > 0).GroupBy(e => e.AppKey).Select(g => g.First()).Take(30).ToList();
         if (apps.Count > 0)
         {
+            col.Children.Add(new ColBreak());
             col.Children.Add(Spaced(Ui.Heading("Your apps", 28), 0, 28, 0, 4));
             col.Children.Add(Spaced(Ui.Text("Click an app to change which style it uses.", 14, C.Sub), 0, 0, 0, 12));
             var rows = apps.Select(e =>
@@ -594,6 +675,7 @@ public sealed class MainWindow : Window
             col.Children.Add(Ui.List(rows));
         }
 
+        if (!col.Children.OfType<ColBreak>().Any()) col.Children.Add(new ColBreak());
         col.Children.Add(Spaced(Ui.Heading("Your instructions", 28), 0, 28, 0, 4));
         col.Children.Add(Spaced(Ui.Text("Applies everywhere. E.g. \"Use US spelling\", \"Write numbers as digits\", \"Never use exclamation points\".", 14, C.Sub), 0, 0, 0, 12));
         var (box, input) = Ui.Field(S.CustomInstructions, "Optional", multiLine: true);
@@ -603,11 +685,17 @@ public sealed class MainWindow : Window
 
     // ---------- Settings ----------
 
-    private static void Section(StackPanel col, string title) => col.Children.Add(Ui.Label(title));
+    private static void Section(StackPanel col, string title)
+    {
+        var l = Ui.Label(title);
+        l.Tag = "section";
+        col.Children.Add(l);
+    }
 
     private void BuildSettings(StackPanel col)
     {
         col.Children.Add(Ui.Heading("Settings"));
+        col.Children.Add(new HeaderEnd());
 
         // --- Setup
         Section(col, "Setup");

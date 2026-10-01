@@ -30,6 +30,9 @@ internal static class Shots
             Page(dir, theme, "4-snippets", w => w.Go(MainWindow.Page.Snippets));
             Page(dir, theme, "5-snippet-editor", w => { w.Go(MainWindow.Page.Snippets); w.OpenSnippetEditor(null); });
             Page(dir, theme, "6-settings", w => w.Go(MainWindow.Page.Settings));
+            Page(dir, theme, "7-wide-home", w => { w.ForcedWidth = 1700; w.Go(MainWindow.Page.Home); w.Render(); }, 1700);
+            Page(dir, theme, "8-wide-settings", w => { w.ForcedWidth = 1700; w.Go(MainWindow.Page.Settings); w.Render(); }, 1700);
+            Page(dir, theme, "9-wide-style", w => { w.ForcedWidth = 1700; w.SetStyleTab("MESSAGING"); w.Go(MainWindow.Page.Style); w.Render(); }, 1700);
         }
         PillShots(dir);
         IndicatorShots(dir);
@@ -59,15 +62,15 @@ internal static class Shots
         Save(row, Path.Combine(dir, "indicators.png"));
     }
 
-    private static void Page(string dir, string theme, string name, Action<MainWindow> setup)
+    private static void Page(string dir, string theme, string name, Action<MainWindow> setup, double width = 1100)
     {
         var w = new MainWindow();
         setup(w);
         var root = (FrameworkElement)w.Content;
         w.Content = null;
-        Layout(root, 1100, 800);
+        Layout(root, width, 800);
         var h = Math.Max(800, w.ExtentHeight + 4);
-        Layout(root, 1100, h);
+        Layout(root, width, h);
         Save(root, Path.Combine(dir, $"{theme}-{name}.png"));
         w.Close();
     }
