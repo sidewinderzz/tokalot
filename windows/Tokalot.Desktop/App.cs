@@ -88,7 +88,11 @@ public sealed class App : Application
         SetUpTray();
 
         // Keep "start with Windows" pointing at the installed exe (its path changes on update).
-        if (Updater.CanUpdate) Platform.Startup.Apply(s.LaunchAtStartup);
+        if (Updater.CanUpdate)
+        {
+            Platform.Startup.Apply(s.LaunchAtStartup);
+            EnsureStartMenuShortcut();
+        }
 
         // A second launch signals this one to show the window.
         var signal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowSignal);
@@ -99,6 +103,29 @@ public sealed class App : Application
             tray?.ShowBalloonTip(6000, "Tokalot", "Couldn't listen for Ctrl+Win. Try restarting Tokalot.", System.Windows.Forms.ToolTipIcon.Warning);
 
         _ = CheckForUpdatesLoop();
+    }
+
+    /** A Start menu entry, so Tokalot can be found by searching "Tokalot" (the silent installer skips it). */
+    private static void EnsureStartMenuShortcut()
+    {
+        try
+        {
+            var lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Tokalot.lnk");
+            if (File.Exists(lnk)) return;
+            // The launcher one folder up survives updates; fall back to this exe.
+            var stub = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Tokalot.exe"));
+            var target = File.Exists(stub) ? stub : Environment.ProcessPath;
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (target == null || shellType == null) return;
+            dynamic shell = Activator.CreateInstance(shellType)!;
+            dynamic sc = shell.CreateShortcut(lnk);
+            sc.TargetPath = target;
+            sc.WorkingDirectory = Path.GetDirectoryName(target);
+            sc.IconLocation = Path.Combine(AppContext.BaseDirectory, "Assets", "icon.ico");
+            sc.Description = "Voice typing: hold Ctrl+Win";
+            sc.Save();
+        }
+        catch (Exception e) { Log("Start menu shortcut failed: " + e.Message); }
     }
 
     // ---------- window ----------
