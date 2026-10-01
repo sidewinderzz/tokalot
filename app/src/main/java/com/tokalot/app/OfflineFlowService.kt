@@ -25,6 +25,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import kotlin.math.abs
@@ -32,7 +33,9 @@ import kotlin.math.abs
 /**
  * Floats a small waveform button above the keyboard whenever the keyboard is open on an
  * editable (non-password) field in any app. Tap to start/stop, long-press to cancel,
- * drag to move (the spot is remembered). If the field or keyboard closes while you talk,
+ * drag to move (the spot is remembered). Drag it into the red zone at the top of the screen
+ * to dismiss it; it comes back the next time an input field is focused or the keyboard
+ * reopens. If the field or keyboard closes while you talk,
  * recording continues; when you stop, the text goes into whatever field is focused, or to
  * the clipboard if none is.
  * Does nothing (no mic, no model in memory, no network) until you tap.
@@ -66,6 +69,11 @@ class OfflineFlowService : AccessibilityService() {
     private var params: WindowManager.LayoutParams? = null
     private var attached = false
     private var touching = false // don't snap the button back while a finger is on it
+    private var dismissed = false // dragged into the top zone; stay hidden until the next field
+    private var inDropZone = false
+    private var dropZone: FrameLayout? = null
+    private var dropIcon: FrameLayout? = null
+    private var zoneAttached = false
     private var state = State.IDLE
     private var targetApp: String? = null // app you were in when you tapped the mic
     private var pendingStop = false       // released (hold mode) before the mic finished starting
@@ -103,6 +111,12 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        // A new input field taking focus brings a dismissed button back.
+        if (dismissed && event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
+            event.source?.isEditable == true
+        ) {
+            dismissed = false
+        }
         // Debounce: keyboard open/close fires a burst of window events.
         handler.removeCallbacks(recheck)
         handler.postDelayed(recheck, 150)
@@ -141,6 +155,63 @@ class OfflineFlowService : AccessibilityService() {
         bars = b
         buttonBg = bg
         params = overlayParams(sizePx, sizePx)
+        buildDropZone()
+    }
+
+    /** Red gradient with an X along the top edge. Fades in while you drag the button. */
+    private fun buildDropZone() {
+        val icon = FrameLayout(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#33FFFFFF"))
+            }
+            val x = ImageView(this@OfflineFlowService).apply {
+                setImageDrawable(this@OfflineFlowService.getDrawable(R.drawable.ic_close)?.mutate()?.apply { setTint(Color.WHITE) })
+            }
+            addView(x, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
+        }
+        val zone = FrameLayout(this).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.parseColor("#F2D93A3A"), Color.parseColor("#00D93A3A"))
+            )
+            alpha = 0f
+            addView(icon, FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = dp(48)
+            })
+        }
+        dropZone = zone
+        dropIcon = icon
+    }
+
+    private val zoneHeight get() = dp(150)
+    /** The button counts as "in the zone" once its centre is inside the red area. */
+    private fun overZone(p: WindowManager.LayoutParams) = p.y + sizePx / 2 <= dp(110)
+
+    private fun showDropZone(show: Boolean) {
+        dropZone?.animate()?.alpha(if (show) 1f else 0f)?.setDuration(140)?.start()
+        if (!show) {
+            inDropZone = false
+            dropIcon?.animate()?.scaleX(1f)?.scaleY(1f)?.setDuration(100)?.start()
+        }
+    }
+
+    private fun updateDropHover(p: WindowManager.LayoutParams) {
+        val over = overZone(p)
+        if (over == inDropZone) return
+        inDropZone = over
+        dropIcon?.animate()?.scaleX(if (over) 1.3f else 1f)?.scaleY(if (over) 1.3f else 1f)?.setDuration(100)?.start()
+        if (over) Haptics.play(this, Haptics.Kind.TICK)
+    }
+
+    /** Hide the button until the next input field is focused (or the keyboard reopens). */
+    private fun dismissButton() {
+        dismissed = true
+        showDropZone(false)
+        Haptics.play(this, Haptics.Kind.CANCEL)
+        handler.removeCallbacks(settle)
+        settling = false
+        detach()
     }
 
     /**
@@ -180,6 +251,7 @@ class OfflineFlowService : AccessibilityService() {
                     downX = e.rawX; downY = e.rawY
                     startX = p.x; startY = p.y
                     dragging = false; longPressed = false; holding = false; inCancelZone = false
+                    inDropZone = false
                     if (holdMode && state == State.IDLE) handler.postDelayed(holdStart, 220)
                     else handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
                 }
@@ -200,12 +272,16 @@ class OfflineFlowService : AccessibilityService() {
                             handler.removeCallbacks(longPress)
                             handler.removeCallbacks(holdStart)
                             v.alpha = 1f
+                            if (state == State.IDLE) showDropZone(true)
                         }
                         if (dragging) {
                             p.x = startX + dx.toInt()
                             p.y = startY + dy.toInt()
-                            clamp(p)
+                            // Only an idle button can be thrown away; mid-recording it stays put.
+                            val canDismiss = state == State.IDLE
+                            clamp(p, allowTop = canDismiss)
                             try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                            if (canDismiss) updateDropHover(p)
                         }
                     }
                 }
@@ -215,7 +291,17 @@ class OfflineFlowService : AccessibilityService() {
                     handler.removeCallbacks(holdStart)
                     when {
                         holding -> { v.alpha = 1f; if (inCancelZone) cancel() else finishRecording() }
-                        dragging -> { savePosition(p); if (state == State.IDLE) v.alpha = IDLE_ALPHA }
+                        dragging -> {
+                            if (inDropZone && state == State.IDLE) {
+                                handler.post { dismissButton() }
+                            } else {
+                                showDropZone(false)
+                                clamp(p)
+                                try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                                savePosition(p)
+                                if (state == State.IDLE) v.alpha = IDLE_ALPHA
+                            }
+                        }
                         holdMode && state == State.IDLE -> toast("Hold the button to talk")
                         !longPressed -> onTap()
                     }
@@ -225,6 +311,7 @@ class OfflineFlowService : AccessibilityService() {
                     touching = false
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(holdStart)
+                    if (dragging) showDropZone(false)
                     if (holding) finishRecording()
                     holding = false
                 }
@@ -252,7 +339,8 @@ class OfflineFlowService : AccessibilityService() {
     private fun updateButton() {
         // Idle: only show when the keyboard is actually up on an editable field.
         // Recording/transcribing: stay visible even if the field or keyboard closed.
-        if (state == State.IDLE && (keyboardTop() == null || focusedEditable() == null)) {
+        if (state == State.IDLE && keyboardTop() == null) dismissed = false // keyboard closed: forget
+        if (state == State.IDLE && (dismissed || keyboardTop() == null || focusedEditable() == null)) {
             handler.removeCallbacks(settle)
             settling = false
             detach()
@@ -266,6 +354,15 @@ class OfflineFlowService : AccessibilityService() {
             p.x = tx; p.y = ty
             button?.alpha = 0f
             try {
+                // The drop zone goes in first (invisible) so it sits underneath the button.
+                if (!zoneAttached) {
+                    val zp = overlayParams(WindowManager.LayoutParams.MATCH_PARENT, zoneHeight)
+                    zp.flags = zp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    zp.x = 0; zp.y = 0
+                    dropZone?.alpha = 0f
+                    wm.addView(dropZone, zp)
+                    zoneAttached = true
+                }
                 wm.addView(button, params)
                 attached = true
             } catch (_: Exception) { return }
@@ -291,7 +388,7 @@ class OfflineFlowService : AccessibilityService() {
 
     /** Called once the keyboard has stopped moving: final position, then fade back in. */
     private fun applySettled() {
-        if (state == State.IDLE && (keyboardTop() == null || focusedEditable() == null)) {
+        if (state == State.IDLE && (dismissed || keyboardTop() == null || focusedEditable() == null)) {
             detach()
             return
         }
@@ -324,10 +421,10 @@ class OfflineFlowService : AccessibilityService() {
         return x to y
     }
 
-    private fun clamp(p: WindowManager.LayoutParams) {
+    private fun clamp(p: WindowManager.LayoutParams, allowTop: Boolean = false) {
         val dm = resources.displayMetrics
         p.x = p.x.coerceIn(0, dm.widthPixels - sizePx)
-        p.y = p.y.coerceIn(dp(24), dm.heightPixels - sizePx)
+        p.y = p.y.coerceIn(if (allowTop) 0 else dp(24), dm.heightPixels - sizePx)
     }
 
     private fun savePosition(p: WindowManager.LayoutParams) {
@@ -341,6 +438,10 @@ class OfflineFlowService : AccessibilityService() {
         if (attached) {
             try { wm.removeView(button) } catch (_: Exception) {}
             attached = false
+        }
+        if (zoneAttached) {
+            try { wm.removeView(dropZone) } catch (_: Exception) {}
+            zoneAttached = false
         }
     }
 
