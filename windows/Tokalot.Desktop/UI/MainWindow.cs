@@ -641,8 +641,6 @@ public sealed class MainWindow : Window
             swatches.Children.Add(dot);
         }
         col.Children.Add(swatches);
-        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Compatibility rendering", "Draws this window without the graphics card. Turn on if Tokalot's window looks blank. Restart Tokalot to apply.",
-            Ui.Switch(S.SoftwareRendering, v => { S.SoftwareRendering = v; S.Save(); }))), 0, 16, 0, 0));
 
         // --- Recording
         Section(col, "Recording");

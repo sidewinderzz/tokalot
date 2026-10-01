@@ -38,7 +38,7 @@ public sealed class App : Application
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown,
             background = args.Contains("--background"),
-            software = args.Contains("--software"),
+            gpu = args.Contains("--gpu"),
         };
         app.Run();
     }
@@ -50,16 +50,17 @@ public sealed class App : Application
     private System.Windows.Forms.NotifyIcon? tray;
     private System.Windows.Forms.ToolStripMenuItem? updateItem;
 
-    private bool background, software;
+    private bool background, gpu;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         var s = Settings.Current;
-        // Some graphics drivers show WPF windows as blank white; drawing on the CPU avoids that.
-        if (software || s.SoftwareRendering)
-            System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
-        Log($"Start {Updater.CurrentVersion} · render tier {System.Windows.Media.RenderCapability.Tier >> 16} · software={software || s.SoftwareRendering} · {Environment.OSVersion}");
+        // Some graphics drivers present WPF windows as blank white (seen on an NVIDIA 4K setup).
+        // Tokalot's UI is simple, so drawing it on the CPU costs nothing noticeable and always works.
+        // "--gpu" switches back to hardware rendering for testing.
+        if (!gpu) System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+        Log($"Start {Updater.CurrentVersion} · render tier {System.Windows.Media.RenderCapability.Tier >> 16} · gpu={gpu} · {Environment.OSVersion}");
         C.Apply(s.Theme);
         DispatcherUnhandledException += (_, e) =>
         {
