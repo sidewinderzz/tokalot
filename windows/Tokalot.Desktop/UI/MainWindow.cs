@@ -96,7 +96,7 @@ public sealed class MainWindow : Window
 
         var hint = Ui.Card(Ui.Stack(
             Ui.Text("Hold to talk", 13, C.Sub),
-            Ui.Row(KeyCap("Ctrl"), Ui.Text(" + ", 14, C.Sub), KeyCap("Win")),
+            Ui.Row(KeyCap("Ctrl"), new TextBlock { Text = "+", FontSize = 14, Foreground = C.Sub, Margin = new Thickness(7, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center }, KeyCap("Win")),
             Ui.Text("Tap once for hands-free. Esc cancels.", 12.5, C.Sub)), 16);
         ((StackPanel)hint.Child).Children[1].SetValue(MarginProperty, new Thickness(0, 8, 0, 8));
         hint.Margin = new Thickness(14, 0, 14, 18);
@@ -220,6 +220,7 @@ public sealed class MainWindow : Window
     {
         var g = new Grid();
         g.ColumnDefinitions.Add(new ColumnDefinition());
+        if (left is FrameworkElement lf) lf.VerticalAlignment = VerticalAlignment.Center;
         g.Children.Add(left);
         for (int i = 0; i < right.Length; i++)
         {
@@ -278,7 +279,7 @@ public sealed class MainWindow : Window
         for (int i = 0; i < 3; i++) { Grid.SetColumn(cells[i], i); stats.Children.Add(cells[i]); }
         var statCard = Ui.Stack(Ui.Text(DateTime.Now.ToString("MMMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant(), 12, C.Sub, bold: true), stats);
         if (m.Fillers + m.Corrections > 0)
-            statCard.Children.Add(Spaced(Ui.Text($"Cleaned up {m.Fillers} filler words and {m.Corrections} self-corrections", 13, C.Sub), 0, 10, 0, 0));
+            statCard.Children.Add(Spaced(Ui.Text($"Cleaned up {Plural(m.Fillers, "filler word")} and {Plural(m.Corrections, "self-correction")}", 13, C.Sub), 0, 10, 0, 0));
         var sc = Ui.Card(statCard, 22);
         sc.Cursor = Cursors.Hand;
         sc.MouseLeftButtonUp += (_, _) => Go(Page.Settings);
@@ -406,6 +407,8 @@ public sealed class MainWindow : Window
         box.Children.Add(Spread(row, more));
         return box;
     }
+
+    private static string Plural(int n, string word) => $"{n} {word}{(n == 1 ? "" : "s")}";
 
     private static string DayLabel(long t)
     {

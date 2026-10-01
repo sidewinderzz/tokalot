@@ -87,6 +87,7 @@ public sealed class Bars : FrameworkElement
 public sealed class Pill : Window
 {
     private readonly Bars bars = new() { Width = 30, Height = 30 };
+    private Border shell = null!;
     private readonly TextBlock label = new()
     {
         Foreground = Brushes.White, FontSize = 13, FontFamily = C.Sans, VerticalAlignment = VerticalAlignment.Center,
@@ -107,12 +108,12 @@ public sealed class Pill : Window
         Focusable = false;
         Opacity = 0;
         bars.Level = level;
-        Content = Ui.Stadium(new Border
+        Content = shell = Ui.Stadium(new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x1C, 0x1C, 0x1E)),
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
-            Padding = new Thickness(12, 7, 14, 7),
+            Padding = new Thickness(9),
             Child = Ui.Row(bars, label),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.35 },
             Margin = new Thickness(16),
@@ -173,6 +174,8 @@ public sealed class Pill : Window
     {
         label.Text = text;
         label.Visibility = text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // Just the bars: a round disc like the Android button. With a message: a pill.
+        shell.Padding = text.Length > 0 ? new Thickness(12, 9, 16, 9) : new Thickness(9);
     }
 
     private void Fade(double to, Action? done = null)

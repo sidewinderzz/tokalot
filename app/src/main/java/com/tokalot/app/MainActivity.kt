@@ -437,7 +437,7 @@ class MainActivity : Activity() {
         statRow.addView(stat(money(m.total), "est. cost"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         stats.addView(statRow)
         if (m.fillers + m.corrections > 0) {
-            stats.addView(text("Cleaned up ${m.fillers} filler words and ${m.corrections} self-corrections", 13f, C.SUB).apply {
+            stats.addView(text("Cleaned up ${m.fillers} filler word${if (m.fillers == 1) "" else "s"} and ${m.corrections} self-correction${if (m.corrections == 1) "" else "s"}", 13f, C.SUB).apply {
                 setPadding(0, dp(10), 0, 0)
             })
         }
