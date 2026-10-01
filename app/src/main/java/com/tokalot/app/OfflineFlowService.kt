@@ -53,7 +53,7 @@ class OfflineFlowService : AccessibilityService() {
         private const val IDLE_ALPHA = 0.75f
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
-        private const val CANCEL_GUARD_MS = 600L
+        private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
         private const val AROUND = 64 // characters read either side of the cursor before typing
         /** Placeholders apps show in empty boxes, for apps that don't flag them as hints. */
         private val COMMON_PLACEHOLDERS = setOf(
@@ -125,6 +125,7 @@ class OfflineFlowService : AccessibilityService() {
         ) {
             dismissed = false
         }
+        lookAgain = 6
         // Debounce: keyboard open/close fires a burst of window events.
         handler.removeCallbacks(recheck)
         handler.postDelayed(recheck, 150)
@@ -358,17 +359,32 @@ class OfflineFlowService : AccessibilityService() {
     ).apply { gravity = Gravity.TOP or Gravity.START }
 
     private fun focusedEditable(): AccessibilityNodeInfo? {
-        val root = rootInActiveWindow ?: return null
-        if (root.packageName == packageName) return null // not inside our own app
-        val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return null
-        return if (node.isEditable && !node.isPassword) node else null
+        // The "active" window is sometimes the keyboard itself, or briefly missing while it slides up,
+        // so look through every app window for the field that has input focus.
+        val roots = sequenceOf(rootInActiveWindow) + windows.asSequence()
+            .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }.map { it.root }
+        for (root in roots) {
+            if (root == null || root.packageName == packageName) continue // not inside our own app
+            val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: continue
+            return if (node.isEditable && !node.isPassword) node else null
+        }
+        return null
     }
+
+    private var lookAgain = 0 // re-checks left when the keyboard is up but no field was found yet
 
     private fun updateButton() {
         // Idle: only show when the keyboard is actually up on an editable field.
         // Recording/transcribing: stay visible even if the field or keyboard closed.
         if (state == State.IDLE && keyboardTop() == null) dismissed = false // keyboard closed: forget
         if (state == State.IDLE && (dismissed || keyboardTop() == null || focusedEditable() == null)) {
+            // Keyboard up but no field found: some apps report the focused field a moment late and send
+            // no further event, which left the button hidden. Look again a few times before giving up.
+            if (!dismissed && keyboardTop() != null && lookAgain > 0) {
+                lookAgain--
+                handler.removeCallbacks(recheck)
+                handler.postDelayed(recheck, 300)
+            }
             handler.removeCallbacks(settle)
             settling = false
             detach()
@@ -478,15 +494,26 @@ class OfflineFlowService : AccessibilityService() {
     private fun describe(s: State) = when (s) {
         State.IDLE -> "Start dictation"
         State.STARTING, State.RECORDING -> "Stop and transcribe"
-        State.WORKING -> "Cancel transcription"
+        State.WORKING -> "Transcribing"
+    }
+
+    /** Transcribing is taking a while: an X over the dimmed ripple shows that a tap now cancels. */
+    private val showCancel = Runnable {
+        if (state == State.WORKING) {
+            cancelIcon?.visibility = View.VISIBLE
+            bars?.alpha = 0.35f
+            button?.contentDescription = "Cancel transcription"
+        }
     }
 
     private fun setState(s: State) {
         state = s
         button?.contentDescription = describe(s)
-        // Transcribing: an X over the dimmed ripple shows that a tap now cancels.
-        cancelIcon?.visibility = if (s == State.WORKING) View.VISIBLE else View.GONE
-        bars?.alpha = if (s == State.WORKING) 0.35f else 1f
+        // A normal transcription takes a second or two; only offer to cancel when it drags on.
+        handler.removeCallbacks(showCancel)
+        cancelIcon?.visibility = View.GONE
+        bars?.alpha = 1f
+        if (s == State.WORKING) handler.postDelayed(showCancel, CANCEL_SHOW_MS)
         buttonBg?.setColor(
             when (s) {
                 State.IDLE -> COLOR_IDLE
@@ -565,9 +592,9 @@ class OfflineFlowService : AccessibilityService() {
         when (state) {
             State.IDLE -> startRecording()
             State.RECORDING -> stopAndTranscribe()
-            // A tap while transcribing cancels (the callback in stopAndTranscribe() does the rest),
-            // but not the second half of a double-tap on "stop".
-            State.WORKING -> if (SystemClock.elapsedRealtime() - workingSince > CANCEL_GUARD_MS) dictation.cancel()
+            // A tap cancels once the X is showing (the callback in stopAndTranscribe() does the rest).
+            // Before that it does nothing, so a double-tap on "stop" can't cancel. A long press cancels at any time.
+            State.WORKING -> if (SystemClock.elapsedRealtime() - workingSince > CANCEL_SHOW_MS) dictation.cancel()
             State.STARTING -> {}
         }
     }
