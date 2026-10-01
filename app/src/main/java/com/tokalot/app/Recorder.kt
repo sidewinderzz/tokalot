@@ -21,6 +21,9 @@ class Recorder {
 
     val isRecording: Boolean get() = running
 
+    /** Called once (on the recording thread) when the 5 minute cap is reached. */
+    @Volatile var onFull: (() -> Unit)? = null
+
     /** Loudness of the latest audio chunk (RMS, 0..1), for the animated button. */
     @Volatile var level = 0f
         private set
@@ -60,8 +63,15 @@ class Recorder {
         lastVoiceSample = 0
         speechSamples = 0
         record = rec
+        try {
+            rec.startRecording()
+        } catch (e: IllegalStateException) {
+            // The mic is busy or was taken away between creating and starting.
+            rec.release()
+            record = null
+            return false
+        }
         running = true
-        rec.startRecording()
         thread = Thread {
             val buf = ShortArray(minBuf)
             while (running) {
@@ -78,6 +88,7 @@ class Recorder {
                     if (total < MAX_SAMPLES) {
                         chunks.add(buf.copyOf(n))
                         total += n
+                        if (total >= MAX_SAMPLES) onFull?.invoke()
                     }
                 } else if (n < 0) break
             }

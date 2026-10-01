@@ -3,7 +3,7 @@ package com.tokalot.app
 /** Plain-code text handling: noise stripping, the no-AI fallback cleanup, and snippets. */
 object TextTools {
     private val NOISE = Regex("""\[[^\]]*]|\((?:music|laughs?|applause|silence|inaudible|blank_audio|noise)[^)]*\)|\*[^*]*\*""", RegexOption.IGNORE_CASE)
-    private val FILLERS = Regex("""(?i)\b(?:um+|uh+|erm?|hmm+|mm+)\b[,.]?\s*""")
+    private val FILLERS = Regex("""(?i)\b(?:um+|uh+|erm|hmm+)\b[,.]?\s*""") // not "er"/"mm": real words (the ER, 5 mm)
     private val SPACES = Regex("""\s+""")
     private val SPACE_BEFORE_PUNCT = Regex("""\s+([,.!?;:])""")
 

@@ -277,7 +277,7 @@ class SettingsScreen(private val a: MainActivity) {
         val setup = card()
         fun setupRow(title: String, done: Boolean, doneText: String, action: String, onClick: () -> Unit): TextView {
             if (setup.childCount > 0) setup.addView(divider())
-            val status = text(if (done) doneText else "Not done", 14f, if (done) C.GOOD else C.WARN)
+            val status = text(if (done) doneText else doneText.takeIf { it.startsWith("Failed") } ?: "Not done", 14f, if (done) C.GOOD else C.WARN)
             val texts = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(text(title, 17f))
@@ -419,9 +419,18 @@ class SettingsScreen(private val a: MainActivity) {
             .forEachIndexed { i, (days, label) ->
                 if (i > 0) rec.addView(divider())
                 rec.addView(choiceRow(label, "", prefs.audioKeepDays == days) {
-                    prefs.audioKeepDays = days
-                    Thread { AudioStore.prune(applicationContext, days); runOnUiThread { render() } }.start()
-                    render()
+                    val keep = {
+                        prefs.audioKeepDays = days
+                        Thread { AudioStore.prune(applicationContext, days); runOnUiThread { render() } }.start()
+                        render()
+                    }
+                    if (days < prefs.audioKeepDays && AudioStore.totalBytes(this) > 0) {
+                        AlertDialog.Builder(this)
+                            .setMessage(if (days == 0) "Delete all saved recordings now? Transcripts stay."
+                                else "Delete recordings older than $days days now? Transcripts stay.")
+                            .setPositiveButton("Delete") { _, _ -> keep() }
+                            .setNegativeButton("Cancel", null).show()
+                    } else keep()
                 })
             }
         col.addView(rec)

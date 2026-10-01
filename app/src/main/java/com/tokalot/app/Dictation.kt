@@ -61,7 +61,7 @@ class Dictation(context: Context) {
             }
             main.post {
                 onDone(outcome, error)
-                main.postDelayed(unload, IDLE_UNLOAD_MS)
+                if (!exec.isShutdown) main.postDelayed(unload, IDLE_UNLOAD_MS)
             }
             // After the text is delivered: keep the audio so it can be replayed.
             // A failed transcription still gets an entry, so the recording isn't lost.

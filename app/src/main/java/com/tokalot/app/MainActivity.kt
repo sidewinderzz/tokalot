@@ -159,13 +159,23 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    private val INSTALL_CONFIRM_ACTIONS = setOf(
+        "android.content.pm.action.CONFIRM_INSTALL", "android.content.pm.action.CONFIRM_PERMISSIONS",
+    )
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.action == ACTION_INSTALL_STATUS) {
             when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -999)) {
                 PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                     @Suppress("DEPRECATION")
-                    (intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT))?.let { startActivity(it) }
+                    val next = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
+                    if (next != null && next.action in INSTALL_CONFIRM_ACTIONS) {
+                        next.flags = next.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                            Intent.FLAG_GRANT_PREFIX_URI_PERMISSION).inv()
+                        startActivity(next)
+                    }
                 }
                 PackageInstaller.STATUS_SUCCESS -> {}
                 else -> toast("Update not installed: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "cancelled"}")

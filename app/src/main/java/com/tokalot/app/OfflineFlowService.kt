@@ -236,7 +236,7 @@ class OfflineFlowService : AccessibilityService() {
             }
         }
         private val holdStart = Runnable {
-            if (!dragging && state == State.IDLE) {
+            if (!dragging && state == State.IDLE && attached) {
                 holding = true
                 startRecording()
             }
@@ -435,6 +435,7 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun detach() {
+        touching = false
         if (attached) {
             try { wm.removeView(button) } catch (_: Exception) {}
             attached = false
@@ -563,6 +564,14 @@ class OfflineFlowService : AccessibilityService() {
         val begin = {
             if (!began && state == State.STARTING) {
                 began = true
+                recorder.onFull = {
+                    handler.post {
+                        if (state == State.RECORDING) {
+                            toast("Reached 5 minutes. Transcribing…")
+                            stopAndTranscribe()
+                        }
+                    }
+                }
                 if (recorder.start()) {
                     setState(State.RECORDING)
                     Haptics.play(this, Haptics.Kind.START)
@@ -610,7 +619,7 @@ class OfflineFlowService : AccessibilityService() {
         var samples = recorder.stop()
         // After an auto-stop, drop the trailing 30 s of silence: less to upload, and Whisper
         // tends to invent words ("Thank you.") in long silences.
-        if (autoStopped) {
+        if (autoStopped && voiceEnd > 0) {
             val keep = (voiceEnd + Recorder.SAMPLE_RATE).coerceAtMost(samples.size)
             samples = samples.copyOf(keep)
         }
@@ -663,7 +672,7 @@ class OfflineFlowService : AccessibilityService() {
         if (node == null || !insert(node, text)) {
             copyToClipboard(text)
             showBubble("Copied ✓  $text") { copyToClipboard(text); toast("Copied") }
-        } else {
+        } else if (lastInsert != null) {
             showBubble("↶  Undo", 5000) { undoInsert() }
         }
     }
@@ -693,6 +702,7 @@ class OfflineFlowService : AccessibilityService() {
     private fun insert(node: AccessibilityNodeInfo, text: String): Boolean {
         // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
         // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
+        lastInsert = null
         val raw = node.text?.toString() ?: ""
         val hintText = node.hintText?.toString()
         val caretAtStart = node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
@@ -708,7 +718,8 @@ class OfflineFlowService : AccessibilityService() {
         end = end.coerceAtMost(current.length)
 
         val needsSpace = start > 0 && !current[start - 1].isWhitespace()
-        val piece = (if (needsSpace) " " else "") + text
+        val needsSpaceAfter = end < current.length && current[end].isLetterOrDigit()
+        val piece = (if (needsSpace) " " else "") + text + (if (needsSpaceAfter) " " else "")
         val updated = current.substring(0, start) + piece + current.substring(end)
 
         val args = Bundle().apply {
