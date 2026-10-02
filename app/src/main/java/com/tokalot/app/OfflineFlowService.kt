@@ -258,9 +258,9 @@ class OfflineFlowService : AccessibilityService() {
         val bottom = anchor()
         val m = dp(40)
         return when (pillDock) {
-            "left" -> 0 to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), bottom - winH)
-            "right" -> (dm.widthPixels - winW) to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), bottom - winH)
-            else -> (m + pillAlong * (dm.widthPixels - 2 * m) - winW / 2f).toInt().coerceIn(0, dm.widthPixels - winW) to (bottom - winH)
+            "left" -> 0 to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), maxOf(dp(24), bottom - winH))
+            "right" -> (dm.widthPixels - winW) to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), maxOf(dp(24), bottom - winH))
+            else -> (m + pillAlong * (dm.widthPixels - 2 * m) - winW / 2f).toInt().coerceIn(0, dm.widthPixels - winW) to maxOf(0, bottom - winH)
         }
     }
 
@@ -409,6 +409,7 @@ class OfflineFlowService : AccessibilityService() {
                             } else {
                                 showDropZone(false)
                                 clamp(p)
+                                if (pill) pillTarget().let { (x, y) -> p.x = x; p.y = y } // land back on its edge
                                 try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                                 savePosition(p)
                                 if (state == State.IDLE && !pill) v.alpha = IDLE_ALPHA
@@ -567,7 +568,7 @@ class OfflineFlowService : AccessibilityService() {
 
     /** Settings may have switched the button's shape since it was built; rebuild it while it is hidden. */
     private fun syncStyle() {
-        if (!attached && (Prefs(this).buttonStyle == "pill") != pill) {
+        if (!attached && !zoneAttached && (Prefs(this).buttonStyle == "pill") != pill) {
             buildButton()
             setState(state)
         }
