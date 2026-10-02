@@ -94,7 +94,7 @@ jobs:
       # (perl's alarm stops it if macOS ever waits on a prompt nobody can answer.)
       - name: Smoke test - native self-test
         run: |
-          TOKALOT_DATA="$RUNNER_TEMP/selftest" perl -e 'alarm 120; exec @ARGV' "$BIN" --selftest | tee "$CHECKS/selftest.txt"
+          TOKALOT_DATA="$RUNNER_TEMP/selftest" perl -e 'alarm 120; exec @ARGV' "$BIN" --selftest --synthetic-keys | tee "$CHECKS/selftest.txt"
 
       # The 60 MB offline model, then real speech (made by macOS's own voice) through the dictation pipeline.
       - name: Smoke test - offline model and a transcription

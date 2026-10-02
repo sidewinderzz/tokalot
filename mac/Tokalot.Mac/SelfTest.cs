@@ -13,7 +13,8 @@ namespace Tokalot.Desktop;
  * "Tokalot --selftest": exercises the Mac-only pieces directly and prints one PASS / FAIL / INFO line
  * each, for the build machine (and for a tester who wants to see what works). It exits non-zero if
  * anything FAILs. Permissions a CI machine can't have are reported as INFO unless asked for:
- *   --expect-tap       the keyboard tap must work, and synthetic Ctrl+Cmd presses must be seen
+ *   --synthetic-keys   press Ctrl+Cmd, Z and Esc (synthetically) and check the keyboard tap sees them
+ *   --expect-tap       the keyboard tap must work (and, with --synthetic-keys, see those presses)
  *   --expect-paste     posting ⌘V must be allowed
  *   --record <secs>    record from the default input device and report what came in
  *   --record-to <wav>  also save that recording
@@ -95,6 +96,8 @@ internal static unsafe class SelfTest
             using var hook = new HotkeyHook();
             if (!hook.Installed)
                 return (!args.Contains("--expect-tap"), "not installed (Input Monitoring not allowed" + (args.Contains("--expect-tap") ? ")" : "; expected on a build machine)"));
+            // Pressing keys on someone's own Mac would land in whatever app is in front: only on request (the build machine).
+            if (!args.Contains("--synthetic-keys")) return (true, "installed (add --synthetic-keys to also press Ctrl+Cmd, Z and Esc and check they're seen)");
             if (!post) return (!args.Contains("--expect-tap"), "installed; synthetic keys skipped (posting events not allowed)");
             return SyntheticKeys(hook);
         });
