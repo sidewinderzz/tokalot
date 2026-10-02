@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <!-- Same assembly name and namespaces as the Windows and Linux apps, so the shared files compile unchanged. -->
+    <AssemblyName>Tokalot</AssemblyName>
+    <RootNamespace>Tokalot.Desktop</RootNamespace>
+    <Product>Tokalot</Product>
+    <Company>sidewinderzz</Company>
+    <Version>0.1.0</Version>
+    <!-- Apple silicon unless another one is asked for (-r osx-x64 for Intel Macs; -r linux-x64 runs the screenshot mode on Linux). -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">osx-arm64</RuntimeIdentifier>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Native macOS calls (Objective-C runtime, Core Audio, Quartz events) use function pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UI toolkit (Avalonia's native macOS backend). Fluent supplies the base control templates. -->
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <!-- Only used by the screenshots mode: renders the pages to PNGs without a display. -->
+    <PackageReference Include="Avalonia.Headless" Version="11.3.22" />
+    <!-- Offline speech recognition (whisper.cpp), the same engine as the other apps. -->
+    <PackageReference Include="Whisper.net" Version="1.9.1" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
+  </ItemGroup>
+
+  <!-- The platform-neutral core, shared with the Windows and Linux apps (linked, not copied). -->
+  <ItemGroup>
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Backup.cs" Link="Shared\Core\Backup.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Catalog.cs" Link="Shared\Core\Catalog.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Cleanup.cs" Link="Shared\Core\Cleanup.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Dictation.cs" Link="Shared\Core\Dictation.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\History.cs" Link="Shared\Core\History.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\LocalWhisper.cs" Link="Shared\Core\LocalWhisper.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Net.cs" Link="Shared\Core\Net.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Sync.cs" Link="Shared\Core\Sync.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\TextTools.cs" Link="Shared\Core\TextTools.cs" />
+  </ItemGroup>
+
+  <!-- The interface and the dictation controller, shared with the Linux app (linked, not copied). -->
+  <ItemGroup>
+    <Compile Include="..\..\linux\Tokalot.Linux\App.Shared.cs" Link="Shared\App.Shared.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\Controller.cs" Link="Shared\Controller.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\Core\AudioStore.cs" Link="Shared\Core\AudioStore.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\Core\Settings.cs" Link="Shared\Core\Settings.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\Core\Updater.cs" Link="Shared\Core\Updater.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\Platform\Sh.cs" Link="Shared\Platform\Sh.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\Platform\Sounds.cs" Link="Shared\Platform\Sounds.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\UI\Icons.cs" Link="Shared\UI\Icons.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\UI\Indicator.cs" Link="Shared\UI\Indicator.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\UI\Licenses.cs" Link="Shared\UI\Licenses.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\UI\MainWindow.cs" Link="Shared\UI\MainWindow.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\UI\Pill.cs" Link="Shared\UI\Pill.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\UI\Shots.cs" Link="Shared\UI\Shots.cs" />
+    <Compile Include="..\..\linux\Tokalot.Linux\UI\Theme.cs" Link="Shared\UI\Theme.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\linux\Tokalot.Linux\Assets\EBGaramond.ttf" Link="Assets\EBGaramond.ttf" />
+    <AvaloniaResource Include="..\..\linux\Tokalot.Linux\Assets\icon.png" Link="Assets\icon.png" />
+    <Content Include="..\..\linux\Tokalot.Linux\Assets\OFL.txt" Link="Assets\OFL.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

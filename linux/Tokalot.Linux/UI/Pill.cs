@@ -161,7 +161,7 @@ public sealed class Pill : Window
             EndHint();
         };
         // Never takes focus, and clicks pass through to whatever is underneath.
-        X11.NeverFocus(this);
+        Overlay.NeverFocus(this);
         Opened += (_, _) => ApplyInput();
         SizeChanged += (_, _) => { Place(); ApplyInput(); };
     }
@@ -225,10 +225,10 @@ public sealed class Pill : Window
      */
     private void ApplyInput()
     {
-        if (onDismiss == null) { X11.SetInputRegion(this, null); return; }
+        if (onDismiss == null) { Overlay.SetInputRegion(this, null); return; }
         double k = RenderScaling;
         var m = shell.Margin;
-        X11.SetInputRegion(this, new PixelRect((int)(m.Left * k), (int)(m.Top * k),
+        Overlay.SetInputRegion(this, new PixelRect((int)(m.Left * k), (int)(m.Top * k),
             (int)Math.Ceiling((Bounds.Width - m.Left - m.Right) * k), (int)Math.Ceiling((Bounds.Height - m.Top - m.Bottom) * k)));
     }
 

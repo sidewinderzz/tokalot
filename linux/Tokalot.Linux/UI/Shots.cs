@@ -171,7 +171,7 @@ internal static class Shots
         var states = new (string Name, Bars.Mode Mode, IBrush Brush, string Text)[]
         {
             ("pill-listening", Bars.Mode.Listening, C.Argb(Settings.Current.Accent), ""),
-            ("pill-handsfree", Bars.Mode.Listening, C.Argb(Settings.Current.Accent), "Hands-free · Ctrl+Super to finish · Esc to cancel"),
+            ("pill-handsfree", Bars.Mode.Listening, C.Argb(Settings.Current.Accent), $"Hands-free · {Platform.Host.Shortcut} to finish · Esc to cancel"),
             ("pill-working", Bars.Mode.Working, Brushes.White, ""),
             ("pill-message", Bars.Mode.Idle, Brushes.White, "The mic heard nothing. Check the input device in your sound settings."),
         };

@@ -72,8 +72,44 @@ jobs:
             gh release create desktop --target "$GITHUB_SHA" --latest=false \
               --title "Tokalot for Windows (newest)" --notes "$NOTES"
           fi
-          for a in $(gh release view desktop --json assets --jq '.assets[].name'); do
-            gh release delete-asset desktop "$a" --yes
+          # Installed apps read this release while it is being refreshed, so no file it points at
+          # may ever be missing (deleting everything first once made an update check get a 404).
+          # A file whose name already exists is uploaded under a temporary name and then swapped in
+          # with one rename, so the old copy stays downloadable until the new one is complete. The
+          # update packages go first and the feed that names them (releases.win.json, RELEASES)
+          # last; only then are leftovers from older builds deleted.
+          REPO="$GITHUB_REPOSITORY"
+          asset_id() {
+            gh api "repos/$REPO/releases/tags/desktop" --jq ".assets[] | select(.name == \"$1\") | .id"
+          }
+          put() {
+            local file="$1" name old new
+            name=$(basename "$file")
+            old=$(asset_id "$name")
+            if [ -z "$old" ]; then
+              gh release upload desktop "$file"
+              return
+            fi
+            mkdir -p staging
+            cp "$file" "staging/next-$name"
+            gh release upload desktop "staging/next-$name" --clobber
+            new=$(asset_id "next-$name")
+            [ -n "$new" ] || { echo "Upload of $name didn't show up"; exit 1; }
+            gh api -X DELETE "repos/$REPO/releases/assets/$old"
+            gh api -X PATCH "repos/$REPO/releases/assets/$new" -f name="$name" > /dev/null
+          }
+          FEED="releases.win.json RELEASES"
+          for f in releases/*; do
+            case " $FEED " in *" $(basename "$f") "*) continue ;; esac
+            put "$f"
           done
-          gh release upload desktop releases/* --clobber
+          for n in $FEED; do
+            if [ -f "releases/$n" ]; then put "releases/$n"; fi
+          done
+          KEEP=$(ls releases)
+          for a in $(gh release view desktop --json assets --jq '.assets[].name'); do
+            if ! printf '%s\n' $KEEP | grep -qxF "$a"; then
+              gh release delete-asset desktop "$a" --yes
+            fi
+          done
           gh release edit desktop --title "Tokalot for Windows $VERSION (newest)" --notes "$NOTES"

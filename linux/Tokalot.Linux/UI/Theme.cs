@@ -59,7 +59,7 @@ public static class C
 
     /**
      * Asks the desktop for its light/dark preference: the freedesktop portal's color-scheme
-     * (1 = dark, 2 = light, 0 = no preference), then GNOME's own setting. Starts helper programs, so
+     * (1 = dark, 2 = light, 0 = no preference), then GNOME's own setting; on a Mac, the system setting. Starts helper programs, so
      * it must not run on the window's thread. Returns true if the answer changed.
      */
     public static bool ProbeSystem()
@@ -71,6 +71,13 @@ public static class C
 
     private static bool AskDesktopForLight()
     {
+        // macOS keeps the choice in AppleInterfaceStyle: "Dark", or no such setting at all in light mode.
+        // Only a clear "no such setting" counts as light; a defaults program that couldn't run says nothing.
+        if (OperatingSystem.IsMacOS())
+        {
+            var r = Sh.Run("/usr/bin/defaults", new[] { "read", "-g", "AppleInterfaceStyle" }, timeoutMs: 1500);
+            return r.Exit == 1;
+        }
         if (!OperatingSystem.IsLinux()) return false;
         try
         {
