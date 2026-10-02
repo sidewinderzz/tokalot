@@ -773,7 +773,7 @@ class MainActivity : Activity() {
                 if (playing) stopPlayback() else play(e.id)
             })
         }
-        if (e.cleaned && e.raw.isNotBlank() && e.raw != e.text) {
+        if ((e.cleaned || e.own) && e.raw.isNotBlank() && e.raw != e.text) {
             actions.addView(spacer(wDp = 8))
             actions.addView(pill("Original", filled = e.id in showOriginal) { toggle(showOriginal, e.id) })
         }

@@ -16,6 +16,7 @@ data class Entry(
     val cleaned: Boolean,   // true if an AI model rewrote it
     val app: String = "",   // package name of the app it was typed into
     val status: String = "", // "" = transcribed; History.FAILED / CANCELLED = audio kept, waiting for a retry
+    val own: Boolean = false, // the AI's wording was swapped back for the user's own ("My wording")
 ) {
     /** No transcript yet: the recording is kept (whatever the retention setting) until it's retried or deleted. */
     val pending: Boolean get() = status.isNotEmpty()
@@ -47,7 +48,7 @@ object History {
             val status = o.optString("st").ifEmpty {
                 if (raw.isEmpty() && text.startsWith("Transcription failed: ")) FAILED else ""
             }
-            list.add(Entry(o.getLong("id"), o.getLong("time"), text, raw, o.optLong("dur"), o.optBoolean("ai"), o.optString("app"), status))
+            list.add(Entry(o.getLong("id"), o.getLong("time"), text, raw, o.optLong("dur"), o.optBoolean("ai"), o.optString("app"), status, o.optBoolean("own")))
         }
         return list
     }
@@ -58,6 +59,7 @@ object History {
             val o = JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)
                 .put("raw", it.raw).put("dur", it.durationMs).put("ai", it.cleaned).put("app", it.app)
             if (it.status.isNotEmpty()) o.put("st", it.status)
+            if (it.own) o.put("own", true)
             arr.put(o)
         }
         return arr.toString()
@@ -120,6 +122,21 @@ object History {
         list[i] = e
         save(ctx)
     }
+
+    /**
+     * "My wording": the entry now holds the user's own words instead of the AI's, and no longer
+     * counts as AI-cleaned. The raw transcript stays, so "Original" still shows it.
+     */
+    @Synchronized
+    fun useOwnWording(ctx: Context, id: Long, plain: String) {
+        val list = load(ctx)
+        val i = list.indexOfFirst { it.id == id }
+        if (i < 0 || list[i].pending) return
+        list[i] = ownWording(list[i], plain)
+        save(ctx)
+    }
+
+    fun ownWording(e: Entry, plain: String) = e.copy(text = plain, cleaned = false, own = true)
 
     @Synchronized
     fun delete(ctx: Context, id: Long) {

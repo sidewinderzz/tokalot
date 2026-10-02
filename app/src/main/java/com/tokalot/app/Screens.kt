@@ -190,6 +190,12 @@ class StyleScreen(private val a: MainActivity) {
             }, lp().margins(this, b = 16))
         }
 
+        col.addView(card().apply {
+            addView(switchRow("Polish my wording", "Off: your own words are kept, with fillers removed and punctuation and formatting fixed. On: the AI may also tighten and clarify what you said, and for a few seconds after each dictation you can tap My wording to put your own words back.", prefs.polish) {
+                prefs.polish = it
+            })
+        }, lp().margins(this, b = 16))
+
         // Category tabs
         val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         AppCategory.values().forEach { c ->

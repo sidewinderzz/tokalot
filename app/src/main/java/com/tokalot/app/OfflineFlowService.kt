@@ -29,6 +29,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import kotlin.math.abs
@@ -102,7 +103,7 @@ class OfflineFlowService : AccessibilityService() {
         }
     }
 
-    private var bubble: TextView? = null
+    private var bubble: View? = null
     private var bubbleAttached = false
     private val hideBubble = Runnable { removeBubble() }
 
@@ -553,14 +554,54 @@ class OfflineFlowService : AccessibilityService() {
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = GradientDrawable().apply {
-                cornerRadius = dp(18).toFloat()
-                setColor(Color.parseColor("#F21C1C1E"))
-            }
+            background = bubbleBackground()
             elevation = dp(6).toFloat()
             maxWidth = dm.widthPixels - dp(24)
             setOnClickListener { removeBubble(); onClick() }
         }
+        attachBubble(tv, durationMs)
+    }
+
+    private fun bubbleBackground() = GradientDrawable().apply {
+        cornerRadius = dp(18).toFloat()
+        setColor(Color.parseColor("#F21C1C1E"))
+    }
+
+    /**
+     * The same pill with two separately tappable halves: "Undo" and "My wording", which swaps the
+     * AI's polished text for the user's own words. Shown when "Polish my wording" is on.
+     */
+    private fun showSwapBubble(plain: String, entryId: Long?, durationMs: Long) {
+        removeBubble()
+        fun part(label: String, desc: String, onClick: () -> Unit) = TextView(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            maxLines = 1
+            gravity = Gravity.CENTER
+            minHeight = dp(48)
+            minWidth = dp(64)
+            setPadding(dp(16), dp(10), dp(16), dp(10))
+            contentDescription = desc
+            setOnClickListener { removeBubble(); onClick() }
+        }
+        val pill = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = bubbleBackground()
+            elevation = dp(6).toFloat()
+            addView(part("↶  Undo", "Undo the dictation") { undoInsert() })
+            addView(View(this@OfflineFlowService).apply {
+                setBackgroundColor(Color.parseColor("#40FFFFFF"))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(dp(1), dp(22)))
+            addView(part("My wording", "Use my own wording") { useMyWording(plain, entryId) })
+        }
+        attachBubble(pill, durationMs)
+    }
+
+    private fun attachBubble(view: View, durationMs: Long) {
+        val dm = resources.displayMetrics
         val bp = params ?: return
         val p = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT)
         // Line the bubble up with whichever side of the screen the button is on.
@@ -573,8 +614,8 @@ class OfflineFlowService : AccessibilityService() {
         }
         p.y = if (bp.y > dp(90)) bp.y - dp(56) else bp.y + sizePx + dp(8)
         try {
-            wm.addView(tv, p)
-            bubble = tv
+            wm.addView(view, p)
+            bubble = view
             bubbleAttached = true
             handler.postDelayed(hideBubble, durationMs)
         } catch (_: Exception) {}
@@ -734,7 +775,7 @@ class OfflineFlowService : AccessibilityService() {
                     Haptics.play(this, Haptics.Kind.ERROR); toast("Didn't catch anything")
                 }
                 else -> {
-                    deliver(outcome.text)
+                    deliver(outcome.text, outcome.plain, outcome.entryId)
                     Haptics.play(this, Haptics.Kind.DONE)
                     outcome.warning?.let { toast(it) }
                 }
@@ -746,13 +787,15 @@ class OfflineFlowService : AccessibilityService() {
     // ---------- text insertion ----------
 
     /** Types into the focused field, or copies to the clipboard if there isn't one. */
-    private fun deliver(text: String) {
+    private fun deliver(text: String, plain: String? = null, entryId: Long? = null) {
         val node = focusedEditable()
         if (node == null || !insert(node, text)) {
             copyToClipboard(text)
             showBubble("Copied ✓  $text") { copyToClipboard(text); toast("Copied") }
         } else if (lastInsert != null) {
-            showBubble("↶  Undo", 5000) { undoInsert() }
+            // plain: the AI polished the wording, so offer the user's own words next to Undo.
+            if (plain != null) showSwapBubble(plain, entryId, 7000)
+            else showBubble("↶  Undo", 5000) { undoInsert() }
         }
     }
 
@@ -760,8 +803,13 @@ class OfflineFlowService : AccessibilityService() {
     private sealed class LastInsert {
         /** Typed at the cursor; [replaced] is the selection it overwrote, if any. */
         class Typed(val piece: String, val replaced: String) : LastInsert()
-        /** The whole field was rewritten; [before] is what it held. */
-        class Rewritten(val node: AccessibilityNodeInfo, val before: String, val caret: Int) : LastInsert()
+        /**
+         * The whole field was rewritten; [before] is what it held, [caret]..[end] the selection the
+         * text went into, [after] what the field holds now.
+         */
+        class Rewritten(
+            val node: AccessibilityNodeInfo, val before: String, val caret: Int, val end: Int, val after: String,
+        ) : LastInsert()
     }
     private var lastInsert: LastInsert? = null
 
@@ -773,6 +821,24 @@ class OfflineFlowService : AccessibilityService() {
             is LastInsert.Rewritten -> undoRewritten(li)
         }
         if (!ok) toast("Couldn't undo here")
+    }
+
+    /**
+     * "My wording": takes the just-inserted text back out and puts [plain] (the user's own words)
+     * in its place, then offers Undo for that. Only when the insert can still be undone safely;
+     * otherwise the text is left alone. Either way the history entry switches to the user's wording.
+     */
+    private fun useMyWording(plain: String, entryId: Long?) {
+        val li = lastInsert
+        lastInsert = null
+        entryId?.let { History.useOwnWording(this, it, plain) }
+        val ok = when (li) {
+            is LastInsert.Typed -> swapTyped(li, plain)
+            is LastInsert.Rewritten -> swapRewritten(li, plain)
+            null -> false
+        }
+        if (ok) showBubble("↶  Undo", 5000) { undoInsert() }
+        else toast("Couldn't swap it here. Your wording is in history.")
     }
 
     /**
@@ -831,6 +897,33 @@ class OfflineFlowService : AccessibilityService() {
         }
     }
 
+    /** Undoes [li] and types [text] in the same place, as one edit. False: nothing was changed. */
+    private fun swapTyped(li: LastInsert.Typed, text: String): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        return try {
+            val ic = inputMethod?.currentInputConnection ?: return false
+            val n = li.piece.length
+            // One more character either side than the piece itself, to decide about spaces again.
+            val around = ic.getSurroundingText(n + 1, 1, 0) ?: return false
+            val chars = around.text
+            val caret = around.selectionStart
+            // Same check as undoTyped: the cursor must still sit right after what was typed.
+            if (caret != around.selectionEnd || caret < n || caret > chars.length) return false
+            if (chars.subSequence(caret - n, caret).toString() != li.piece) return false
+            val piece = TextTools.pad(
+                text,
+                before = if (caret > n) chars[caret - n - 1] else null,
+                after = if (caret < chars.length) chars[caret] else null,
+            )
+            ic.deleteSurroundingText(n, 0)
+            ic.commitText(piece, 1, null)
+            lastInsert = LastInsert.Typed(piece, li.replaced)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun rewriteField(node: AccessibilityNodeInfo, text: String): Boolean {
         // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
         // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
@@ -859,7 +952,7 @@ class OfflineFlowService : AccessibilityService() {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
         }
         if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-            lastInsert = LastInsert.Rewritten(node, current, start)
+            lastInsert = LastInsert.Rewritten(node, current, start, end, updated)
             val caret = start + piece.length
             val sel = Bundle().apply {
                 putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, caret)
@@ -870,6 +963,30 @@ class OfflineFlowService : AccessibilityService() {
         }
         // Some fields refuse SET_TEXT; try pasting at the cursor instead.
         return paste(node, piece)
+    }
+
+    /** Rewrites the field as it was before [li], with [text] where the dictation went. False: nothing was changed. */
+    private fun swapRewritten(li: LastInsert.Rewritten, text: String): Boolean {
+        // Only when the field still holds exactly what the insert left there.
+        if (!li.node.refresh() || (li.node.text?.toString() ?: "") != li.after) return false
+        val piece = TextTools.pad(
+            text,
+            before = if (li.caret > 0) li.before[li.caret - 1] else null,
+            after = if (li.end < li.before.length) li.before[li.end] else null,
+        )
+        val updated = li.before.substring(0, li.caret) + piece + li.before.substring(li.end)
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, updated)
+        }
+        if (!li.node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return false
+        lastInsert = LastInsert.Rewritten(li.node, li.before, li.caret, li.end, updated)
+        val caret = li.caret + piece.length
+        val sel = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, caret)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, caret)
+        }
+        li.node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
+        return true
     }
 
     private fun undoRewritten(li: LastInsert.Rewritten): Boolean {
