@@ -384,7 +384,7 @@ class SettingsScreen(private val a: MainActivity) {
             prefs.autoStop = it
         })
         rc.addView(divider())
-        rc.addView(switchRow("Pill-shaped button", "A slim capsule that lies along the nearest edge of the screen, instead of the rounded square. Takes effect the next time the button appears.", prefs.buttonStyle == "pill") {
+        rc.addView(switchRow("Pill-shaped button", "The desktop app's ripple pill: a slim capsule that clings to the nearest screen edge and ripples with your voice, instead of the rounded square. Takes effect the next time the button appears.", prefs.buttonStyle == "pill") {
             prefs.buttonStyle = if (it) "pill" else "square"
         })
         rc.addView(divider())

@@ -66,7 +66,7 @@ class BarsView(context: Context) : View(context) {
             cur[i] += (target - cur[i]) * 0.3f
             if (kotlin.math.abs(target - cur[i]) > 0.3f) settling = true
             val h = cur[i].coerceIn(6f, 64f) * s
-            val cx = (xs[i] + 3f) * s
+            val cx = (xs[i] + 2f) * s // bars span 32..76 around the 54 centre of the grid
             r.set(cx - 3f * s, height / 2f - h / 2f, cx + 3f * s, height / 2f + h / 2f)
             val ac = accentColor
             val p = if (i == 3 && ac != null) accentPaint.also { it.color = ac } else paint

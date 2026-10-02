@@ -110,11 +110,15 @@ class OfflineFlowService : AccessibilityService() {
     private val recheck = Runnable { updateButton() }
 
     // The window is the button body plus a margin on every side (for the shadow and the listening halo).
-    // Square style: 48dp square. Pill style: 84x40dp capsule, lying horizontally or standing vertically.
+    // Square style: 48dp square. Pill style: the desktop's ripple pill, attached to the bottom (keyboard),
+    // left or right edge; the window is long along that edge.
     private var pill = false
-    private var vertical = false
-    private val winW get() = dp(2 * PAD_DP + if (!pill) 48 else if (vertical) 40 else 84)
-    private val winH get() = dp(2 * PAD_DP + if (!pill) 48 else if (vertical) 84 else 40)
+    private var pillDock = "bottom"
+    private var pillAlong = 0.85f   // 0..1 position along the edge
+    private var pillView: PillView? = null
+    private val pillK get() = resources.displayMetrics.density * PillView.SCALE
+    private val winW get() = if (!pill) dp(2 * PAD_DP + 48) else ((if (pillDock == "bottom") PillView.SPAN else PillView.DEPTH) * pillK).toInt()
+    private val winH get() = if (!pill) dp(2 * PAD_DP + 48) else ((if (pillDock == "bottom") PillView.DEPTH else PillView.SPAN) * pillK).toInt()
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onServiceConnected() {
@@ -157,10 +161,10 @@ class OfflineFlowService : AccessibilityService() {
     @SuppressLint("ClickableViewAccessibility")
     private fun buildButton() {
         pill = Prefs(this).buttonStyle == "pill"
-        vertical = pill && overlayPrefs().safeBoolean("vertical", false)
-        val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat(), if (pill) dp(100).toFloat() else dp(14).toFloat())
+        if (pill) { buildPillButton(); return }
+        val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat(), dp(14).toFloat())
         // A ring of accent light that swells with your voice while listening (invisible otherwise).
-        val h = HaloView(this, dp(PAD_DP).toFloat(), if (pill) dp(100).toFloat() else dp(14).toFloat()).apply {
+        val h = HaloView(this, dp(PAD_DP).toFloat(), dp(14).toFloat()).apply {
             level = { recorder.level }
             color = Prefs(this@OfflineFlowService).accent
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -181,7 +185,7 @@ class OfflineFlowService : AccessibilityService() {
             background = bg
             alpha = IDLE_ALPHA
             addView(h, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-            addView(b, FrameLayout.LayoutParams(dp(if (pill) 56 else 64), dp(if (pill) 56 else 64), Gravity.CENTER))
+            addView(b, FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER))
             addView(x, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
             // For screen readers: one labelled, clickable button. Their "activate" arrives as a
             // click rather than a touch, so it is routed to the same tap action (start / stop /
@@ -198,8 +202,66 @@ class OfflineFlowService : AccessibilityService() {
         cancelIcon = x
         halo = h
         buttonBg = bg
+        pillView = null
         params = overlayParams(winW, winH)
         buildDropZone()
+    }
+
+    /** The pill style: just the desktop ripple pill, no frame, halo or bars. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun buildPillButton() {
+        val sp = overlayPrefs()
+        pillDock = sp.safeString("pdock", "bottom").let { if (it == "left" || it == "right") it else "bottom" }
+        pillAlong = (sp.safeInt("palong", 850) / 1000f).coerceIn(0f, 1f)
+        val pv = PillView(this).apply {
+            level = { recorder.level }
+            dock = pillDock
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        val frame = FrameLayout(this).apply {
+            alpha = 1f
+            addView(pv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            isClickable = true
+            isFocusable = true
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            contentDescription = describe(State.IDLE)
+            setOnClickListener { onTap() }
+        }
+        frame.setOnTouchListener(DragTouch())
+        button = frame
+        pillView = pv
+        bars = null; cancelIcon = null; halo = null; buttonBg = null
+        params = overlayParams(winW, winH)
+        buildDropZone()
+    }
+
+    /** Pill drag: like the desktop, snap to whichever of the bottom (keyboard), left or right edge is nearest the finger. */
+    private fun snapPill(p: WindowManager.LayoutParams, fx: Float, fy: Float) {
+        val dm = resources.displayMetrics
+        val bottom = anchor()
+        val dl = fx
+        val dr = dm.widthPixels - fx
+        val db = maxOf(0f, bottom - fy)
+        pillDock = if (dl <= dr && dl < db) "left" else if (dr < dl && dr < db) "right" else "bottom"
+        val m = dp(40)
+        val along = if (pillDock == "bottom") (fx - m) / maxOf(1, dm.widthPixels - 2 * m)
+        else (fy - dp(24) - m) / maxOf(1, bottom - dp(24) - 2 * m)
+        pillAlong = along.coerceIn(0f, 1f)
+        pillView?.dock = pillDock
+        p.width = winW; p.height = winH
+        val (x, y) = pillTarget()
+        p.x = x; p.y = y
+    }
+
+    private fun pillTarget(): Pair<Int, Int> {
+        val dm = resources.displayMetrics
+        val bottom = anchor()
+        val m = dp(40)
+        return when (pillDock) {
+            "left" -> 0 to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), bottom - winH)
+            "right" -> (dm.widthPixels - winW) to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), bottom - winH)
+            else -> (m + pillAlong * (dm.widthPixels - 2 * m) - winW / 2f).toInt().coerceIn(0, dm.widthPixels - winW) to (bottom - winH)
+        }
     }
 
     /** Red gradient with an X along the top edge. Fades in while you drag the button. */
@@ -321,11 +383,15 @@ class OfflineFlowService : AccessibilityService() {
                             if (state == State.IDLE) showDropZone(true)
                         }
                         if (dragging) {
-                            p.x = startX + dx.toInt()
-                            p.y = startY + dy.toInt()
                             // Only an idle button can be thrown away; mid-recording it stays put.
                             val canDismiss = state == State.IDLE
-                            clamp(p, allowTop = canDismiss)
+                            if (pill && !(canDismiss && e.rawY <= dp(110))) {
+                                snapPill(p, e.rawX, e.rawY) // the pill clings to the nearest edge, like the desktop's
+                            } else {
+                                p.x = startX + dx.toInt()
+                                p.y = startY + dy.toInt()
+                                clamp(p, allowTop = canDismiss)
+                            }
                             try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                             if (canDismiss) updateDropHover(p)
                         }
@@ -343,10 +409,9 @@ class OfflineFlowService : AccessibilityService() {
                             } else {
                                 showDropZone(false)
                                 clamp(p)
-                                reorient(p)
                                 try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                                 savePosition(p)
-                                if (state == State.IDLE) v.alpha = IDLE_ALPHA
+                                if (state == State.IDLE && !pill) v.alpha = IDLE_ALPHA
                             }
                         }
                         holdMode && state == State.IDLE -> toast("Hold the button to talk")
@@ -467,9 +532,8 @@ class OfflineFlowService : AccessibilityService() {
         if (!attached || touching) return
         val (tx, ty) = targetPosition()
         p.x = tx; p.y = ty
-        reorient(p)
         try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
-        val rest = if (state == State.IDLE) IDLE_ALPHA else 1f
+        val rest = if (state == State.IDLE && !pill) IDLE_ALPHA else 1f
         button?.animate()?.alpha(rest)?.setDuration(140)?.start()
     }
 
@@ -486,6 +550,7 @@ class OfflineFlowService : AccessibilityService() {
     private fun overlayPrefs() = getSharedPreferences("overlay", Context.MODE_PRIVATE)
 
     private fun targetPosition(): Pair<Int, Int> {
+        if (pill) return pillTarget()
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
         // Defaults leave the same visible gap as before; the window now carries PAD_DP of margin of its own.
@@ -500,28 +565,6 @@ class OfflineFlowService : AccessibilityService() {
         p.y = p.y.coerceIn(if (allowTop) 0 else dp(24), dm.heightPixels - winH)
     }
 
-    /**
-     * Pill style only: lie along the screen side the button is closest to (stand up near the left or
-     * right edge, lie down near the top or the keyboard), keeping the button's centre where it is.
-     */
-    private fun reorient(p: WindowManager.LayoutParams) {
-        if (!pill) return
-        val dm = resources.displayMetrics
-        val cx = p.x + winW / 2
-        val cy = p.y + winH / 2
-        val side = minOf(cx, dm.widthPixels - cx)
-        val topBottom = minOf(cy, anchor() - cy)
-        val v = side < topBottom
-        if (v == vertical) return
-        vertical = v
-        p.x = cx - winW / 2
-        p.y = cy - winH / 2
-        p.width = winW
-        p.height = winH
-        clamp(p, allowTop = state == State.IDLE)
-        if (attached) try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
-    }
-
     /** Settings may have switched the button's shape since it was built; rebuild it while it is hidden. */
     private fun syncStyle() {
         if (!attached && (Prefs(this).buttonStyle == "pill") != pill) {
@@ -531,7 +574,11 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun savePosition(p: WindowManager.LayoutParams) {
-        val e = overlayPrefs().edit().putInt("x", p.x).putBoolean("vertical", vertical)
+        if (pill) {
+            overlayPrefs().edit().putString("pdock", pillDock).putInt("palong", (pillAlong * 1000).toInt()).apply()
+            return
+        }
+        val e = overlayPrefs().edit().putInt("x", p.x)
         // The height is measured from the keyboard. With no keyboard on screen (dragged while
         // recording after it closed) keep the old height, or the button turns up somewhere odd next time.
         keyboardTop()?.let { e.putInt("above", it - winH - p.y) }
@@ -575,8 +622,13 @@ class OfflineFlowService : AccessibilityService() {
         bars?.alpha = 1f
         if (s == State.WORKING) handler.postDelayed(showCancel, CANCEL_SHOW_MS)
         buttonBg?.active = s != State.IDLE
+        pillView?.mode = when (s) {
+            State.IDLE -> PillView.Mode.IDLE
+            State.STARTING, State.RECORDING -> PillView.Mode.LISTENING
+            State.WORKING -> PillView.Mode.WORKING
+        }
         button?.animate()?.cancel()
-        button?.alpha = if (s == State.IDLE) IDLE_ALPHA else 1f
+        button?.alpha = if (s == State.IDLE && !pill) IDLE_ALPHA else 1f
         // Keep the screen awake from tap to finished text, so it can't sleep mid-sentence.
         params?.let { p ->
             val keepOn = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
