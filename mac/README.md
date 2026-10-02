@@ -94,7 +94,8 @@ model, `log.txt`), private to your user. API keys are in your login Keychain und
 
 ## Reporting
 
-Please open an issue at https://github.com/sidewinderzz/tokalot/issues with your Mac model, macOS
+Please comment on the "Mac testers wanted" issue (https://github.com/sidewinderzz/tokalot/issues/6),
+or open a new issue at https://github.com/sidewinderzz/tokalot/issues, with your Mac model, macOS
 version, what you tried and what happened, plus the output of:
 
 ```

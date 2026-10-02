@@ -122,7 +122,7 @@ A port of the Windows app, for X11 and Wayland desktops on 64-bit Intel/AMD: hol
 A port of the Linux app for Macs with Apple silicon (M1 or newer) on macOS 15 or newer: hold **Ctrl+Cmd** and talk. Download the newest `Tokalot-mac-arm64` zip from [Releases](https://github.com/sidewinderzz/tokalot/releases) (tagged `mac-v…`, marked pre-release), move Tokalot.app to Applications and follow [mac/README.md](mac/README.md). The app isn't signed by Apple yet, so the first start needs **System Settings › Privacy & Security › Open Anyway**, and it asks for three permissions (Input Monitoring, Accessibility, Microphone), which the app shows you with a button to each.
 
 > [!WARNING]
-> The Mac build has only been run on GitHub's build machines, never by a person on a real Mac. The shortcut, the microphone, pasting, the permission prompts, the menu-bar icon and the recording indicator have not been tried by hand and may need fixes. If you try it, please comment on the pinned "Mac testers wanted" issue with your Mac, macOS version and the output of `Tokalot --diagnose`.
+> The Mac build has only been run on GitHub's build machines, never by a person on a real Mac. The shortcut, the microphone, pasting, the permission prompts, the menu-bar icon and the recording indicator have not been tried by hand and may need fixes. If you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6) with your Mac, macOS version and the output of `Tokalot --diagnose`.
 
 ## What it costs
 
