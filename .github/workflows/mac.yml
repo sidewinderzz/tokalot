@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  # To see whether the other apps' builds of the same commit passed, before publishing.
+  actions: read
 
 jobs:
   build:
@@ -232,5 +234,17 @@ jobs:
             echo "$TAG is already released; nothing to publish."
             exit 0
           fi
+          # Publish only once the Android, Windows and Linux builds of this same commit (those that run for it) have passed.
+          for i in $(seq 90); do
+            RUNS=$(gh run list --commit "$GITHUB_SHA" --json workflowName,status,conclusion --jq '[.[] | select(.workflowName != "Build Mac app")]')
+            FAILED=$(echo "$RUNS" | jq '[.[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped")] | length')
+            PENDING=$(echo "$RUNS" | jq '[.[] | select(.status != "completed")] | length')
+            if [ "$FAILED" -gt 0 ]; then echo "Another app's build failed on this commit; not publishing."; echo "$RUNS"; exit 1; fi
+            if [ "$PENDING" -eq 0 ]; then break; fi
+            echo "Waiting for $PENDING other build(s) of this commit…"
+            sleep 20
+          done
+          if [ "$PENDING" -gt 0 ]; then echo "The other builds didn't finish in time; not publishing."; exit 1; fi
+          echo "$RUNS"
           gh release create "$TAG" "Tokalot-mac-arm64-$VERSION.zip" --target "$GITHUB_SHA" --prerelease --latest=false \
             --title "Tokalot for Mac $VERSION (experimental)" --notes-file mac/RELEASE_NOTES.md

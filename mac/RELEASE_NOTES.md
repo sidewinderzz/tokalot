@@ -7,7 +7,7 @@
 Every build is run on one of GitHub's macOS 15 machines (Apple silicon, a virtual machine with no person at it) before it is published. This release passed all of these there:
 
 - The real program inside Tokalot.app starts, prints its `--diagnose` report and loads the offline speech engine.
-- Every page draws in light and dark (24 pictures, looked at by hand), and the 11 settings-sync merge checks pass.
+- Every page draws in light and dark (24 pictures; a sample of them checked by eye), and the 11 settings-sync merge checks pass.
 - The API-key store: a key was saved to the login Keychain, changed, read back and deleted.
 - The clipboard: text written, read back, and the earlier clipboard put back.
 - The keyboard listener: started, and synthetic Ctrl+Cmd, Z and Esc presses were each seen correctly.
@@ -15,6 +15,7 @@ Every build is run on one of GitHub's macOS 15 machines (Apple silicon, a virtua
 - The app itself ran with its window and menu-bar icon (seen in a screen capture), and a second start handed over to the first instead of running twice.
 - Pasting: text was pasted into TextEdit, the earlier clipboard came back afterwards, and the "own words back" swap (⌘Z, then paste) worked.
 - **A whole dictation:** with the app running and TextEdit in front, Ctrl+Cmd was held (synthetically) while the spoken sentence played into a virtual microphone; the app recorded it, transcribed it offline and pasted *"The quick brown fox jumps over the lazy dog. Please call me back tomorrow morning."* into TextEdit.
+- Screen captures taken during that dictation show the recording indicator at the bottom of the screen (listening, then working, then the slim idle bar), with TextEdit keeping the keyboard throughout.
 - The downloaded zip unpacks with its signature intact.
 
 ## What has never been tried
