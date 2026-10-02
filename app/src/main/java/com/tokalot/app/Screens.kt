@@ -443,11 +443,33 @@ class SettingsScreen(private val a: MainActivity) {
         Services.all.forEachIndexed { i, (id, name) ->
             val label = text(name, 16f, bold = true)
             val hint = text("Get one at ${Services.keyPages[id]}", 13f, C.SUB)
-            val f = field("Paste key", prefs.key(id), secret = true)
-            f.onChange { prefs.setKey(id, it) }
+            val f = field("Paste key", prefs.key(id), secret = true).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val warn = text("", 13f, C.WARN).apply { visibility = View.GONE }
+            val check = { key: String ->
+                val problem = Keys.problem(id, Keys.clean(key))
+                warn.text = problem ?: ""
+                warn.visibility = if (problem == null) View.GONE else View.VISIBLE
+            }
+            check(f.text.toString())
+            f.onChange { prefs.setKey(id, it); check(it) }
+            // Some keyboards hide their clipboard suggestion in password fields, and long-press
+            // paste is easy to miss, so read the clipboard directly.
+            val paste = pill("Paste") {
+                val clip = (getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).primaryClip
+                val pasted = Keys.clean(clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString() ?: "")
+                if (pasted.isEmpty()) {
+                    android.widget.Toast.makeText(this, "Nothing to paste. Copy the key first, then tap Paste.", android.widget.Toast.LENGTH_LONG).show()
+                } else {
+                    f.setText(pasted)
+                    android.widget.Toast.makeText(this, "$name key saved", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
             keys.addView(label, lp().margins(this, t = if (i == 0) 0 else 16))
             keys.addView(hint)
-            keys.addView(f, lp().margins(this, t = 6))
+            keys.addView(row(f, spacer(wDp = 8), paste), lp().margins(this, t = 6))
+            keys.addView(warn, lp().margins(this, t = 4))
         }
         col.addView(keys)
         col.addView(text(

@@ -65,6 +65,40 @@ object Services {
     )
 }
 
+/** Tidying and sanity-checking API keys as they're pasted in. */
+object Keys {
+    /** How each provider's keys start today; a key that doesn't match only gets a warning, never refused. */
+    val prefixes = mapOf(
+        "groq" to "gsk_",
+        "anthropic" to "sk-ant-",
+        "openai" to "sk-",
+        "gemini" to "AIza",
+    )
+
+    /**
+     * Keys never contain spaces, so drop every bit of whitespace (line breaks from a wrapped email,
+     * invisible zero-width characters from web pages) plus quotes around a key copied out of code.
+     */
+    fun clean(raw: String): String =
+        raw.replace(Regex("[\\s\u200B-\u200D\u2060\uFEFF]"), "").trim('"', '\'', '`', '“', '”', '‘', '’')
+
+    /** A short warning when [key] doesn't look like a [service] key, or null when it looks right (or is empty). */
+    fun problem(service: String, key: String): String? {
+        if (key.isEmpty()) return null
+        val name = nameOf(service)
+        // The longest matching prefix wins, so an Anthropic "sk-ant-" key isn't taken for OpenAI's "sk-".
+        val looksLike = prefixes.entries.filter { key.startsWith(it.value) }.maxByOrNull { it.value.length }?.key
+        return when {
+            looksLike != null && looksLike != service -> "That looks like a key for ${nameOf(looksLike)}. This box is for $name."
+            looksLike == null && prefixes[service] != null -> "$name keys usually start with ${prefixes[service]}. Check you copied the whole key."
+            key.length < 20 -> "That looks too short for an API key. Check you copied the whole key."
+            else -> null
+        }
+    }
+
+    private fun nameOf(service: String) = Services.all.firstOrNull { it.first == service }?.second ?: service
+}
+
 /** Choices for the floating button's listening color. Amber matches the app icon. */
 object Accents {
     val DEFAULT = 0xFFF2A93B.toInt()
@@ -208,7 +242,7 @@ class Prefs(ctx: Context) {
     }
 
     fun setKey(service: String, v: String) {
-        val plain = v.trim()
+        val plain = Keys.clean(v)
         // If the Keystore is broken on this phone, a plain-text key still beats a key that can't be saved.
         val stored = if (plain.isEmpty()) "" else Secrets.encrypt(plain) ?: plain
         sp.edit().putString("key_$service", stored).apply()
@@ -271,7 +305,7 @@ class Prefs(ctx: Context) {
     }
 
     private fun setKeyQuietly(service: String, v: String) {
-        val plain = v.trim()
+        val plain = Keys.clean(v)
         sp.edit().putString("key_$service", if (plain.isEmpty()) "" else Secrets.encrypt(plain) ?: plain).apply()
     }
 
