@@ -127,6 +127,16 @@ public sealed partial class App : Application
         Controller = new Controller();
         SetUpTray();
         Log($"Permissions: input monitoring={Permissions.InputMonitoring}, accessibility={Permissions.Accessibility}, microphone={Permissions.Microphone}, keyboard tap={Controller.HotkeyWorks}");
+        // Where the indicator ended up, and the screens as Avalonia reports them (the first Mac runs need this).
+        DispatcherTimer.RunOnce(() =>
+        {
+            try
+            {
+                var screens = Controller.AnyWindow.Screens.All.Select(x => $"{x.Bounds} work area {x.WorkingArea} scale {x.Scaling}");
+                Log("Indicator: " + Controller.IndicatorState + " · screens: " + string.Join("; ", screens));
+            }
+            catch (Exception e) { Log("Indicator state unavailable: " + e.Message); }
+        }, TimeSpan.FromSeconds(4));
 
         if (Startup.Supported) Startup.Apply(s.LaunchAtStartup);
 

@@ -63,6 +63,9 @@ public sealed class Controller : IDisposable
 
     public bool HotkeyWorks => hook.Installed;
 
+    /** Where the indicator is and whether it shows, for the log (diagnosing placement on new desktops). */
+    internal string IndicatorState => $"{(indicator.IsVisible ? "shown" : "hidden")} at {indicator.ScreenBounds} ({indicator.Dock}, {indicator.Mode})";
+
     internal Window AnyWindow => pill;
 
     /** Re-reads the indicator's style, edge and idle visibility (after a Settings change). */

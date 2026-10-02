@@ -189,9 +189,12 @@ jobs:
           cat "$CHECKS/e2e-mic-level.txt"
           ( sleep 1.5; afplay "$RUNNER_TEMP/speech.wav" ) &
           PLAY_PID=$!
+          # What the screen looks like while recording, and just after (the indicator and its messages).
+          ( sleep 4; screencapture -x "$CHECKS/screen-listening.png"; sleep 7; screencapture -x "$CHECKS/screen-working.png" ) &
           "$BIN" --hold-shortcut 9
           wait $PLAY_PID || true
           sleep 30
+          screencapture -x "$CHECKS/screen-after.png" || true
           "$BIN" --save-front
           sleep 2
           echo "TextEdit's file now holds:"; cat "$FILE" | tee "$CHECKS/e2e-dictation.txt"; echo
