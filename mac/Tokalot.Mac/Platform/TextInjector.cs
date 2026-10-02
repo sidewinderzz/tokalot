@@ -97,7 +97,7 @@ public static class TextInjector
     // ---------- the paste shortcut ----------
 
     /** ⌘ plus a key, as one press and release. */
-    private static bool Chord(ushort key)
+    internal static bool Chord(ushort key)
     {
         if (!OperatingSystem.IsMacOS()) return false;
         try
@@ -144,7 +144,7 @@ public static class TextInjector
      * Puts text on the clipboard and returns the change count it got (or -1). transient: just passing
      * through for a paste, so clipboard-history apps are asked not to keep it.
      */
-    private static long Set(string text, bool transient)
+    internal static long Set(string text, bool transient)
     {
         if (!OperatingSystem.IsMacOS()) return -1;
         try

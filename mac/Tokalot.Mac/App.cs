@@ -42,6 +42,12 @@ public sealed partial class App : Application
         // "Tokalot --transcribe <file.wav>" runs a recording through the same pipeline a dictation takes and prints the text.
         if (args.Length >= 2 && args[0] == "--transcribe") return SelfTest.Transcribe(args[1]);
 
+        // Build-machine checks that drive other apps: paste into TextEdit, hold the shortcut, press ⌘S.
+        if (args.Contains("--paste-test")) return SelfTest.PasteTest();
+        if (args.Length >= 2 && args[0] == "--hold-shortcut") return SelfTest.HoldShortcut(args[1]);
+        if (args.Length >= 2 && args[0] == "--mic-check") return SelfTest.MicCheck(args[1]);
+        if (args.Contains("--save-front")) { TextInjector.Chord(1 /* S */); return 0; }
+
         // Developer tool: "Tokalot --screenshots <folder>" renders every page to PNGs with sample data. Needs no display.
         if (args.Length >= 2 && args[0] == "--screenshots")
         {
@@ -84,6 +90,13 @@ public sealed partial class App : Application
     }
 
     private static string ShowSocket => Paths.File("show.sock");
+
+    /** For the command-line checks that start Avalonia only to drive the clipboard: no window, no menu-bar icon. */
+    internal static void StartForTools()
+    {
+        shotsDir = "";
+        AppBuilder.Configure<App>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = true }).SetupWithoutStarting();
+    }
 
     private TrayIcon? tray;
     private bool askedForAccessibility;
@@ -268,7 +281,7 @@ public sealed partial class App : Application
         Line("Tokalot", Updater.CurrentVersion);
         Line("System", Native.MacVersion() + " · " + System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture);
         Line("Data folder", Paths.Root);
-        Line("App bundle", Startup.Bundle ?? "not running from Tokalot.app (start at login is unavailable)");
+        Line("App bundle", Startup.Bundle ?? (Paths.IsTestInstance ? "test copy (TOKALOT_DATA is set; start at login is left alone)" : "not running from Tokalot.app (start at login is unavailable)"));
 
         using (var hook = new HotkeyHook())
             Line("Ctrl+Cmd shortcut", hook.Installed ? "OK (Input Monitoring allowed; keyboard tap running)"

@@ -36,7 +36,18 @@ internal static unsafe class Native
     }
 
     public static IntPtr Sel(string name) => sel_registerName(name);
-    public static IntPtr Class(string name) => objc_getClass(name);
+    /**
+     * An Objective-C class by name. AppKit (NSPasteboard, NSWorkspace…) is only loaded once something
+     * asks for it: the app's window does, but the command-line checks don't, so it is loaded here then.
+     */
+    public static IntPtr Class(string name)
+    {
+        var c = objc_getClass(name);
+        if (c != IntPtr.Zero) return c;
+        Load(AppKit);
+        Load(AVFoundation);
+        return objc_getClass(name);
+    }
 
     // objc_msgSend has to be called through a pointer of exactly the right type (on Apple silicon above all).
     public static IntPtr Send(IntPtr o, string sel) =>
@@ -100,8 +111,6 @@ internal static unsafe class Native
     [DllImport(CoreFoundation)] public static extern IntPtr CFMachPortCreateRunLoopSource(IntPtr alloc, IntPtr port, nint order);
 
     [StructLayout(LayoutKind.Sequential)] private struct CFRange { public nint Location, Length; }
-
-    private static readonly IntPtr CF = NativeLibrary.Load(CoreFoundation);
 
     /** The value of an exported constant such as kCFBooleanTrue or kSecClass (a pointer stored in the library). */
     public static IntPtr Constant(string library, string name) =>

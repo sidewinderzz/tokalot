@@ -73,8 +73,9 @@ public static unsafe class Overlay
         try
         {
             using var pool = Native.AutoreleasePool();
-            var nsApp = Native.Send(Native.Class("NSApplication"), "sharedApplication");
-            if (!Native.SendRB(nsApp, "isActive")) return;
+            // NSApp itself, without creating one in a process that has none (the command-line checks).
+            var nsApp = System.Runtime.InteropServices.Marshal.ReadIntPtr(Native.Address(Native.AppKit, "NSApp"));
+            if (nsApp == IntPtr.Zero || !Native.SendRB(nsApp, "isActive")) return;
             var key = Native.Send(nsApp, "keyWindow");
             bool overlayOnly;
             lock (Windows) overlayOnly = key == IntPtr.Zero || Windows.Contains(key);

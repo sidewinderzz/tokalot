@@ -108,6 +108,7 @@ jobs:
 
       # The real app with its window and menu-bar icon, for half a minute, with a throwaway data folder.
       - name: Smoke test - run the app
+        timeout-minutes: 6
         run: |
           export TOKALOT_DATA="$RUNNER_TEMP/run"
           "$BIN" > "$CHECKS/run-stdout.txt" 2>&1 &
@@ -137,43 +138,67 @@ jobs:
           "$RUNNER_TEMP/unzipped/Tokalot.app/Contents/MacOS/Tokalot" --diagnose > /dev/null
           ls -l "Tokalot-mac-arm64-$VERSION.zip"
 
-      # ---- Experiments: try to give this machine the permissions a user would grant, and a virtual
-      # microphone, to exercise the shortcut, paste and recording paths. GitHub's machines may not allow
-      # it; these steps can't fail the build, and their output says what was and wasn't possible.
+      # ---- Driving other apps. GitHub's macOS machines let programs started from the build's shell use
+      # Input Monitoring, Accessibility and the microphone, so the shortcut, pasting and recording can be
+      # exercised here. A person's Mac asks for each first; that part can't be tested on this machine.
+      # These steps report but can't fail the build, so a change to GitHub's machines can't block a release.
 
-      - name: Experiment - grant permissions to Tokalot.app
+      # Pastes into TextEdit exactly as a dictation does, checks the old clipboard came back, then does
+      # the "own words back" swap (⌘Z and paste). TextEdit's saved file shows what landed.
+      - name: Check - paste into TextEdit
         continue-on-error: true
         run: |
-          csrutil status || true
-          NOW=$(date +%s)
-          for db in "/Library/Application Support/com.apple.TCC/TCC.db" "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
-            for svc in kTCCServiceListenEvent kTCCServicePostEvent kTCCServiceAccessibility kTCCServiceMicrophone; do
-              sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, policy_id, indirect_object_identifier_type, indirect_object_identifier, indirect_object_code_identity, flags, last_modified, pid, pid_version, boot_uuid, last_reminded) VALUES ('$svc', 'com.sidewinderzz.tokalot', 0, 2, 4, 1, NULL, NULL, 0, 'UNUSED', NULL, 0, $NOW, NULL, NULL, 'UNUSED', $NOW);" \
-                && echo "granted $svc in $db" || echo "could not write $svc to $db"
-            done
-          done
+          TOKALOT_DATA="$RUNNER_TEMP/paste" perl -e 'alarm 90; exec @ARGV' "$BIN" --paste-test | tee "$CHECKS/paste-test.txt"
 
-      - name: Experiment - virtual microphone
+      # A virtual sound card (BlackHole) that loops what is played back into the microphone input.
+      - name: Check - virtual microphone
+        timeout-minutes: 6
+        id: loopback
         continue-on-error: true
         run: |
-          brew install --quiet blackhole-2ch switchaudio-osx || exit 0
+          brew install --quiet blackhole-2ch switchaudio-osx
           sudo killall coreaudiod || true
-          sleep 5
-          SwitchAudioSource -a || true
-          SwitchAudioSource -t input -s "BlackHole 2ch" && SwitchAudioSource -t output -s "BlackHole 2ch" || true
+          sleep 6
+          SwitchAudioSource -a
+          SwitchAudioSource -t input -s "BlackHole 2ch"
+          SwitchAudioSource -t output -s "BlackHole 2ch"
+          echo "ok=1" >> "$GITHUB_OUTPUT"
 
-      - name: Experiment - shortcut, paste and microphone through the app itself
+      # The whole thing, as a person would do it: the app runs, TextEdit is in front, Ctrl+Cmd is held while
+      # the spoken sentence plays into the microphone, and the transcription (offline model) is pasted.
+      - name: Check - hold Ctrl+Cmd and dictate into TextEdit
+        timeout-minutes: 6
+        if: steps.loopback.outputs.ok == '1'
         continue-on-error: true
         run: |
-          # Started through LaunchServices so macOS sees Tokalot.app (not this shell) as the one asking.
-          OUT="$CHECKS/selftest-granted.txt"
-          ( sleep 3; afplay "$RUNNER_TEMP/speech.wav" ) &
-          open -W -n --env TOKALOT_DATA="$RUNNER_TEMP/granted" --stdout "$OUT" --stderr "$OUT" \
-            -a "$APP" --args --selftest --no-keychain --expect-tap --expect-paste --record 8 --record-to "$RUNNER_TEMP/mic.wav" || true
-          cat "$OUT" || true
-          if [ -s "$RUNNER_TEMP/mic.wav" ]; then
-            TOKALOT_DATA="$RUNNER_TEMP/model" "$BIN" --transcribe "$RUNNER_TEMP/mic.wav" | tee "$CHECKS/transcribe-mic.txt" || true
-          fi
+          export TOKALOT_DATA="$RUNNER_TEMP/e2e"
+          mkdir -p "$TOKALOT_DATA"
+          cp -R "$RUNNER_TEMP/model/models" "$TOKALOT_DATA/"
+          "$BIN" > "$CHECKS/e2e-stdout.txt" 2>&1 &
+          APP_PID=$!
+          sleep 12
+          FILE="$RUNNER_TEMP/e2e-dictation.txt"
+          : > "$FILE"
+          open -a TextEdit "$FILE"
+          sleep 5
+          # First: does the sentence reach the microphone at all?
+          "$BIN" --mic-check 3 > "$CHECKS/e2e-mic-level.txt" 2>&1 &
+          MIC_PID=$!
+          sleep 0.5; afplay "$RUNNER_TEMP/speech.wav"
+          wait $MIC_PID || true
+          cat "$CHECKS/e2e-mic-level.txt"
+          ( sleep 1.5; afplay "$RUNNER_TEMP/speech.wav" ) &
+          PLAY_PID=$!
+          "$BIN" --hold-shortcut 9
+          wait $PLAY_PID || true
+          sleep 30
+          "$BIN" --save-front
+          sleep 2
+          echo "TextEdit's file now holds:"; cat "$FILE" | tee "$CHECKS/e2e-dictation.txt"; echo
+          kill $APP_PID || true
+          killall TextEdit || true
+          cat "$TOKALOT_DATA/log.txt" | tee "$CHECKS/e2e-log.txt"
+          grep -qi "fox" "$FILE"
 
       - uses: actions/upload-artifact@v4
         with:

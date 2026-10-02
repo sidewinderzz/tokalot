@@ -41,7 +41,7 @@ internal static unsafe class SelfTest
     {
         string? Arg(string name) { var i = Array.IndexOf(args, name); return i >= 0 && i + 1 < args.Length ? args[i + 1] : null; }
 
-        Info("system", Native.MacVersion() + " · " + RuntimeInformation.ProcessArchitecture + " · bundle " + (Startup.Bundle ?? "none"));
+        Info("system", Native.MacVersion() + " · " + RuntimeInformation.ProcessArchitecture + " · bundle " + (Startup.Bundle ?? (Paths.IsTestInstance ? "(test copy)" : "none")));
 
         if (!args.Contains("--no-keychain"))
             Check("keychain", () =>
@@ -103,19 +103,7 @@ internal static unsafe class SelfTest
 
         Info("microphone device", Recorder.InputDevice() ?? "none");
         if (Arg("--record") is { } secs && double.TryParse(secs, System.Globalization.CultureInfo.InvariantCulture, out var seconds))
-            Check("recording", () =>
-            {
-                using var r = new Recorder();
-                if (!r.Start()) return (false, "couldn't start: " + Recorder.LastError);
-                Thread.Sleep(TimeSpan.FromSeconds(seconds));
-                var speech = r.SpeechChunks;
-                var samples = r.Stop();
-                float peak = samples.Length == 0 ? 0 : samples.Max(Math.Abs);
-                if (Arg("--record-to") is { } path) File.WriteAllBytes(path, Net.Wav(samples));
-                var expected = (int)(seconds * Recorder.SampleRate);
-                return (samples.Length >= expected * 0.8,
-                    FormattableString.Invariant($"{samples.Length} samples ({samples.Length / (double)Recorder.SampleRate:0.00} s of {seconds} s), peak {peak:0.000}, {speech} chunks with sound"));
-            });
+            Check("recording", () => Record(seconds, Arg("--record-to")));
 
         Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) failed.");
         return failures == 0 ? 0 : 1;
@@ -149,6 +137,101 @@ internal static unsafe class SelfTest
             Console.WriteLine("Transcription failed: " + e.Message);
             return 1;
         }
+    }
+
+    /** Records from the default input for a while and describes what came in. */
+    private static (bool, string) Record(double seconds, string? saveTo)
+    {
+        using var r = new Recorder();
+        if (!r.Start()) return (false, "couldn't start: " + Recorder.LastError);
+        Thread.Sleep(TimeSpan.FromSeconds(seconds));
+        var speech = r.SpeechChunks;
+        var samples = r.Stop();
+        float peak = samples.Length == 0 ? 0 : samples.Max(Math.Abs);
+        if (saveTo != null) File.WriteAllBytes(saveTo, Net.Wav(samples));
+        var expected = (int)(seconds * Recorder.SampleRate);
+        return (samples.Length >= expected * 0.8,
+            FormattableString.Invariant($"{samples.Length} samples ({samples.Length / (double)Recorder.SampleRate:0.00} s of {seconds} s), peak {peak:0.000}, {speech} chunks with sound, from {Recorder.InputDevice() ?? "no device"}"));
+    }
+
+    /** "Tokalot --mic-check <seconds>": only the recording check. */
+    public static int MicCheck(string seconds)
+    {
+        Check("recording", () => Record(double.Parse(seconds, System.Globalization.CultureInfo.InvariantCulture), null));
+        return failures == 0 ? 0 : 1;
+    }
+
+    // ---------- pasting into a real app ----------
+
+    /** Runs the app's own async code on this thread, letting Avalonia's dispatcher do its work meanwhile. */
+    private static T Pump<T>(System.Threading.Tasks.Task<T> t)
+    {
+        while (!t.IsCompleted) { Avalonia.Threading.Dispatcher.UIThread.RunJobs(); Thread.Sleep(5); }
+        return t.GetAwaiter().GetResult();
+    }
+
+    private static void Wait(int ms)
+    {
+        var until = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < until) { Avalonia.Threading.Dispatcher.UIThread.RunJobs(); Thread.Sleep(5); }
+    }
+
+    /**
+     * "Tokalot --paste-test": opens a text file in TextEdit and pastes into it exactly as a dictation
+     * does (clipboard, ⌘V, old clipboard put back), then does the "own words back" swap (⌘Z, paste),
+     * saving with ⌘S after each and reading the file. Needs Accessibility; for the build machine.
+     */
+    public static int PasteTest()
+    {
+        App.StartForTools();
+        var file = Path.Combine(Path.GetTempPath(), "tokalot-paste-test.txt");
+        File.WriteAllText(file, "");
+        Sh.Run("/usr/bin/open", new[] { "-a", "TextEdit", file }, timeoutMs: 10000);
+        for (int i = 0; i < 40 && AppDetect.Frontmost()?.Bundle != "com.apple.TextEdit"; i++) Thread.Sleep(250);
+        Wait(1500);
+        Info("front app", AppDetect.Frontmost()?.Name ?? "none");
+
+        string Saved()
+        {
+            TextInjector.Chord(1); // ⌘S
+            Wait(1200);
+            return File.ReadAllText(file).Trim();
+        }
+
+        const string previous = "Something copied earlier ✓";
+        TextInjector.Set(previous, transient: false);
+        const string dictated = "Hello from the Tokalot paste test, with commas and 123.";
+        var r1 = Pump(TextInjector.Paste(dictated));
+        Wait(300);
+        var after = Saved();
+        if (r1 == TextInjector.Result.Pasted && after == dictated) Pass("paste", $"\"{after}\" landed in TextEdit");
+        else Fail("paste", $"result {r1}, file holds \"{after}\"");
+        var clip = TextInjector.Read();
+        if (clip == previous) Pass("clipboard restored", "the earlier clipboard text is back");
+        else Fail("clipboard restored", $"clipboard holds \"{clip}\"");
+
+        const string own = "Your own words are back.";
+        var r2 = Pump(TextInjector.Replace(own));
+        Wait(300);
+        var swapped = Saved();
+        if (r2 == TextInjector.Result.Pasted && swapped == own) Pass("revert", $"⌘Z then paste left \"{swapped}\"");
+        else Fail("revert", $"result {r2}, file holds \"{swapped}\"");
+
+        Sh.Run("/usr/bin/killall", new[] { "TextEdit" }, timeoutMs: 5000);
+        Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) failed.");
+        return failures == 0 ? 0 : 1;
+    }
+
+    /** "Tokalot --hold-shortcut <seconds>": holds Ctrl+Cmd for that long, as a person would (for the build machine). */
+    public static int HoldShortcut(string seconds)
+    {
+        var s = double.Parse(seconds, System.Globalization.CultureInfo.InvariantCulture);
+        Post(59, true, Control, true);
+        Post(55, true, Control | Command, true);
+        Thread.Sleep(TimeSpan.FromSeconds(s));
+        Post(55, false, Control, true);
+        Post(59, false, 0, true);
+        return 0;
     }
 
     // ---------- synthetic key presses (only where the machine allows posting events) ----------
