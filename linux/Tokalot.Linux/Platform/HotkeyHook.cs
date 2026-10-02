@@ -20,6 +20,9 @@ public sealed class HotkeyHook : IDisposable
     public event Action<int>? KeyWhileHeld; // another key while the combo (or recording) is active
     public event Action? Escape;            // Esc pressed (used to cancel recording)
 
+    /** The code this reader reports for the Z key (the shortcut plus Z puts your own wording back). */
+    public const int KeyZ = 44;
+
     private const ushort EV_KEY = 1;
     private const int KEY_ESC = 1, KEY_LEFTCTRL = 29, KEY_RIGHTCTRL = 97, KEY_LEFTMETA = 125, KEY_RIGHTMETA = 126,
         KEY_LEFTSHIFT = 42, KEY_RIGHTSHIFT = 54, KEY_LEFTALT = 56, KEY_RIGHTALT = 100;

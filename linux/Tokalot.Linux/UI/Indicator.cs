@@ -324,9 +324,9 @@ public sealed class IndicatorWindow : Window
         view.Level = level;
         Content = view;
         Cursor = Cursors.Hand;
-        ToolTip.SetTip(this, "Tokalot: click or hold Ctrl+Super to dictate. Drag to move.");
+        ToolTip.SetTip(this, $"Tokalot: click or hold {Host.Shortcut} to dictate. Drag to move.");
         // Clicking it must not pull the keyboard away from the app you're dictating into.
-        X11.NeverFocus(this);
+        Overlay.NeverFocus(this);
         PointerEntered += (_, _) => { view.Hover = true; view.InvalidateVisual(); };
         PointerExited += (_, _) => { view.Hover = false; view.InvalidateVisual(); };
         PointerPressed += OnDown;
@@ -371,7 +371,7 @@ public sealed class IndicatorWindow : Window
     {
         if (dragging) return;
         var s = Settings.Current;
-        var (fullScreen, center) = X11.ActiveWindowState();
+        var (fullScreen, center) = Overlay.ActiveWindowState();
         bool show = view.CurrentMode != IndicatorView.Mode.Idle || (s.ShowIdleIndicator && !fullScreen);
         // Placed even when hidden, so messages still know where to appear.
         if (view.CurrentMode == IndicatorView.Mode.Idle || force) Place(ActiveMonitor(center));
@@ -419,7 +419,7 @@ public sealed class IndicatorWindow : Window
     {
         double k = RenderScaling;
         var h = view.HitArea;
-        X11.SetInputRegion(this, new PixelRect((int)Math.Floor(h.X * k), (int)Math.Floor(h.Y * k), (int)Math.Ceiling(h.Width * k), (int)Math.Ceiling(h.Height * k)));
+        Overlay.SetInputRegion(this, new PixelRect((int)Math.Floor(h.X * k), (int)Math.Floor(h.Y * k), (int)Math.Ceiling(h.Width * k), (int)Math.Ceiling(h.Height * k)));
     }
 
     // ---------- drag and click ----------
@@ -444,7 +444,7 @@ public sealed class IndicatorWindow : Window
             dragging = true;
             Cursor = Cursors.SizeAll;
             // While dragging, the whole window follows the pointer; let all of it take the mouse.
-            X11.SetInputRegion(this, new PixelRect(0, 0, 4096, 4096));
+            Overlay.SetInputRegion(this, new PixelRect(0, 0, 4096, 4096));
         }
         if (!dragging) return;
 
@@ -467,7 +467,7 @@ public sealed class IndicatorWindow : Window
         view.Dock = dock;
         var keep = dragMonitor;
         Place(keep);
-        X11.SetInputRegion(this, new PixelRect(0, 0, 4096, 4096));
+        Overlay.SetInputRegion(this, new PixelRect(0, 0, 4096, 4096));
     }
 
     private void OnUp(object? sender, PointerReleasedEventArgs e)
@@ -496,7 +496,7 @@ public sealed class IndicatorWindow : Window
         try
         {
             if (activeWindowCenter is { } c && Screens.ScreenFromPoint(c) is { } a) return a;
-            if (X11.Pointer() is { } p && Screens.ScreenFromPoint(p) is { } b) return b;
+            if (Overlay.Pointer() is { } p && Screens.ScreenFromPoint(p) is { } b) return b;
             return Screens.Primary ?? (Screens.All.Count > 0 ? Screens.All[0] : null);
         }
         catch { return null; }

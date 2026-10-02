@@ -21,8 +21,12 @@ using Tokalot.Desktop.Platform;
 
 namespace Tokalot.Desktop.UI;
 
-/** The settings and history window. Closing it leaves Tokalot running in the tray. */
-public sealed class MainWindow : Window
+/**
+ * The settings and history window. Closing it leaves Tokalot running in the tray (the menu bar on a Mac).
+ * Shared by the Linux and Mac apps; each has its own part of this class (MainWindow.Linux.cs,
+ * MainWindow.Mac.cs) with the setup rows and warnings that name its own permissions.
+ */
+public sealed partial class MainWindow : Window
 {
     public enum Page { Home, Dictionary, Style, Snippets, Settings }
 
@@ -69,7 +73,14 @@ public sealed class MainWindow : Window
         FontFamily = C.Sans;
         try { Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Tokalot/Assets/icon.png"))); } catch { }
         // No system title bar: the app draws to the top edge. Dragging, resizing and double-click to maximize are done below.
-        SystemDecorations = SystemDecorations.None;
+        // A Mac keeps its own window buttons (top left) and edges, with the page drawn up under them.
+        if (OperatingSystem.IsMacOS())
+        {
+            ExtendClientAreaToDecorationsHint = true;
+            ExtendClientAreaChromeHints = Avalonia.Platform.ExtendClientAreaChromeHints.PreferSystemChrome;
+            ExtendClientAreaTitleBarHeightHint = CaptionHeight * UiScale;
+        }
+        else SystemDecorations = SystemDecorations.None;
 
         (searchBox, search) = Ui.Field("", "Search your dictations");
         search.TextChanged += (_, _) => FillHistory();
@@ -101,15 +112,19 @@ public sealed class MainWindow : Window
         var strip = DragStrip();
         Grid.SetColumnSpan(strip, 2);
         root.Children.Add(strip);
-        var caption = CaptionButtons();
-        Grid.SetColumn(caption, 1);
-        root.Children.Add(caption);
+        if (!OperatingSystem.IsMacOS())
+        {
+            var caption = CaptionButtons();
+            Grid.SetColumn(caption, 1);
+            root.Children.Add(caption);
+        }
 
         // The scaled page, a thin outline in place of the system window border, and the resize edges on top.
         var frame = new Grid();
         frame.Children.Add(new LayoutTransformControl { LayoutTransform = new ScaleTransform(UiScale, UiScale), Child = root });
         frame.Children.Add(new Border { BorderBrush = C.Line, BorderThickness = new Thickness(1), IsHitTestVisible = false });
-        foreach (var g in ResizeGrips()) { grips.Add(g); frame.Children.Add(g); }
+        if (!OperatingSystem.IsMacOS())
+            foreach (var g in ResizeGrips()) { grips.Add(g); frame.Children.Add(g); }
         Content = frame;
 
         onHistory = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Home) FillHistory(); });
@@ -124,7 +139,7 @@ public sealed class MainWindow : Window
         // Seen before the focused control gets the key (WPF's PreviewKeyDown).
         AddHandler(KeyDownEvent, (_, e) =>
         {
-            if (e.Key == Key.F && e.KeyModifiers == KeyModifiers.Control)
+            if (e.Key == Key.F && (e.KeyModifiers == KeyModifiers.Control || (OperatingSystem.IsMacOS() && e.KeyModifiers == KeyModifiers.Meta)))
             {
                 e.Handled = true;
                 if (CurrentPage != Page.Home) Go(Page.Home);
@@ -217,7 +232,7 @@ public sealed class MainWindow : Window
             Child = Icons.Get("close", 14, C.Sub),
         };
         ToolTip.SetTip(dismiss, "Hide this tip");
-        var keys = Ui.Row(KeyCap("Ctrl"), new TextBlock { Text = "+", FontSize = 14, Foreground = C.Sub, Margin = new Thickness(7, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center }, KeyCap("Super"));
+        var keys = Ui.Row(KeyCap(Host.ShortcutKeys[0]), new TextBlock { Text = "+", FontSize = 14, Foreground = C.Sub, Margin = new Thickness(7, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center }, KeyCap(Host.ShortcutKeys[1]));
         keys.Margin = new Thickness(0, 8, 0, 8);
         var hint = Ui.Card(Ui.Stack(
             Spread(Ui.Text("Hold to talk", 13, C.Sub), dismiss),
@@ -454,7 +469,7 @@ public sealed class MainWindow : Window
     {
         var text = new SelectableTextBlock
         {
-            Text = command, FontFamily = new FontFamily("DejaVu Sans Mono, Liberation Mono, Noto Sans Mono, monospace"), FontSize = 12.5,
+            Text = command, FontFamily = new FontFamily("DejaVu Sans Mono, Liberation Mono, Noto Sans Mono, Menlo, monospace"), FontSize = 12.5,
             Foreground = C.Text, TextWrapping = TextWrapping.Wrap,
         };
         var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(command); Toast("Copied"); }, icon: "copy");
@@ -474,12 +489,6 @@ public sealed class MainWindow : Window
         if (bannerText != null) bannerText.Text = $"Downloading Tokalot {App.Current.UpdateVersion}… {pct}%";
     }
 
-    /** One line that adds the user to the "input" group, which is what lets Tokalot see Ctrl+Super. */
-    internal const string InputGroupCommand = "sudo usermod -aG input $USER";
-    /** Lets the "input" group use /dev/uinput, which is how Tokalot presses Ctrl+V. */
-    internal const string UinputRuleCommand =
-        "echo 'KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\", OPTIONS+=\"static_node=uinput\"' | sudo tee /etc/udev/rules.d/60-tokalot-uinput.rules && sudo udevadm control --reload-rules && sudo udevadm trigger";
-
     private void BuildHome(StackPanel col)
     {
         var app = App.Current;
@@ -494,19 +503,14 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(Ui.Card(banner, 14), 0, 0, 0, 14));
         }
 
-        if (!(app.Controller?.HotkeyWorks ?? true))
-        {
-            var c = Ui.Card(Ui.Stack(
-                Ui.Text("Tokalot can't listen for Ctrl+Super yet. Linux only lets members of the \"input\" group see the keyboard. Run this in a terminal, then log out and back in:", 15, C.Warn),
-                Command(InputGroupCommand)), 18);
-            col.Children.Add(Spaced(c, 0, 0, 0, 14));
-        }
+        // The permissions this platform needs that aren't in place yet, each naming what to do.
+        PlatformWarnings(col);
 
         if (!SetupComplete)
         {
             var c = Ui.Stack(
                 Ui.Heading("Finish setup", 30),
-                Spaced(Ui.Text("Add a Groq API key (free) or download the offline model, and Ctrl+Super will start working in any app.", 15, C.Sub), 0, 6, 0, 14),
+                Spaced(Ui.Text($"Add a Groq API key (free) or download the offline model, and {Host.Shortcut} will start working in any app.", 15, C.Sub), 0, 6, 0, 14),
                 Ui.Button("Open settings", () => Go(Page.Settings), filled: true));
             col.Children.Add(Spaced(Ui.Card(c, 22), 0, 0, 0, 16));
         }
@@ -554,7 +558,7 @@ public sealed class MainWindow : Window
         {
             box.Children.Add(Spaced(Ui.Heading(q.Length == 0 ? "Today" : "No matches", 30), 0, 24, 0, 12));
             box.Children.Add(Ui.Card(Ui.Text(q.Length == 0
-                ? "Nothing yet. Click into any text box, hold Ctrl+Super and talk."
+                ? $"Nothing yet. Click into any text box, hold {Host.Shortcut} and talk."
                 : $"Nothing matches “{q}”.", 16, C.Sub), 24));
             return;
         }
@@ -779,7 +783,7 @@ public sealed class MainWindow : Window
 
     private void BuildStyle(StackPanel col)
     {
-        Intro(col, "Style", "How the cleanup model writes what you say, per kind of app. Tokalot checks which app you're in when you press Ctrl+Super."
+        Intro(col, "Style", "How the cleanup model writes what you say, per kind of app. Tokalot checks which app you're in when you press " + Host.Shortcut + "."
             + (Sh.IsWayland ? " On Wayland the desktop doesn't tell apps which window is in front, so every dictation uses “Everything else”." : ""));
         if (!S.CleanupReady)
         {
@@ -791,7 +795,7 @@ public sealed class MainWindow : Window
 
         col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Polish my wording",
             "Off: your own words are kept, with fillers removed and punctuation and formatting fixed. On: the AI may also tighten and clarify what you said, " +
-            "and for a few seconds after each dictation Ctrl+Super+Z puts your own words back.",
+            $"and for a few seconds after each dictation {Host.Shortcut}+Z puts your own words back.",
             Ui.Switch(S.Polish, v => { S.Polish = v; S.Save(); }))), 0, 0, 0, 18));
 
         var tabs = new WrapPanel();
@@ -873,6 +877,17 @@ public sealed class MainWindow : Window
         col.Children.Add(l);
     }
 
+    /** One row of Settings › Setup: green when done, otherwise orange with what to do (and a command to copy, if any). */
+    private Control Status(string title, bool done, string doneText, string notDone, Control? action = null, string? command = null)
+    {
+        var st = Ui.Text(done ? doneText : notDone, 13.5, done ? C.Good : C.Warn);
+        if (title.StartsWith("Offline")) modelStatus = st;
+        var texts = Ui.Stack(Ui.Text(title, 15.5), st);
+        // What to type in a terminal to fix it, shown only while it needs fixing.
+        if (!done && command != null) texts.Children.Add(Command(command));
+        return Spaced(Spread(texts, action ?? new Border()), 20, 13, 16, 13);
+    }
+
     private void BuildSettings(StackPanel col)
     {
         col.Children.Add(Ui.Heading("Settings"));
@@ -880,35 +895,17 @@ public sealed class MainWindow : Window
 
         // --- Setup
         Section(col, "Setup");
-        Control Status(string title, bool done, string doneText, string notDone, Control? action = null, string? command = null)
-        {
-            var st = Ui.Text(done ? doneText : notDone, 13.5, done ? C.Good : C.Warn);
-            if (title.StartsWith("Offline")) modelStatus = st;
-            var texts = Ui.Stack(Ui.Text(title, 15.5), st);
-            // What to type in a terminal to fix it, shown only while it needs fixing.
-            if (!done && command != null) texts.Children.Add(Command(command));
-            return Spaced(Spread(texts, action ?? new Border()), 20, 13, 16, 13);
-        }
-        var hookOk = App.Current.Controller?.HotkeyWorks ?? true;
         var modelText = ModelManager.IsReady ? "Downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
-        var setup = new List<Control>
-        {
-            Status("Ctrl+Super shortcut", hookOk, "Working", "Not working: Tokalot isn't allowed to see the keyboard. Run this, then log out and back in.", command: InputGroupCommand),
-            Status("Pasting into apps", TextInjector.CanType, "Working, using the " + TextInjector.Method,
-                "Tokalot can't press Ctrl+V for you, so text is only copied and you paste it yourself. Run this (and the command above), then log out and back in.",
-                command: UinputRuleCommand),
-        };
-        if (TextInjector.ClipboardNeedsWlCopy)
-            setup.Add(Status("Clipboard", false, "", "On this Wayland desktop Tokalot's clipboard may not reach your apps, so dictations are only copied and you press Ctrl+V yourself. Install the wl-clipboard package (wl-copy) to have them pasted for you."));
-        if (Recorder.Tool == null)
-            setup.Add(Status("Microphone", false, "", "No recorder program found. Install PipeWire (pw-record), pulseaudio-utils (parec) or alsa-utils (arecord)."));
+        var setup = new List<Control>();
+        // The shortcut, pasting and microphone rows, which name this platform's own permissions.
+        PlatformSetupRows(setup);
         setup.Add(Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key below (free)"));
         setup.Add(Status("Offline backup model (60 MB)", ModelManager.IsReady || downloadPct != null, modelText, modelText,
             ModelManager.IsReady || downloadPct != null ? null : Ui.Button("Download", StartDownload)));
-        setup.Add(Ui.SettingRow("Start at login", Startup.Supported ? "Runs quietly in the tray so Ctrl+Super always works." : "Not available in a test or development copy.",
+        setup.Add(Ui.SettingRow("Start at login", Startup.Supported ? $"Runs quietly in the {Host.TrayName} so {Host.Shortcut} always works." : "Not available in a test or development copy.",
             Ui.Switch(S.LaunchAtStartup, v => { S.LaunchAtStartup = v; S.Save(); Startup.Apply(v); })));
         col.Children.Add(Ui.List(setup.ToArray()));
-        col.Children.Add(Spaced(Ui.Text("If dictation hears nothing, open your system's sound settings and check that the right microphone is chosen as the input device and isn't muted.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.Text(MicHelp, 13, C.Sub), 4, 8, 0, 0));
 
         // --- Appearance
         Section(col, "Appearance");
@@ -969,7 +966,7 @@ public sealed class MainWindow : Window
         Section(col, "Recording");
         col.Children.Add(Ui.List(
             Spaced(Ui.Stack(Ui.Text("How to dictate", 15.5),
-                Ui.Text("Hold Ctrl+Super while you talk and let go to paste. Or tap Ctrl+Super once for hands-free, then tap again to finish. Esc cancels.", 13.5, C.Sub)), 20, 13, 18, 13),
+                Ui.Text($"Hold {Host.Shortcut} while you talk and let go to paste. Or tap {Host.Shortcut} once for hands-free, then tap again to finish. Esc cancels.", 13.5, C.Sub)), 20, 13, 18, 13),
             Ui.SettingRow("Auto-stop after 30 s of silence", "Hands-free mode only. Long pauses to think are fine.",
                 Ui.Switch(S.AutoStop, v => { S.AutoStop = v; S.Save(); })),
             Ui.SettingRow("Hands-free reminder", "A short note above the indicator when hands-free starts. Its X turns this off.",
@@ -984,7 +981,7 @@ public sealed class MainWindow : Window
         col.Children.Add(Ui.List(Catalog.Stt.Select(o =>
         {
             var needsKey = o.Service != null && S.Key(o.Service).Length == 0;
-            // The shared catalog says "this PC"; same thing, said for Linux.
+            // The shared catalog says "this PC"; same thing, said for any computer.
             var note = o.Note.Replace("this PC", "this computer");
             return (Control)Ui.Choice(o.Label, note + (needsKey ? " Needs a key." : ""), S.Stt == o.Id, () => { S.Stt = o.Id; S.Save(); Render(); });
         }).ToArray()));
@@ -1056,7 +1053,7 @@ public sealed class MainWindow : Window
         var backupRow = Ui.Row(Ui.Button("Back up…", () => DoBackup(withAudio, withKeys), filled: true), Ui.Button("Restore…", DoRestore));
         backupRow.Children[0].Margin = new Thickness(0, 0, 10, 0);
         col.Children.Add(Spaced(backupRow, 0, 12, 0, 0));
-        col.Children.Add(Spaced(Ui.Text("Saves one .zip file wherever you choose: Documents, a cloud folder, a USB stick, etc. Backups work in both the Linux and Windows apps.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Saves one .zip file wherever you choose: Documents, a cloud folder, a USB stick, etc. " + BackupNote, 13, C.Sub), 4, 8, 0, 0));
 
         // --- Usage
         Section(col, "Usage");
@@ -1085,13 +1082,13 @@ public sealed class MainWindow : Window
         // --- About
         Section(col, "About");
         var about = new StackPanel();
-        about.Children.Add(Ui.Text("Tokalot for Linux " + Updater.CurrentVersion, 16, bold: true));
-        about.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this computer. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The Ctrl+Super listener only watches for that shortcut; it never records your typing.", 14, C.Sub), 0, 4, 0, 0));
+        about.Children.Add(Ui.Text($"Tokalot for {Host.Name} " + Updater.CurrentVersion, 16, bold: true));
+        about.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this computer. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The " + Host.Shortcut + " listener only watches for that shortcut; it never records your typing.", 14, C.Sub), 0, 4, 0, 0));
         about.Children.Add(Spaced(Link("Source code: github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)), 0, 8, 0, 0));
         var status = Ui.Text("", 14, C.Sub);
         about.Children.Add(Spaced(Ui.Button("Check for updates", async () =>
         {
-            if (!Updater.CanUpdate) { status.Text = "The Linux app doesn't update itself yet. Newer builds are on the GitHub page above."; return; }
+            if (!Updater.CanUpdate) { status.Text = $"The {Host.Name} app doesn't update itself yet. Newer builds are on the GitHub page above."; return; }
             status.Text = "Checking…";
             var v = await App.Current.CheckForUpdates();
             status.Text = v != null ? $"Version {v} is available. See the banner on Home." : "You're up to date.";
