@@ -48,6 +48,21 @@ public static class TextInjector
         }
     }
 
+    /** Takes back what was just pasted (Ctrl+Z in the focused app) and pastes this instead. */
+    public static async Task Replace(string text)
+    {
+        for (int i = 0; i < 30 && (Down(0x11) || Down(0x5B) || Down(0x5C) || Down(0x12) || Down(0x10)); i++)
+            await Task.Delay(50);
+        var undo = new[]
+        {
+            HotkeyHook.Key(0x11, false), HotkeyHook.Key(0x5A, false), // Ctrl down, Z down
+            HotkeyHook.Key(0x5A, true), HotkeyHook.Key(0x11, true),   // Z up, Ctrl up
+        };
+        HotkeyHook.SendInput((uint)undo.Length, undo, Marshal.SizeOf<HotkeyHook.INPUT>());
+        await Task.Delay(150);
+        await Paste(text);
+    }
+
     /** Copies every format currently on the clipboard (text, images, files…) so it can be restored. */
     private static DataObject? Snapshot()
     {

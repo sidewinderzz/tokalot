@@ -295,6 +295,10 @@ public sealed class Controller : IDisposable
     private bool ignoreNextRelease;
     private DateTime pressedAt;
     private ActiveApp? app;
+    private const int RevertSeconds = 8;
+    private string? plainText;             // the user's own wording for the last (polished) dictation
+    private long? plainEntry;
+    private DateTime revertUntil;          // Ctrl+Win+Z puts it back until then
     private CancellationTokenSource? work; // the transcription in progress, so Esc can stop it
     private bool userCancelled;
 
@@ -377,6 +381,13 @@ public sealed class Controller : IDisposable
 
     private void OnOtherKey(int vk)
     {
+        // Ctrl+Win+Z just after a polished dictation: put the user's own wording back.
+        if (vk == 0x5A && plainText != null && DateTime.UtcNow < revertUntil)
+        {
+            if (state == State.Recording && !handsFree) Cancel(false); // the press also started a recording
+            if (state == State.Idle) Revert();
+            return;
+        }
         if (state != State.Recording || handsFree) return;
         // Ctrl+Win+D, Ctrl+Win+Arrow, etc.: the user meant a Windows shortcut.
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < ShortcutWindowMs) Cancel(false);
@@ -415,6 +426,34 @@ public sealed class Controller : IDisposable
                 Say("Cancelled · the recording is in history", 2400);
             }
             else Say("Cancelled", 1200);
+        }
+    }
+
+    /** Swaps the polished text that was just pasted for the user's own wording. */
+    private async void Revert()
+    {
+        var text = plainText;
+        var id = plainEntry;
+        plainText = null;
+        if (text == null) return;
+        state = State.Processing; // no new recording while keys are being sent
+        try
+        {
+            await TextInjector.Replace(text);
+            var entry = id == null ? null : History.All().FirstOrDefault(e => e.Id == id);
+            if (entry != null)
+                History.Replace(new Entry
+                {
+                    Id = entry.Id, Time = entry.Time, Text = text, Raw = entry.Raw, DurationMs = entry.DurationMs,
+                    Cleaned = false, AppKey = entry.AppKey, AppLabel = entry.AppLabel,
+                });
+            Say("Your own wording is back", 1800);
+        }
+        catch (Exception e) { App.Log("Revert failed: " + e.Message); }
+        finally
+        {
+            state = State.Idle;
+            App.Current.RefreshAfterDictation();
         }
     }
 
@@ -553,8 +592,14 @@ public sealed class Controller : IDisposable
                 Sounds.Play(Sounds.Kind.Done);
             }
             indicator.SetMode(IndicatorView.Mode.Idle);
+            plainText = outcome.Plain;
+            plainEntry = outcome.EntryId;
+            revertUntil = DateTime.UtcNow.AddSeconds(RevertSeconds);
+            hook.OwnKeyUntil = revertUntil;
+            hook.OwnKey = outcome.Plain != null ? 0x5A : 0; // Z
             if (outcome.Warning != null) Say(outcome.Warning, 3500);
             else if (outcome.Text.Length == 0) Say("Didn't catch anything", 1800);
+            else if (outcome.Plain != null) Say("Polished · Ctrl+Win+Z for your own wording", RevertSeconds * 1000);
             dictation.KeepAudio(samples, outcome.EntryId, null, target);
         }
         catch (OperationCanceledException) when (userCancelled)

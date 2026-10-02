@@ -46,6 +46,13 @@ public sealed class HotkeyHook : IDisposable
     public volatile bool Listening;
 
     /**
+     * A key that, pressed with the combo before this time, belongs to Tokalot (Ctrl+Win+Z = put my wording back).
+     * It is reported but not passed on, so the app in front doesn't also act on it (many treat it as Ctrl+Z).
+     */
+    public volatile int OwnKey;
+    public DateTime OwnKeyUntil;
+
+    /**
      * The hook runs on its own thread with its own message loop. Windows silently removes a
      * low-level hook that answers too slowly, so it must never wait on the (sometimes busy) UI thread.
      */
@@ -93,6 +100,12 @@ public sealed class HotkeyHook : IDisposable
         // can be missed there. Re-read the key this event isn't about, so a stale "held" never sticks.
         if (!isCtrl) ctrl = Held(VK_CONTROL);
         if (!isWin) win = Held(VK_LWIN) || Held(VK_RWIN);
+
+        if (active && OwnKey != 0 && vk == OwnKey && DateTime.UtcNow < OwnKeyUntil)
+        {
+            if (down) KeyWhileHeld?.Invoke(vk);
+            return (IntPtr)1;
+        }
 
         if (isCtrl) { if (down) ctrl = true; else if (up) ctrl = false; }
         else if (isWin) { if (down) win = true; else if (up) win = false; }

@@ -18,7 +18,8 @@ public sealed class Dictation : IDisposable
 {
     private readonly LocalWhisper local = new();
 
-    public sealed record Outcome(string Text, string? Warning, long? EntryId);
+    /** Plain: the user's own wording (fillers out, no AI), set only when Polish reworded it, so it can be put back. */
+    public sealed record Outcome(string Text, string? Warning, long? EntryId, string? Plain = null);
 
     /** Opens connections to the chosen providers while the user talks. */
     public void WarmUp()
@@ -128,7 +129,13 @@ public sealed class Dictation : IDisposable
         catch { }
         Usage.RecordDictation(TextTools.WordCount(final), usedLocal);
         Usage.RecordEdits(AppDetect.FillerCount(baseText), cleaned ? AppDetect.CorrectionCount(baseText) : 0);
-        return new Outcome(final, warnings.FirstOrDefault(), now);
+        string? plain = null;
+        if (cleaned && s.Polish)
+        {
+            plain = TextTools.Restore(TextTools.BasicClean(protectedText), map);
+            if (plain == final) plain = null;
+        }
+        return new Outcome(final, warnings.FirstOrDefault(), now, plain);
     }
 
     /** Keeps the audio for playback (after the text is delivered). Failed runs still get an entry. */

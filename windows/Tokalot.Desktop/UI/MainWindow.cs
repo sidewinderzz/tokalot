@@ -696,6 +696,11 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(warn, 0, 0, 0, 16));
         }
 
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Polish my wording",
+            "Off: your own words are kept, with fillers removed and punctuation and formatting fixed. On: the AI may also tighten and clarify what you said, " +
+            "and for a few seconds after each dictation Ctrl+Win+Z puts your own words back.",
+            Ui.Switch(S.Polish, v => { S.Polish = v; S.Save(); }))), 0, 0, 0, 18));
+
         var tabs = new WrapPanel();
         foreach (var c in Catalog.Categories)
         {

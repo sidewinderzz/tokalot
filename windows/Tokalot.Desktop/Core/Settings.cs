@@ -52,6 +52,8 @@ public sealed class Settings
     public List<Snippet> Snippets { get; set; } = new();
     public bool AutoStop { get; set; } = true;
     public bool AutoLanguage { get; set; }
+    /** Let the cleanup model reword for clarity. Off: the user's own words are kept. */
+    public bool Polish { get; set; }
     public bool Sounds { get; set; } = true;
     public string Theme { get; set; } = "system";
     public uint Accent { get; set; } = Catalog.Accents[0].Argb;
