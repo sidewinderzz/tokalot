@@ -117,6 +117,13 @@ A port of the Windows app, for X11 and Wayland desktops on 64-bit Intel/AMD: hol
 > [!WARNING]
 > The Linux build has only been run under WSL so far, not on a real Linux desktop. Recording, pasting, the tray icon and the on-screen indicator may need fixes on your setup. If you try it, please open an issue with your distro, desktop and the output of `Tokalot --diagnose`.
 
+### Mac (experimental)
+
+A port of the Linux app for Macs with Apple silicon (M1 or newer) on macOS 15 or newer: hold **Ctrl+Cmd** and talk. Download the newest `Tokalot-mac-arm64` zip from [Releases](https://github.com/sidewinderzz/tokalot/releases) (tagged `mac-v…`, marked pre-release), move Tokalot.app to Applications and follow [mac/README.md](mac/README.md). The app isn't signed by Apple yet, so the first start needs **System Settings › Privacy & Security › Open Anyway**, and it asks for three permissions (Input Monitoring, Accessibility, Microphone), which the app shows you with a button to each.
+
+> [!WARNING]
+> The Mac build has only been run on GitHub's build machines, never by a person on a real Mac. The shortcut, the microphone, pasting, the permission prompts, the menu-bar icon and the recording indicator have not been tried by hand and may need fixes. If you try it, please comment on the pinned "Mac testers wanted" issue with your Mac, macOS version and the output of `Tokalot --diagnose`.
+
 ## What it costs
 
 Tokalot is free. You pay your AI providers directly, at their rates:
@@ -166,13 +173,21 @@ dotnet publish linux/Tokalot.Linux -c Release -r linux-x64 --self-contained
 
 To release, bump `<Version>` in `Tokalot.Linux.csproj` and push to `main`. The workflow publishes `linux-v<version>` as a pre-release.
 
+**Mac** (`mac/Tokalot.Mac`, which also compiles the shared code in `windows/Tokalot.Desktop/Core` and the Linux app's interface). Requirements: the .NET 10 SDK, on a Mac. Then:
+
+```sh
+dotnet publish mac/Tokalot.Mac -c Release -r osx-arm64 --self-contained
+```
+
+To release, bump `<Version>` in `Tokalot.Mac.csproj` and push to `main`. The workflow assembles and checks `Tokalot.app` on a macOS build machine and publishes `mac-v<version>` as a pre-release.
+
 GitHub Actions builds every push and runs the Android unit tests.
 
 </details>
 
 ## Credits
 
-On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT), through [Whisper.net](https://github.com/sandrohanea/whisper.net) on Windows and Linux. The Linux interface uses [Avalonia](https://github.com/AvaloniaUI/Avalonia). Audio on Windows uses [NAudio](https://github.com/naudio/NAudio), and installs and updates use [Velopack](https://github.com/velopack/velopack). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License).
+On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT), through [Whisper.net](https://github.com/sandrohanea/whisper.net) on Windows, Linux and Mac. The Linux and Mac interface uses [Avalonia](https://github.com/AvaloniaUI/Avalonia). Audio on Windows uses [NAudio](https://github.com/naudio/NAudio), and installs and updates use [Velopack](https://github.com/velopack/velopack). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License).
 
 ## License
 
