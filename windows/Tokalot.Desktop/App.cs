@@ -55,6 +55,14 @@ public sealed class App : Application
 
     public static new App Current => (App)Application.Current;
 
+    /**
+     * True when the installer was run from inside a Microsoft Store-style app (a download opened from
+     * within it). Windows then keeps Tokalot in that app's private storage: no Start menu entry, no start
+     * at sign-in, and a different settings folder depending on how it was launched.
+     */
+    public static bool InsideAnotherAppsStorage =>
+        Environment.ProcessPath is { } p && p.Contains(@"\Packages\", StringComparison.OrdinalIgnoreCase) && p.Contains(@"\LocalCache\", StringComparison.OrdinalIgnoreCase);
+
     public Controller? Controller { get; private set; }
     private MainWindow? window;
     private System.Windows.Forms.NotifyIcon? tray;
@@ -258,7 +266,7 @@ public sealed class App : Application
         {
             UpdateProgress = null;
             Log("Update failed: " + e.Message);
-            Ui.Dialog(window, "The update couldn't be installed: " + e.Message, cancel: null);
+            Ui.Dialog(window, "The update couldn't be downloaded just now. A new version may still be publishing; try again in a few minutes.\n\n(" + e.Message + ")", cancel: null);
             Refresh();
         }
     }
@@ -324,6 +332,14 @@ public sealed class Controller : IDisposable
 
     private void Say(string text, int ms) => pill.FlashNear(text, indicator.Bounds, indicator.Dock, ms);
 
+    /** A reminder of how hands-free works. It has an X; once closed it never shows again (Settings can bring it back). */
+    private void Hint(string text, int ms)
+    {
+        var s = Settings.Current;
+        if (s.HideHandsFreeHint) return;
+        pill.HintNear(text, indicator.Bounds, indicator.Dock, ms, () => { s.HideHandsFreeHint = true; s.Save(); });
+    }
+
     private void OnPressed()
     {
         if (state == State.Recording && handsFree)
@@ -342,7 +358,7 @@ public sealed class Controller : IDisposable
         if (state == State.Recording) { Finish(); return; }
         if (state == State.Processing) { CancelWork(); return; }
         if (state != State.Idle) return;
-        if (Begin(handsFreeMode: true)) Say("Listening · click again or press Ctrl+Win to finish", 2200);
+        if (Begin(handsFreeMode: true)) Hint("Listening · click again or press Ctrl+Win to finish", 3500);
     }
 
     private bool Begin(bool handsFreeMode)
@@ -373,7 +389,7 @@ public sealed class Controller : IDisposable
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < TapMs)
         {
             handsFree = true;
-            Say("Hands-free · Ctrl+Win to finish · Esc to cancel", 2600);
+            Hint("Hands-free · Ctrl+Win to finish · Esc to cancel", 3500);
             return;
         }
         Finish();

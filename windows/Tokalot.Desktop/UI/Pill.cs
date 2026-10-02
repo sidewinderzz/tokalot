@@ -94,6 +94,8 @@ public sealed class Pill : Window
         Margin = new Thickness(10, 0, 4, 0), Visibility = Visibility.Collapsed,
     };
     private readonly DispatcherTimer hideTimer = new();
+    private readonly FrameworkElement close = Icons.Get("close", 13, Brushes.White);
+    private Action? onDismiss; // set while a closable hint is showing
 
     public Pill(Func<float> level)
     {
@@ -114,10 +116,21 @@ public sealed class Pill : Window
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(9),
-            Child = Ui.Row(bars, label),
+            Child = Ui.Row(bars, label, close),
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.35 },
             Margin = new Thickness(16),
         });
+        close.Margin = new Thickness(6, 0, 0, 0);
+        close.Opacity = 0.7;
+        close.Visibility = Visibility.Collapsed;
+        shell.MouseLeftButtonUp += (_, _) =>
+        {
+            if (onDismiss == null) return;
+            var d = onDismiss;
+            onDismiss = null;
+            d();
+            FadeOut();
+        };
         hideTimer.Tick += (_, _) => { hideTimer.Stop(); FadeOut(); };
         SourceInitialized += (_, _) =>
         {
@@ -161,9 +174,33 @@ public sealed class Pill : Window
     private Rect? anchorRect;
     private string anchorDock = "bottom";
 
+    /**
+     * A reminder with an X: clicking it hides the reminder for good (dismissed runs). Unlike other
+     * messages it can be clicked, though it still never takes focus.
+     */
+    public void HintNear(string text, Rect anchor, string dock, int ms, Action dismissed)
+    {
+        FlashNear(text, anchor, dock, ms);
+        onDismiss = dismissed;
+        close.Visibility = Visibility.Visible;
+        shell.Cursor = System.Windows.Input.Cursors.Hand;
+        ClickThrough(false);
+    }
+
+    private void ClickThrough(bool on)
+    {
+        var h = new WindowInteropHelper(this).Handle;
+        if (h == IntPtr.Zero) return;
+        var style = GetWindowLong(h, GWL_EXSTYLE);
+        SetWindowLong(h, GWL_EXSTYLE, on ? style | WS_EX_TRANSPARENT : style & ~WS_EX_TRANSPARENT);
+    }
+
     /** Shows a short message, then hides. */
     public void Flash(string text, int ms = 2600)
     {
+        onDismiss = null;
+        close.Visibility = Visibility.Collapsed;
+        ClickThrough(true);
         bars.BarBrush = Brushes.White;
         bars.CurrentMode = Bars.Mode.Idle;
         SetText(text);

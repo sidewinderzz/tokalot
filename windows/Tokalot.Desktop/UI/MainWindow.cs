@@ -405,6 +405,15 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(Ui.Card(banner, 14), 0, 0, 0, 14));
         }
 
+        if (App.InsideAnotherAppsStorage)
+        {
+            var c = Ui.Stack(
+                Ui.Text("Tokalot is installed inside another app's private storage", 15.5, C.Warn, bold: true),
+                Spaced(Ui.Text("That happens when the installer is opened from within another app instead of from your browser's downloads. Windows then hides Tokalot from the Start menu, doesn't start it when you sign in, and can show it an empty set of settings. To fix it, download the installer with your web browser and run it from File Explorer. Your settings and history are kept.", 14, C.Sub), 0, 4, 0, 12),
+                Ui.Button("Download the installer", () => Open(Updater.RepoUrl + "/releases/download/desktop/TokalotSetup.exe"), filled: true));
+            col.Children.Add(Spaced(Ui.Card(c, 20), 0, 0, 0, 14));
+        }
+
         if (!(app.Controller?.HotkeyWorks ?? true))
         {
             var c = Ui.Card(Ui.Text("Tokalot couldn't listen for Ctrl+Win. Quit it from the tray icon and open it again.", 15, C.Warn), 18);
@@ -865,6 +874,8 @@ public sealed class MainWindow : Window
                 Ui.Text("Hold Ctrl+Win while you talk and let go to paste. Or tap Ctrl+Win once for hands-free, then tap again to finish. Esc cancels.", 13.5, C.Sub)), 20, 13, 18, 13),
             Ui.SettingRow("Auto-stop after 30 s of silence", "Hands-free mode only. Long pauses to think are fine.",
                 Ui.Switch(S.AutoStop, v => { S.AutoStop = v; S.Save(); })),
+            Ui.SettingRow("Hands-free reminder", "A short note above the indicator when hands-free starts. Its X turns this off.",
+                Ui.Switch(!S.HideHandsFreeHint, v => { S.HideHandsFreeHint = !v; S.Save(); })),
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",

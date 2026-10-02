@@ -67,6 +67,8 @@ public sealed class Settings
     public bool LaunchAtStartup { get; set; } = true;
     /** The "Hold to talk" card in the sidebar was closed. */
     public bool HideShortcutTip { get; set; }
+    /** The "Hands-free · Ctrl+Win to finish" reminder above the indicator was closed. */
+    public bool HideHandsFreeHint { get; set; }
     /** Optional sync: the shared file's path on this PC ("" = off), and whether this PC puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }
