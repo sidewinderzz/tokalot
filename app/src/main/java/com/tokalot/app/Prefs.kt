@@ -338,6 +338,14 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("autolang", false)
         set(v) = sp.edit().putBoolean("autolang", v).apply()
 
+    /**
+     * Let the cleanup model tighten and clarify the wording. Off: the user's own words are kept.
+     * A per-device setting: it is in backups, but not in the sync file.
+     */
+    var polish: Boolean
+        get() = sp.safeBoolean("polish", false)
+        set(v) = sp.edit().putBoolean("polish", v).apply()
+
     /** How long to keep recordings: 0 = don't save, Int.MAX_VALUE = forever. */
     var audioKeepDays: Int
         get() = sp.safeInt("audio_days", 30)

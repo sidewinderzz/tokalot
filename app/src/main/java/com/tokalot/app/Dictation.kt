@@ -25,7 +25,11 @@ class Dictation(context: Context) {
     private val unload = Runnable { exec.execute { releaseLocal() } }
     private var current: Job? = null // main thread only
 
-    class Outcome(val text: String, val warning: String?, val entryId: Long? = null)
+    /**
+     * plain: the user's own wording, cleaned up without AI. Only set when "Polish my wording" is on,
+     * the AI cleanup ran, and it differs from [text]; it is what "My wording" puts back.
+     */
+    class Outcome(val text: String, val warning: String?, val entryId: Long? = null, val plain: String? = null)
 
     companion object {
         private const val IDLE_UNLOAD_MS = 60_000L
@@ -204,13 +208,14 @@ class Dictation(context: Context) {
         // 2-4. Snippets + cleanup
         val snippets = prefs.snippets
         val (protectedText, map) = TextTools.protect(base, snippets)
+        val polish = prefs.polish
         var cleaned = false
         var finalText: String? = null
         var cleanupErr: String? = null
         for (c in cleanupOrder(prefs)) {
             call.check()
             try {
-                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call)
+                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish)
                 Usage.recordLlm(app, c, r.inTokens, r.outTokens)
                 cleaned = true
                 finalText = TextTools.restore(r.text, map)
@@ -222,13 +227,15 @@ class Dictation(context: Context) {
             }
         }
         if (!cleaned && cleanupErr != null) warnings += cleanupErr
-        if (finalText == null) finalText = TextTools.restore(TextTools.basicClean(protectedText), map)
+        val basic = TextTools.restore(TextTools.basicClean(protectedText), map)
+        if (finalText == null) finalText = basic
+        val plain = basic.takeIf { polish && cleaned && it != finalText }
 
         call.check() // cancelled at the last moment: don't save a transcript nobody will get
         History.put(app, Entry(id, retry?.time ?: id, finalText, base, audioMs, cleaned, appPkg ?: ""))
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
         Usage.recordEdits(app, AppContext.fillerCount(base), if (cleaned) AppContext.correctionCount(base) else 0)
-        return Outcome(finalText, warnings.firstOrNull(), id)
+        return Outcome(finalText, warnings.firstOrNull(), id, plain)
     }
 
     /** Sends the compressed file when there is one; if the provider rejects the format, sends WAV instead. */
