@@ -49,9 +49,8 @@ class OfflineFlowService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: OfflineFlowService? = null
-        private val COLOR_IDLE = Color.parseColor("#8C3A3A3C")   // grey, semi-transparent
-        private val COLOR_ACTIVE = Color.parseColor("#E61C1C1E") // dark while listening/transcribing
-        private const val IDLE_ALPHA = 0.75f
+        private const val IDLE_ALPHA = 0.9f // resting opacity; the disc is solid, this is what lets it recede
+        private const val PAD_DP = 8        // margin inside the window around the disc, for its shadow and halo
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
         private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
@@ -73,7 +72,8 @@ class OfflineFlowService : AccessibilityService() {
     private var button: FrameLayout? = null
     private var bars: BarsView? = null
     private var cancelIcon: ImageView? = null
-    private var buttonBg: GradientDrawable? = null
+    private var buttonBg: ButtonDisc? = null
+    private var halo: HaloView? = null
     private var params: WindowManager.LayoutParams? = null
     private var attached = false
     private var touching = false // don't snap the button back while a finger is on it
@@ -109,7 +109,8 @@ class OfflineFlowService : AccessibilityService() {
 
     private val recheck = Runnable { updateButton() }
 
-    private val sizePx get() = dp(48)
+    // The window is the 48dp disc plus a margin on every side (for the shadow and the listening halo).
+    private val sizePx get() = dp(48 + 2 * PAD_DP)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onServiceConnected() {
@@ -151,13 +152,17 @@ class OfflineFlowService : AccessibilityService() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildButton() {
-        val bg = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(COLOR_IDLE)
-            setStroke(dp(1), Color.parseColor("#66FFFFFF")) // a light rim, so the grey button shows on dark apps too
+        val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat())
+        // A ring of accent light that swells with your voice while listening (invisible otherwise).
+        val h = HaloView(this, dp(24).toFloat()).apply {
+            level = { recorder.level }
+            color = Prefs(this@OfflineFlowService).accent
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         val b = BarsView(this).apply {
             level = { recorder.level }
+            // Idle: the tall bar carries the accent color, as in the launcher icon.
+            accentColor = Prefs(this@OfflineFlowService).accent
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO // the frame speaks for it
         }
         // Shown over the dimmed bars while transcribing, when a tap cancels.
@@ -169,6 +174,7 @@ class OfflineFlowService : AccessibilityService() {
         val frame = FrameLayout(this).apply {
             background = bg
             alpha = IDLE_ALPHA
+            addView(h, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             addView(b, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
             addView(x, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
             // For screen readers: one labelled, clickable button. Their "activate" arrives as a
@@ -184,6 +190,7 @@ class OfflineFlowService : AccessibilityService() {
         button = frame
         bars = b
         cancelIcon = x
+        halo = h
         buttonBg = bg
         params = overlayParams(sizePx, sizePx)
         buildDropZone()
@@ -284,6 +291,7 @@ class OfflineFlowService : AccessibilityService() {
                     startX = p.x; startY = p.y
                     dragging = false; longPressed = false; holding = false; inCancelZone = false
                     inDropZone = false
+                    v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90).start() // a small press-in
                     if (holdMode && state == State.IDLE) handler.postDelayed(holdStart, 220)
                     else handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
                 }
@@ -338,6 +346,7 @@ class OfflineFlowService : AccessibilityService() {
                         !longPressed -> onTap()
                     }
                     holding = false
+                    releasePress(v) // after the action, so a state change's animation reset can't leave it half-scaled
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     touching = false
@@ -346,9 +355,15 @@ class OfflineFlowService : AccessibilityService() {
                     if (dragging) showDropZone(false)
                     if (holding) finishRecording()
                     holding = false
+                    releasePress(v)
                 }
             }
             return true
+        }
+
+        private fun releasePress(v: View) {
+            v.animate().scaleX(1f).scaleY(1f).setDuration(180)
+                .setInterpolator(android.view.animation.OvershootInterpolator(2.2f)).start()
         }
     }
 
@@ -400,6 +415,7 @@ class OfflineFlowService : AccessibilityService() {
             // Appear invisibly, then fade in once the keyboard has finished sliding up.
             p.x = tx; p.y = ty
             button?.alpha = 0f
+            button?.scaleX = 1f; button?.scaleY = 1f // never come back mid-press
             try {
                 // The drop zone goes in first (invisible) so it sits underneath the button.
                 if (!zoneAttached) {
@@ -463,8 +479,9 @@ class OfflineFlowService : AccessibilityService() {
     private fun targetPosition(): Pair<Int, Int> {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
-        val x = sp.safeInt("x", dm.widthPixels - sizePx - dp(12)).coerceIn(0, dm.widthPixels - sizePx)
-        val y = (anchor() - sizePx - sp.safeInt("above", dp(8))).coerceIn(dp(24), dm.heightPixels - sizePx)
+        // Defaults leave the same visible gap as before; the window now carries PAD_DP of margin of its own.
+        val x = sp.safeInt("x", dm.widthPixels - sizePx - dp(12 - PAD_DP)).coerceIn(0, dm.widthPixels - sizePx)
+        val y = (anchor() - sizePx - sp.safeInt("above", dp(8 - PAD_DP))).coerceIn(dp(24), dm.heightPixels - sizePx)
         return x to y
     }
 
@@ -518,12 +535,7 @@ class OfflineFlowService : AccessibilityService() {
         cancelIcon?.visibility = View.GONE
         bars?.alpha = 1f
         if (s == State.WORKING) handler.postDelayed(showCancel, CANCEL_SHOW_MS)
-        buttonBg?.setColor(
-            when (s) {
-                State.IDLE -> COLOR_IDLE
-                State.STARTING, State.RECORDING, State.WORKING -> COLOR_ACTIVE
-            }
-        )
+        buttonBg?.active = s != State.IDLE
         button?.animate()?.cancel()
         button?.alpha = if (s == State.IDLE) IDLE_ALPHA else 1f
         // Keep the screen awake from tap to finished text, so it can't sleep mid-sentence.
@@ -532,8 +544,14 @@ class OfflineFlowService : AccessibilityService() {
             p.flags = if (s == State.IDLE) p.flags and keepOn.inv() else p.flags or keepOn
             if (attached) try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
         }
-        // Listening: bars in the accent color (amber by default). Transcribing: white ripple.
-        bars?.barColor = if (s == State.STARTING || s == State.RECORDING) Prefs(this).accent else Color.WHITE
+        // Listening: bars and halo in the accent color (amber by default). Transcribing: white ripple.
+        // Idle: white bars with the tall one in the accent color, like the launcher icon.
+        val accent = Prefs(this).accent
+        val listening = s == State.STARTING || s == State.RECORDING
+        bars?.barColor = if (listening) accent else Color.WHITE
+        bars?.accentColor = if (s == State.WORKING) null else accent
+        halo?.color = accent
+        halo?.listening = s == State.RECORDING
         bars?.mode = when (s) {
             State.IDLE, State.STARTING -> BarsView.Mode.IDLE
             State.RECORDING -> BarsView.Mode.LISTENING
