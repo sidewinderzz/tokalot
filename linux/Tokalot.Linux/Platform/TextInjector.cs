@@ -73,11 +73,30 @@ public static class TextInjector
         return Result.Pasted;
     }
 
+    /**
+     * Takes back what was just pasted (Ctrl+Z in the focused app) and pastes this instead.
+     * Pasted only when both the undo and the paste were sent. If Tokalot can't press keys here (or its
+     * clipboard may not reach the app), nothing is undone: the text is only copied and the result is Copied.
+     */
+    public static async Task<Result> Replace(string text, ActiveApp? app = null)
+    {
+        text = text.Replace("\r\n", "\n");
+        if (ClipboardNeedsWlCopy || !CanType)
+            return await SetClipboard(text) ? Result.Copied : Result.Failed;
+        // The shortcut that asked for this (Ctrl+Super+Z) must be fully let go first, or the undo would be read as something else.
+        for (int i = 0; i < 30 && HotkeyHook.ModifiersDown; i++)
+            await Task.Delay(50);
+        if (!await Task.Run(() => Send(Combo.CtrlZ)))
+            return await SetClipboard(text) ? Result.Copied : Result.Failed;
+        await Task.Delay(150);
+        return await Paste(text, app);
+    }
+
     public static Task<bool> Copy(string text) => SetClipboard(text);
 
     // ---------- the paste shortcut ----------
 
-    private enum Combo { CtrlV, CtrlShiftV, ShiftInsert }
+    private enum Combo { CtrlV, CtrlShiftV, ShiftInsert, CtrlZ }
 
     /** Ctrl+V normally, Ctrl+Shift+V in terminals. TOKALOT_PASTE=ctrl+v | ctrl+shift+v | shift+insert forces one. */
     private static Combo Pick(bool terminal) => (Environment.GetEnvironmentVariable("TOKALOT_PASTE") ?? "").ToLowerInvariant().Replace(" ", "") switch
@@ -91,13 +110,15 @@ public static class TextInjector
     private static string? workingTool;
     private static bool toolsFailed;
 
-    private static bool SendPaste(bool terminal)
+    private static bool SendPaste(bool terminal) => Send(Pick(terminal));
+
+    private static bool Send(Combo combo)
     {
-        var combo = Pick(terminal);
         if (Uinput.Ready)
         {
             var sent = combo switch
             {
+                Combo.CtrlZ => Uinput.Chord(new[] { Uinput.KEY_LEFTCTRL }, Uinput.KEY_Z),
                 Combo.CtrlShiftV => Uinput.Chord(new[] { Uinput.KEY_LEFTCTRL, Uinput.KEY_LEFTSHIFT }, Uinput.KEY_V),
                 Combo.ShiftInsert => Uinput.Chord(new[] { Uinput.KEY_LEFTSHIFT }, Uinput.KEY_INSERT),
                 _ => Uinput.Chord(new[] { Uinput.KEY_LEFTCTRL }, Uinput.KEY_V),
@@ -135,22 +156,24 @@ public static class TextInjector
                 {
                     Combo.CtrlShiftV => new[] { "-M", "ctrl", "-M", "shift", "v", "-m", "shift", "-m", "ctrl" },
                     Combo.ShiftInsert => new[] { "-M", "shift", "-k", "Insert", "-m", "shift" },
+                    Combo.CtrlZ => new[] { "-M", "ctrl", "z", "-m", "ctrl" },
                     _ => new[] { "-M", "ctrl", "v", "-m", "ctrl" },
                 };
                 break;
             case "xdotool":
-                yield return new[] { "key", "--clearmodifiers", combo switch { Combo.CtrlShiftV => "ctrl+shift+v", Combo.ShiftInsert => "shift+Insert", _ => "ctrl+v" } };
+                yield return new[] { "key", "--clearmodifiers", combo switch { Combo.CtrlShiftV => "ctrl+shift+v", Combo.ShiftInsert => "shift+Insert", Combo.CtrlZ => "ctrl+z", _ => "ctrl+v" } };
                 break;
             default:
-                // ydotool 1.x takes raw key codes: 29 Ctrl, 42 Shift, 47 V, 110 Insert.
+                // ydotool 1.x takes raw key codes: 29 Ctrl, 42 Shift, 44 Z, 47 V, 110 Insert.
                 yield return combo switch
                 {
+                    Combo.CtrlZ => new[] { "key", "29:1", "44:1", "44:0", "29:0" },
                     Combo.CtrlShiftV => new[] { "key", "29:1", "42:1", "47:1", "47:0", "42:0", "29:0" },
                     Combo.ShiftInsert => new[] { "key", "42:1", "110:1", "110:0", "42:0" },
                     _ => new[] { "key", "29:1", "47:1", "47:0", "29:0" },
                 };
                 // ydotool 0.1.x takes key names.
-                yield return new[] { "key", combo switch { Combo.CtrlShiftV => "ctrl+shift+v", Combo.ShiftInsert => "shift+insert", _ => "ctrl+v" } };
+                yield return new[] { "key", combo switch { Combo.CtrlShiftV => "ctrl+shift+v", Combo.ShiftInsert => "shift+insert", Combo.CtrlZ => "ctrl+z", _ => "ctrl+v" } };
                 break;
         }
     }

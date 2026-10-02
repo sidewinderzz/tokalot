@@ -109,6 +109,8 @@ public sealed class Pill : Window
         Foreground = Brushes.White, FontSize = 13, FontFamily = C.Sans, VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(10, 0, 4, 0), IsVisible = false,
     };
+    private readonly Control close = Icons.Get("close", 13, Brushes.White);
+    private Action? onDismiss; // set while a closable hint is showing
     private readonly DispatcherTimer hideTimer = new();
     private readonly DispatcherTimer fadeDone = new();
     private double fadeTarget;
@@ -133,18 +135,35 @@ public sealed class Pill : Window
             BorderBrush = new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(9),
-            Child = Ui.Row(bars, label),
+            Child = Ui.Row(bars, label, close),
             BoxShadow = new BoxShadows(new BoxShadow { Blur = 18, OffsetY = 3, Color = Color.FromArgb(0x59, 0, 0, 0) }),
             Margin = new Thickness(16),
             // The window itself can't fade on every Linux desktop, so the content does.
             Opacity = 0,
         });
+        close.Margin = new Thickness(6, 0, 0, 0);
+        close.Opacity = 0.7;
+        close.IsVisible = false;
+        shell.PointerReleased += (_, _) =>
+        {
+            if (onDismiss == null) return;
+            var d = onDismiss;
+            onDismiss = null;
+            d();
+            FadeOut();
+        };
         hideTimer.Tick += (_, _) => { hideTimer.Stop(); FadeOut(); };
-        fadeDone.Tick += (_, _) => { fadeDone.Stop(); if (fadeTarget == 0) Hide(); };
+        fadeDone.Tick += (_, _) =>
+        {
+            fadeDone.Stop();
+            if (fadeTarget != 0) return;
+            Hide();
+            EndHint();
+        };
         // Never takes focus, and clicks pass through to whatever is underneath.
         X11.NeverFocus(this);
-        Opened += (_, _) => X11.SetInputRegion(this, null);
-        SizeChanged += (_, _) => { Place(); X11.SetInputRegion(this, null); };
+        Opened += (_, _) => ApplyInput();
+        SizeChanged += (_, _) => { Place(); ApplyInput(); };
     }
 
     /** Sets what the pill shows without putting it on screen (screenshot mode). */
@@ -179,12 +198,47 @@ public sealed class Pill : Window
         Flash(text, ms);
     }
 
+    /**
+     * A reminder with an X: clicking it hides the reminder for good (dismissed runs). Unlike other
+     * messages it can be clicked, though it still never takes focus.
+     */
+    public void HintNear(string text, PixelRect anchor, string dock, int ms, Action dismissed)
+    {
+        FlashNear(text, anchor, dock, ms);
+        onDismiss = dismissed;
+        close.IsVisible = true;
+        shell.Cursor = Cursors.Hand;
+        ApplyInput();
+    }
+
+    private void EndHint()
+    {
+        onDismiss = null;
+        close.IsVisible = false;
+        shell.Cursor = null;
+        ApplyInput();
+    }
+
+    /**
+     * Clicks pass through the pill to whatever is underneath, except while a hint with an X is showing:
+     * then the drawn pill (not the clear margin around it) takes them.
+     */
+    private void ApplyInput()
+    {
+        if (onDismiss == null) { X11.SetInputRegion(this, null); return; }
+        double k = RenderScaling;
+        var m = shell.Margin;
+        X11.SetInputRegion(this, new PixelRect((int)(m.Left * k), (int)(m.Top * k),
+            (int)Math.Ceiling((Bounds.Width - m.Left - m.Right) * k), (int)Math.Ceiling((Bounds.Height - m.Top - m.Bottom) * k)));
+    }
+
     private PixelRect? anchorRect;
     private string anchorDock = "bottom";
 
     /** Shows a short message, then hides. */
     public void Flash(string text, int ms = 2600)
     {
+        EndHint();
         bars.BarBrush = Brushes.White;
         bars.CurrentMode = Bars.Mode.Idle;
         SetText(text);

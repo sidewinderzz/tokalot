@@ -16,13 +16,15 @@ public sealed class Recorder : IDisposable
 {
     public const int SampleRate = 16000;
     private const int MaxSamples = SampleRate * 600; // 10 minute cap
-    private const float VoiceRms = 0.015f;            // above this counts as "someone is talking"
+    private const float VoiceRms = 0.015f;            // the most a sound ever has to reach to count as "someone is talking"
+    private const float VoiceMin = 0.004f;            // and the least, on a very quiet microphone
     private const float SpeechRms = 0.008f;           // lower bar for "was anything said at all" (quiet mics)
     private const int ChunkBytes = SampleRate / 20 * 2; // 50 ms
 
     private Process? proc;
     private Thread? reader;
     private volatile int session;
+    private float floor;                              // running estimate of the room's background level
     private readonly List<short> samples = new();
     private readonly object gate = new();
 
@@ -71,6 +73,7 @@ public sealed class Recorder : IDisposable
             LastVoiceSample = 0;
             SpeechChunks = 0;
             LateSpeechChunks = 0;
+            floor = 0.002f;
 
             var order = new List<(string Tool, string[] Args)>(Tools);
             order.Sort((a, b) => (b.Tool == proven).CompareTo(a.Tool == proven));
@@ -200,7 +203,11 @@ public sealed class Recorder : IDisposable
                 SpeechChunks++;
                 if (samples.Count - n >= CueSamples) LateSpeechChunks++;
             }
-            if (Level > VoiceRms)
+            // The bar for "talking" follows the room: three times the background level, which drops at once in a
+            // quiet moment and creeps up slowly. A fixed bar read soft speech on a quiet mic as silence, and
+            // auto-stop then ended the recording 30 s in, mid-sentence.
+            floor = Level < floor ? Level : Math.Min(Level, floor * 1.003f + 0.00001f);
+            if (Level > Math.Clamp(floor * 3, VoiceMin, VoiceRms))
             {
                 LastVoiceAt = DateTime.UtcNow;
                 LastVoiceSample = samples.Count;

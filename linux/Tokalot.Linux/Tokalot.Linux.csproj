@@ -10,7 +10,7 @@
     <RootNamespace>Tokalot.Desktop</RootNamespace>
     <Product>Tokalot</Product>
     <Company>sidewinderzz</Company>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <!-- linux-x64 unless another one is asked for (-r linux-arm64; -r win-x64 runs the screenshot mode on Windows). -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">linux-x64</RuntimeIdentifier>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

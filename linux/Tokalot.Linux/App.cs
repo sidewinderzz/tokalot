@@ -433,6 +433,12 @@ public sealed class Controller : IDisposable
     private const int TapMs = 350;          // shorter press = hands-free
     private const int ShortcutWindowMs = 600; // another key this soon = a desktop shortcut, not dictation
     private const int AutoStopSeconds = 30;
+    private const int RevertSeconds = 8;
+    private const int KEY_Z = 44;          // the keyboard's own code for Z (what the key reader reports)
+    private string? plainText;             // the user's own wording for the last (polished) dictation
+    private long? plainEntry;
+    private ActiveApp? plainApp;
+    private DateTime revertUntil;          // Ctrl+Super+Z puts it back until then
 
     private readonly Dispatcher ui = Dispatcher.UIThread;
     private readonly HotkeyHook hook;
@@ -474,6 +480,14 @@ public sealed class Controller : IDisposable
 
     private void Say(string text, int ms) => pill.FlashNear(text, indicator.ScreenBounds, indicator.Dock, ms);
 
+    /** A reminder of how hands-free works. It has an X; once closed it never shows again (Settings can bring it back). */
+    private void Hint(string text, int ms)
+    {
+        var s = Settings.Current;
+        if (s.HideHandsFreeHint) return;
+        pill.HintNear(text, indicator.ScreenBounds, indicator.Dock, ms, () => { s.HideHandsFreeHint = true; s.Save(); });
+    }
+
     private void OnPressed()
     {
         if (state == State.Recording && handsFree)
@@ -492,7 +506,7 @@ public sealed class Controller : IDisposable
         if (state == State.Recording) { Finish(); return; }
         if (state == State.Processing) { CancelWork(); return; }
         if (state != State.Idle) return;
-        if (Begin(handsFreeMode: true)) Say("Listening · click again or press Ctrl+Super to finish", 2200);
+        if (Begin(handsFreeMode: true)) Hint("Listening · click again or press Ctrl+Super to finish", 3500);
     }
 
     private bool Begin(bool handsFreeMode)
@@ -528,7 +542,7 @@ public sealed class Controller : IDisposable
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < TapMs)
         {
             handsFree = true;
-            Say("Hands-free · Ctrl+Super to finish · Esc to cancel", 2600);
+            Hint("Hands-free · Ctrl+Super to finish · Esc to cancel", 3500);
             return;
         }
         Finish();
@@ -536,6 +550,13 @@ public sealed class Controller : IDisposable
 
     private void OnOtherKey(int vk)
     {
+        // Ctrl+Super+Z just after a polished dictation: put the user's own wording back.
+        if (vk == KEY_Z && plainText != null && DateTime.UtcNow < revertUntil)
+        {
+            if (state == State.Recording && !handsFree) Cancel(false); // the press also started a recording
+            if (state == State.Idle) Revert();
+            return;
+        }
         if (state != State.Recording || handsFree) return;
         // Ctrl+Super+D, Ctrl+Super+Arrow, etc.: the user meant a desktop shortcut.
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < ShortcutWindowMs) Cancel(false);
@@ -577,6 +598,46 @@ public sealed class Controller : IDisposable
                 Say("Cancelled · the recording is in history", 2400);
             }
             else Say("Cancelled", 1200);
+        }
+    }
+
+    /**
+     * Swaps the polished text that was just pasted for the user's own wording.
+     * Linux can watch the keyboard but not hold a key back, so the app in front also receives the
+     * Ctrl+Super+Z that asked for this. Tokalot waits for the keys to be let go, sends a plain
+     * Ctrl+Z to take the polished text out, then pastes the original wording.
+     */
+    private async void Revert()
+    {
+        var text = plainText;
+        var id = plainEntry;
+        var target = plainApp;
+        plainText = null;
+        if (text == null) return;
+        state = State.Processing; // no new recording while keys are being sent
+        try
+        {
+            var result = await TextInjector.Replace(text, target);
+            if (result == TextInjector.Result.Pasted)
+            {
+                var entry = id == null ? null : History.All().FirstOrDefault(e => e.Id == id);
+                if (entry != null)
+                    History.Replace(new Entry
+                    {
+                        Id = entry.Id, Time = entry.Time, Text = text, Raw = entry.Raw, DurationMs = entry.DurationMs,
+                        Cleaned = false, AppKey = entry.AppKey, AppLabel = entry.AppLabel,
+                    });
+                Say("Your own wording is back", 1800);
+            }
+            // Nothing was swapped: say what did happen instead.
+            else if (result == TextInjector.Result.Copied) Say("Your own wording is copied · press Ctrl+V", 3500);
+            else Say("Couldn't reach the clipboard", 3000);
+        }
+        catch (Exception e) { App.Log("Revert failed: " + e.Message); }
+        finally
+        {
+            state = State.Idle;
+            App.Current.RefreshAfterDictation();
         }
     }
 
@@ -726,8 +787,15 @@ public sealed class Controller : IDisposable
                 if (pasted != TextInjector.Result.Pasted) App.Log("Paste: " + pasted + " (keys: " + TextInjector.Method + ", clipboard: " + TextInjector.ClipboardMethod + ")");
             }
             indicator.SetMode(IndicatorView.Mode.Idle);
+            // The revert only makes sense when the polished text really went into the app.
+            var canRevert = outcome.Plain != null && outcome.Text.Length > 0 && pasted == TextInjector.Result.Pasted;
+            plainText = canRevert ? outcome.Plain : null;
+            plainEntry = outcome.EntryId;
+            plainApp = target;
+            revertUntil = DateTime.UtcNow.AddSeconds(RevertSeconds);
             if (outcome.Warning != null) Say(outcome.Warning, 3500);
             else if (outcome.Text.Length == 0) Say("Didn't catch anything", 1800);
+            else if (canRevert) Say("Polished · Ctrl+Super+Z for your own wording", RevertSeconds * 1000);
             // Linux only: Tokalot couldn't press the paste shortcut itself (see Settings › Setup).
             else if (pasted == TextInjector.Result.Copied) Say(TextInjector.ClipboardNeedsWlCopy ? "Copied · press Ctrl+V (install wl-clipboard to paste automatically)" : "Copied · press Ctrl+V", 3500);
             else if (pasted == TextInjector.Result.Failed) Say("Couldn't reach the clipboard. The text is in Tokalot's history.", 4500);

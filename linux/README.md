@@ -100,6 +100,12 @@ All desktops
 
 - Pasting presses the physical **Ctrl+V** keys. On a keyboard layout where V is somewhere else
   (Dvorak, for instance) set `TOKALOT_PASTE=shift+insert` in the environment.
+- "Polish my wording" (Style page) offers Ctrl+Super+Z for a few seconds after a dictation to put
+  your own words back. Tokalot does that by pressing Ctrl+Z and pasting the original. Linux lets it
+  watch the keyboard but not hold a key back, so the app in front also sees your Ctrl+Super+Z; an
+  app that treats that as undo too will have undone one step too many. Redo once in that app
+  (usually Ctrl+Shift+Z or Ctrl+Y) to fix it. In apps where Ctrl+Z isn't undo (terminals) the swap
+  doesn't work.
 - If the clipboard held a picture or files before a dictation, the dictated text is left on the
   clipboard afterwards (only text can be put back).
 - Recordings are saved as WAV (about 2 MB a minute); the Windows app compresses them.

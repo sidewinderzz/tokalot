@@ -15,8 +15,8 @@ public static class Uinput
 {
     public const string DeviceName = "Tokalot virtual keyboard";
 
-    public const ushort KEY_LEFTCTRL = 29, KEY_LEFTSHIFT = 42, KEY_V = 47, KEY_INSERT = 110;
-    private static readonly ushort[] Keys = { KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_V, KEY_INSERT };
+    public const ushort KEY_LEFTCTRL = 29, KEY_LEFTSHIFT = 42, KEY_Z = 44, KEY_V = 47, KEY_INSERT = 110;
+    private static readonly ushort[] Keys = { KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_Z, KEY_V, KEY_INSERT };
 
     private const int O_WRONLY = 1, O_NONBLOCK = 0x800;
     private const ushort EV_SYN = 0, EV_KEY = 1;

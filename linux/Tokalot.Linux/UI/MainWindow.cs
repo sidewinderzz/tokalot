@@ -789,6 +789,11 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(warn, 0, 0, 0, 16));
         }
 
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Polish my wording",
+            "Off: your own words are kept, with fillers removed and punctuation and formatting fixed. On: the AI may also tighten and clarify what you said, " +
+            "and for a few seconds after each dictation Ctrl+Super+Z puts your own words back.",
+            Ui.Switch(S.Polish, v => { S.Polish = v; S.Save(); }))), 0, 0, 0, 18));
+
         var tabs = new WrapPanel();
         foreach (var c in Catalog.Categories)
         {
@@ -967,6 +972,8 @@ public sealed class MainWindow : Window
                 Ui.Text("Hold Ctrl+Super while you talk and let go to paste. Or tap Ctrl+Super once for hands-free, then tap again to finish. Esc cancels.", 13.5, C.Sub)), 20, 13, 18, 13),
             Ui.SettingRow("Auto-stop after 30 s of silence", "Hands-free mode only. Long pauses to think are fine.",
                 Ui.Switch(S.AutoStop, v => { S.AutoStop = v; S.Save(); })),
+            Ui.SettingRow("Hands-free reminder", "A short note above the indicator when hands-free starts. Its X turns this off.",
+                Ui.Switch(!S.HideHandsFreeHint, v => { S.HideHandsFreeHint = !v; S.Save(); })),
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
