@@ -109,8 +109,12 @@ class OfflineFlowService : AccessibilityService() {
 
     private val recheck = Runnable { updateButton() }
 
-    // The window is the 48dp disc plus a margin on every side (for the shadow and the listening halo).
-    private val sizePx get() = dp(48 + 2 * PAD_DP)
+    // The window is the button body plus a margin on every side (for the shadow and the listening halo).
+    // Square style: 48dp square. Pill style: 84x40dp capsule, lying horizontally or standing vertically.
+    private var pill = false
+    private var vertical = false
+    private val winW get() = dp(2 * PAD_DP + if (!pill) 48 else if (vertical) 40 else 84)
+    private val winH get() = dp(2 * PAD_DP + if (!pill) 48 else if (vertical) 84 else 40)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onServiceConnected() {
@@ -152,9 +156,11 @@ class OfflineFlowService : AccessibilityService() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildButton() {
-        val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat())
+        pill = Prefs(this).buttonStyle == "pill"
+        vertical = pill && overlayPrefs().safeBoolean("vertical", false)
+        val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat(), if (pill) dp(100).toFloat() else dp(14).toFloat())
         // A ring of accent light that swells with your voice while listening (invisible otherwise).
-        val h = HaloView(this, dp(24).toFloat()).apply {
+        val h = HaloView(this, dp(PAD_DP).toFloat(), if (pill) dp(100).toFloat() else dp(14).toFloat()).apply {
             level = { recorder.level }
             color = Prefs(this@OfflineFlowService).accent
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -175,8 +181,8 @@ class OfflineFlowService : AccessibilityService() {
             background = bg
             alpha = IDLE_ALPHA
             addView(h, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-            addView(b, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
-            addView(x, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+            addView(b, FrameLayout.LayoutParams(dp(if (pill) 56 else 64), dp(if (pill) 56 else 64), Gravity.CENTER))
+            addView(x, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
             // For screen readers: one labelled, clickable button. Their "activate" arrives as a
             // click rather than a touch, so it is routed to the same tap action (start / stop /
             // cancel, whatever the hold-to-talk setting, since a screen reader can't hold).
@@ -192,7 +198,7 @@ class OfflineFlowService : AccessibilityService() {
         cancelIcon = x
         halo = h
         buttonBg = bg
-        params = overlayParams(sizePx, sizePx)
+        params = overlayParams(winW, winH)
         buildDropZone()
     }
 
@@ -225,7 +231,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private val zoneHeight get() = dp(150)
     /** The button counts as "in the zone" once its centre is inside the red area. */
-    private fun overZone(p: WindowManager.LayoutParams) = p.y + sizePx / 2 <= dp(110)
+    private fun overZone(p: WindowManager.LayoutParams) = p.y + winH / 2 <= dp(110)
 
     private fun showDropZone(show: Boolean) {
         dropZone?.animate()?.alpha(if (show) 1f else 0f)?.setDuration(140)?.start()
@@ -337,6 +343,7 @@ class OfflineFlowService : AccessibilityService() {
                             } else {
                                 showDropZone(false)
                                 clamp(p)
+                                reorient(p)
                                 try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                                 savePosition(p)
                                 if (state == State.IDLE) v.alpha = IDLE_ALPHA
@@ -409,6 +416,7 @@ class OfflineFlowService : AccessibilityService() {
             return
         }
         if (touching) return
+        syncStyle()
         val p = params ?: return
         val (tx, ty) = targetPosition()
         if (!attached) {
@@ -459,6 +467,7 @@ class OfflineFlowService : AccessibilityService() {
         if (!attached || touching) return
         val (tx, ty) = targetPosition()
         p.x = tx; p.y = ty
+        reorient(p)
         try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
         val rest = if (state == State.IDLE) IDLE_ALPHA else 1f
         button?.animate()?.alpha(rest)?.setDuration(140)?.start()
@@ -480,22 +489,52 @@ class OfflineFlowService : AccessibilityService() {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
         // Defaults leave the same visible gap as before; the window now carries PAD_DP of margin of its own.
-        val x = sp.safeInt("x", dm.widthPixels - sizePx - dp(12 - PAD_DP)).coerceIn(0, dm.widthPixels - sizePx)
-        val y = (anchor() - sizePx - sp.safeInt("above", dp(8 - PAD_DP))).coerceIn(dp(24), dm.heightPixels - sizePx)
+        val x = sp.safeInt("x", dm.widthPixels - winW - dp(12 - PAD_DP)).coerceIn(0, dm.widthPixels - winW)
+        val y = (anchor() - winH - sp.safeInt("above", dp(8 - PAD_DP))).coerceIn(dp(24), dm.heightPixels - winH)
         return x to y
     }
 
     private fun clamp(p: WindowManager.LayoutParams, allowTop: Boolean = false) {
         val dm = resources.displayMetrics
-        p.x = p.x.coerceIn(0, dm.widthPixels - sizePx)
-        p.y = p.y.coerceIn(if (allowTop) 0 else dp(24), dm.heightPixels - sizePx)
+        p.x = p.x.coerceIn(0, dm.widthPixels - winW)
+        p.y = p.y.coerceIn(if (allowTop) 0 else dp(24), dm.heightPixels - winH)
+    }
+
+    /**
+     * Pill style only: lie along the screen side the button is closest to (stand up near the left or
+     * right edge, lie down near the top or the keyboard), keeping the button's centre where it is.
+     */
+    private fun reorient(p: WindowManager.LayoutParams) {
+        if (!pill) return
+        val dm = resources.displayMetrics
+        val cx = p.x + winW / 2
+        val cy = p.y + winH / 2
+        val side = minOf(cx, dm.widthPixels - cx)
+        val topBottom = minOf(cy, anchor() - cy)
+        val v = side < topBottom
+        if (v == vertical) return
+        vertical = v
+        p.x = cx - winW / 2
+        p.y = cy - winH / 2
+        p.width = winW
+        p.height = winH
+        clamp(p, allowTop = state == State.IDLE)
+        if (attached) try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
+    }
+
+    /** Settings may have switched the button's shape since it was built; rebuild it while it is hidden. */
+    private fun syncStyle() {
+        if (!attached && (Prefs(this).buttonStyle == "pill") != pill) {
+            buildButton()
+            setState(state)
+        }
     }
 
     private fun savePosition(p: WindowManager.LayoutParams) {
-        val e = overlayPrefs().edit().putInt("x", p.x)
+        val e = overlayPrefs().edit().putInt("x", p.x).putBoolean("vertical", vertical)
         // The height is measured from the keyboard. With no keyboard on screen (dragged while
         // recording after it closed) keep the old height, or the button turns up somewhere odd next time.
-        keyboardTop()?.let { e.putInt("above", it - sizePx - p.y) }
+        keyboardTop()?.let { e.putInt("above", it - winH - p.y) }
         e.apply()
     }
 
@@ -623,14 +662,14 @@ class OfflineFlowService : AccessibilityService() {
         val bp = params ?: return
         val p = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT)
         // Line the bubble up with whichever side of the screen the button is on.
-        if (bp.x + sizePx / 2 > dm.widthPixels / 2) {
+        if (bp.x + winW / 2 > dm.widthPixels / 2) {
             p.gravity = Gravity.TOP or Gravity.END
-            p.x = dm.widthPixels - bp.x - sizePx
+            p.x = dm.widthPixels - bp.x - winW
         } else {
             p.gravity = Gravity.TOP or Gravity.START
             p.x = bp.x
         }
-        p.y = if (bp.y > dp(90)) bp.y - dp(56) else bp.y + sizePx + dp(8)
+        p.y = if (bp.y > dp(90)) bp.y - dp(56) else bp.y + winH + dp(8)
         try {
             wm.addView(view, p)
             bubble = view

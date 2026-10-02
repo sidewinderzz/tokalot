@@ -384,6 +384,10 @@ class SettingsScreen(private val a: MainActivity) {
             prefs.autoStop = it
         })
         rc.addView(divider())
+        rc.addView(switchRow("Pill-shaped button", "A slim capsule that lies along the nearest edge of the screen, instead of the rounded square. Takes effect the next time the button appears.", prefs.buttonStyle == "pill") {
+            prefs.buttonStyle = if (it) "pill" else "square"
+        })
+        rc.addView(divider())
         rc.addView(switchRow("Haptics", "A small buzz when recording starts, stops, finishes or fails.", prefs.haptics) {
             prefs.haptics = it
             if (it) Haptics.play(this, Haptics.Kind.DONE)
