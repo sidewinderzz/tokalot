@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.3.1
+
+- No more freezes under fractional scaling: on X11, when a monitor is set to 125%, 150% and so on, the window now draws with the processor instead of the graphics card, which could stall it for many seconds. Start with `--gpu` to keep the graphics card anyway.
+
 ## New in 0.3.0
 
 - Your own words are kept by default: cleanup removes fillers and fixes punctuation and formatting without rewording you.
