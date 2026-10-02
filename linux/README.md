@@ -142,7 +142,8 @@ X11
 | | |
 | --- | --- |
 | `--background` | Start in the tray without opening the window (what "Start at login" uses) |
-| `--software` | Draw without the graphics card, if the window comes up blank |
+| `--software` | Draw without the graphics card, if the window comes up blank. Automatic on X11 when a monitor uses fractional scaling (125%, 150%…), which can freeze graphics-card drawing |
+| `--gpu` | Draw with the graphics card even under fractional scaling |
 | `--diagnose` | Print what works on this machine and exit. Add `--download-model` to also fetch and test the offline model |
 | `--screenshots <folder>` | Developer tool: draw every page to PNG files with sample data. Needs no display |
 | `TOKALOT_DATA=<folder>` | Use another data folder (a test copy that leaves your real data, keyring and autostart alone) |

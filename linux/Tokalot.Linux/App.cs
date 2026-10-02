@@ -25,6 +25,7 @@ namespace Tokalot.Desktop;
 public sealed partial class App : Application
 {
     private static bool background, software;
+    private static string softwareWhy = "";
     private static string? shotsDir;
     private static FileStream? instanceLock;
     private static Task<bool>? themeProbe;
@@ -69,6 +70,13 @@ public sealed partial class App : Application
         KeyStore.Preload(Settings.Current);
         background = args.Contains("--background");
         software = args.Contains("--software");
+        // Fractional scaling on X11 can freeze graphics-card drawing for seconds at a time (see Scaling), so draw
+        // with the processor there too. "--gpu" keeps the graphics card anyway.
+        if (!software && !args.Contains("--gpu") && !Sh.IsWayland && Scaling.Fractional() is { } scale)
+        {
+            software = true;
+            softwareWhy = $" (fractional scaling {scale * 100:0}%)";
+        }
 
         var builder = AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont();
         // "--software" draws without the graphics card, for machines where the window comes up blank.
@@ -85,7 +93,7 @@ public sealed partial class App : Application
         var s = Settings.Current;
         // The light/dark probe has had the whole of Avalonia's start-up to finish; give it a moment more, then go on without it.
         try { themeProbe?.Wait(150); } catch { }
-        Log($"Start {Updater.CurrentVersion} · {(Sh.IsWayland ? "wayland (through XWayland)" : "x11")} · {Sh.Desktop} · software={software} · {Environment.OSVersion}");
+        Log($"Start {Updater.CurrentVersion} · {(Sh.IsWayland ? "wayland (through XWayland)" : "x11")} · {Sh.Desktop} · software={software}{softwareWhy} · {Environment.OSVersion}");
         // (the theme is logged once it is applied, below)
         ApplyLook();
         Log($"Theme: {s.Theme} -> {(C.Dark ? "dark" : "light")}");
@@ -247,6 +255,9 @@ public sealed partial class App : Application
         Line("Microphone recorder", Recorder.Tool ?? "NOT FOUND: install PipeWire (pw-record), pulseaudio-utils (parec) or alsa-utils (arecord)");
         Line("Sound player", Sh.First("pw-play", "paplay", "aplay") ?? "not found (no feedback tones or playback)");
         Line("API key storage", KeyStore.Backend == KeyStore.Keyring ? "login keyring (secret-tool)" : "keys.json in the data folder, mode 0600");
+        Line("Drawing", Sh.IsWayland ? "graphics card" : Scaling.Fractional() is { } scale
+            ? $"processor, because a monitor uses fractional scaling ({scale * 100:0}%), which can freeze graphics-card drawing on X11. --gpu overrides"
+            : "graphics card (--software draws with the processor if the window comes up blank or freezes)");
         Line("Active-app detection", Sh.IsWayland ? "off (Wayland doesn't expose the focused window)" : X11.Available ? "OK (X11)" : Sh.First("xdotool", "xprop") ?? "not available");
         if (downloadModel && !ModelManager.IsReady)
         {
