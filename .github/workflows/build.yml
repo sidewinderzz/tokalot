@@ -3,8 +3,8 @@ name: Build APK
 on:
   push:
     branches: ['**']
-    # The Windows and Linux apps have their own workflows (windows.yml, linux.yml).
-    paths-ignore: ['windows/**', 'linux/**', '.github/workflows/windows.yml', '.github/workflows/linux.yml']
+    # The Windows, Linux and Mac apps have their own workflows (windows.yml, linux.yml, mac.yml).
+    paths-ignore: ['windows/**', 'linux/**', 'mac/**', '.github/workflows/windows.yml', '.github/workflows/linux.yml', '.github/workflows/mac.yml']
   workflow_dispatch:
 
 # Needed so tagged builds can publish a GitHub Release (what the in-app updater reads).

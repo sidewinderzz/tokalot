@@ -135,7 +135,10 @@ public static class Sh
     /** A desktop notification (the stand-in for Windows' tray balloon). Does nothing if notify-send is missing. */
     public static void Notify(string title, string body)
     {
-        if (Which("notify-send") is { } n) Spawn(n, "--app-name=Tokalot", title, body)?.Dispose();
+        // A Mac: Notification Center through AppleScript, with the texts passed as arguments (nothing to escape).
+        if (OperatingSystem.IsMacOS())
+            Spawn("/usr/bin/osascript", "-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run", title, body)?.Dispose();
+        else if (Which("notify-send") is { } n) Spawn(n, "--app-name=Tokalot", title, body)?.Dispose();
     }
 }
 

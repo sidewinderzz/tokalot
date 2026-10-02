@@ -133,6 +133,8 @@ public sealed partial class MainWindow : Window
         Player.Changed += onPlayer;
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); };
         Activated += (_, _) => Sync.Queue();
+        // Coming back from System Settings on a Mac: redraw if a permission changed meanwhile.
+        Activated += (_, _) => PlatformActivated();
         onSync = changed => Dispatcher.UIThread.Post(() => { if (changed || CurrentPage == Page.Settings) Render(); });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
@@ -151,6 +153,9 @@ public sealed partial class MainWindow : Window
         SizeChanged += (_, _) => { if (IsLoaded && IsWide != wideLayout) Render(); };
         Render();
     }
+
+    /** The platform's part may react to the window coming to the front (only the Mac's does). */
+    partial void PlatformActivated();
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {

@@ -1,0 +1,208 @@
+name: Build Mac app
+
+on:
+  push:
+    branches: ['**']
+    # The Mac app compiles the Windows app's Core folder and the Linux app's interface too, so changes there rebuild it.
+    paths: ['mac/**', 'linux/Tokalot.Linux/**', 'windows/Tokalot.Desktop/Core/**', '.github/workflows/mac.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Apple silicon, macOS 15.
+    runs-on: macos-15
+    timeout-minutes: 40
+    defaults:
+      run:
+        # -eo pipefail: a failing program fails the step even when its output goes through tee.
+        shell: bash
+    env:
+      APP: ${{ github.workspace }}/out/Tokalot.app
+      BIN: ${{ github.workspace }}/out/Tokalot.app/Contents/MacOS/Tokalot
+      CHECKS: ${{ github.workspace }}/checks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version
+        run: |
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' mac/Tokalot.Mac/Tokalot.Mac.csproj | tr -d '\r')
+          [ -n "$VERSION" ] || { echo "No <Version> in the csproj"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          mkdir -p "$CHECKS"
+          echo "Building Tokalot for Mac $VERSION"
+          sw_vers; uname -m
+
+      # Self-contained: the user doesn't need .NET installed.
+      - name: Publish
+        run: dotnet publish mac/Tokalot.Mac -c Release -r osx-arm64 --self-contained -o publish/Tokalot
+
+      # A Mac app is a folder: Tokalot.app/Contents/{Info.plist, MacOS/<the program>, Resources/<icon>}.
+      - name: Assemble Tokalot.app
+        run: |
+          # The speech engine ships its native libraries for every system; keep only Apple silicon's.
+          find publish/Tokalot/runtimes -mindepth 1 -maxdepth 1 ! -name 'macos-arm64' -exec rm -rf {} +
+          rm -f publish/Tokalot/*.pdb
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp -R publish/Tokalot/. "$APP/Contents/MacOS/"
+          sed "s/__VERSION__/$VERSION/g" mac/Tokalot.Mac/Bundle/Info.plist > "$APP/Contents/Info.plist"
+          plutil -lint "$APP/Contents/Info.plist"
+          # The app icon, from the same 256 px picture the other apps use.
+          ICONSET="$RUNNER_TEMP/Tokalot.iconset"
+          mkdir -p "$ICONSET"
+          for s in 16 32 128 256; do
+            sips -z $s $s linux/Tokalot.Linux/Assets/icon.png --out "$ICONSET/icon_${s}x${s}.png" > /dev/null
+          done
+          sips -z 32 32 linux/Tokalot.Linux/Assets/icon.png --out "$ICONSET/icon_16x16@2x.png" > /dev/null
+          sips -z 64 64 linux/Tokalot.Linux/Assets/icon.png --out "$ICONSET/icon_32x32@2x.png" > /dev/null
+          sips -z 256 256 linux/Tokalot.Linux/Assets/icon.png --out "$ICONSET/icon_128x128@2x.png" > /dev/null
+          iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/Tokalot.icns"
+          cp mac/README.md "$APP/Contents/Resources/README.md"
+          chmod +x "$BIN"
+          # Not notarized: an "ad-hoc" signature, which Apple silicon requires for any program to run.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          du -sh "$APP"
+
+      # Starts the real program inside the bundle with no window: what it can do on this machine.
+      - name: Smoke test - diagnose
+        run: |
+          TOKALOT_DATA="$RUNNER_TEMP/diag" "$BIN" --diagnose | tee "$CHECKS/diagnose.txt"
+          grep -q "^Offline engine *OK" "$CHECKS/diagnose.txt"
+
+      - name: Smoke test - screenshots
+        run: |
+          "$BIN" --screenshots "$RUNNER_TEMP/screenshots"
+          ls -l "$RUNNER_TEMP/screenshots"
+          COUNT=$(ls "$RUNNER_TEMP/screenshots"/*.png | wc -l)
+          echo "$COUNT screenshots"
+          [ "$COUNT" -ge 20 ]
+          cat "$RUNNER_TEMP/screenshots/sync-checks.txt" "$RUNNER_TEMP/screenshots/audio-roundtrip.txt"
+          if grep -v '^PASS' "$RUNNER_TEMP/screenshots/sync-checks.txt"; then echo "A sync check failed"; exit 1; fi
+          [ "$(grep -c '^PASS' "$RUNNER_TEMP/screenshots/sync-checks.txt")" -ge 11 ]
+          grep -q "32000 samples saved as .wav, 32000 read back" "$RUNNER_TEMP/screenshots/audio-roundtrip.txt"
+
+      # The native pieces: Keychain, clipboard, front app, start-at-login file, tones. Fails on any FAIL line.
+      # (perl's alarm stops it if macOS ever waits on a prompt nobody can answer.)
+      - name: Smoke test - native self-test
+        run: |
+          TOKALOT_DATA="$RUNNER_TEMP/selftest" perl -e 'alarm 120; exec @ARGV' "$BIN" --selftest | tee "$CHECKS/selftest.txt"
+
+      # The 60 MB offline model, then real speech (made by macOS's own voice) through the dictation pipeline.
+      - name: Smoke test - offline model and a transcription
+        run: |
+          export TOKALOT_DATA="$RUNNER_TEMP/model"
+          "$BIN" --diagnose --download-model | tee "$CHECKS/diagnose-model.txt"
+          grep -q "^Offline model *OK" "$CHECKS/diagnose-model.txt"
+          say -o "$RUNNER_TEMP/speech.wav" --file-format=WAVE --data-format=LEI16@16000 \
+            "The quick brown fox jumps over the lazy dog. Please call me back tomorrow morning."
+          "$BIN" --transcribe "$RUNNER_TEMP/speech.wav" | tee "$CHECKS/transcribe.txt"
+          grep -qi "fox" "$CHECKS/transcribe.txt"
+          grep -qi "tomorrow" "$CHECKS/transcribe.txt"
+
+      # The real app with its window and menu-bar icon, for half a minute, with a throwaway data folder.
+      - name: Smoke test - run the app
+        run: |
+          export TOKALOT_DATA="$RUNNER_TEMP/run"
+          "$BIN" > "$CHECKS/run-stdout.txt" 2>&1 &
+          PID=$!
+          sleep 20
+          # A second start must hand over to the first (and bring its window up), not run twice.
+          "$BIN"; echo "second start exited with $?"
+          sleep 5
+          screencapture -x "$CHECKS/screen.png" || echo "screencapture not allowed here"
+          kill -0 $PID || { echo "Tokalot quit by itself"; cat "$TOKALOT_DATA/log.txt"; exit 1; }
+          kill $PID; wait $PID || true
+          cat "$TOKALOT_DATA/log.txt" | tee "$CHECKS/run-log.txt"
+          grep -q "Window rendered" "$TOKALOT_DATA/log.txt"
+          grep -q "Menu bar icon added" "$TOKALOT_DATA/log.txt"
+          if grep -E "Crash:|UI error:" "$TOKALOT_DATA/log.txt"; then echo "Errors in the log"; exit 1; fi
+
+      # What a user downloads: the app in a zip made with ditto, which keeps the signature intact.
+      - name: Package
+        run: |
+          cd out
+          ditto -c -k --sequesterRsrc --keepParent Tokalot.app "../Tokalot-mac-arm64-$VERSION.zip"
+          cd ..
+          # Unzip it again the way a user would and check the signature survived.
+          mkdir -p "$RUNNER_TEMP/unzipped"
+          ditto -x -k "Tokalot-mac-arm64-$VERSION.zip" "$RUNNER_TEMP/unzipped"
+          codesign --verify --deep --strict --verbose=2 "$RUNNER_TEMP/unzipped/Tokalot.app"
+          "$RUNNER_TEMP/unzipped/Tokalot.app/Contents/MacOS/Tokalot" --diagnose > /dev/null
+          ls -l "Tokalot-mac-arm64-$VERSION.zip"
+
+      # ---- Experiments: try to give this machine the permissions a user would grant, and a virtual
+      # microphone, to exercise the shortcut, paste and recording paths. GitHub's machines may not allow
+      # it; these steps can't fail the build, and their output says what was and wasn't possible.
+
+      - name: Experiment - grant permissions to Tokalot.app
+        continue-on-error: true
+        run: |
+          csrutil status || true
+          NOW=$(date +%s)
+          for db in "/Library/Application Support/com.apple.TCC/TCC.db" "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
+            for svc in kTCCServiceListenEvent kTCCServicePostEvent kTCCServiceAccessibility kTCCServiceMicrophone; do
+              sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, csreq, policy_id, indirect_object_identifier_type, indirect_object_identifier, indirect_object_code_identity, flags, last_modified, pid, pid_version, boot_uuid, last_reminded) VALUES ('$svc', 'com.sidewinderzz.tokalot', 0, 2, 4, 1, NULL, NULL, 0, 'UNUSED', NULL, 0, $NOW, NULL, NULL, 'UNUSED', $NOW);" \
+                && echo "granted $svc in $db" || echo "could not write $svc to $db"
+            done
+          done
+
+      - name: Experiment - virtual microphone
+        continue-on-error: true
+        run: |
+          brew install --quiet blackhole-2ch switchaudio-osx || exit 0
+          sudo killall coreaudiod || true
+          sleep 5
+          SwitchAudioSource -a || true
+          SwitchAudioSource -t input -s "BlackHole 2ch" && SwitchAudioSource -t output -s "BlackHole 2ch" || true
+
+      - name: Experiment - shortcut, paste and microphone through the app itself
+        continue-on-error: true
+        run: |
+          # Started through LaunchServices so macOS sees Tokalot.app (not this shell) as the one asking.
+          OUT="$CHECKS/selftest-granted.txt"
+          ( sleep 3; afplay "$RUNNER_TEMP/speech.wav" ) &
+          open -W -n --env TOKALOT_DATA="$RUNNER_TEMP/granted" --stdout "$OUT" --stderr "$OUT" \
+            -a "$APP" --args --selftest --no-keychain --expect-tap --expect-paste --record 8 --record-to "$RUNNER_TEMP/mic.wav" || true
+          cat "$OUT" || true
+          if [ -s "$RUNNER_TEMP/mic.wav" ]; then
+            TOKALOT_DATA="$RUNNER_TEMP/model" "$BIN" --transcribe "$RUNNER_TEMP/mic.wav" | tee "$CHECKS/transcribe-mic.txt" || true
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tokalot-mac-arm64
+          path: Tokalot-mac-arm64-*.zip
+          retention-days: 14
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Tokalot-mac-checks
+          path: |
+            ${{ runner.temp }}/screenshots
+            ${{ env.CHECKS }}
+          retention-days: 7
+
+      # Bump <Version> in the .csproj and push to main to release. Mac releases are tagged mac-v<version>
+      # and marked as pre-releases while the app is experimental, so they never become "latest" (which the
+      # Android app's updater and the README's APK link rely on).
+      - name: Publish experimental release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="mac-v$VERSION"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG is already released; nothing to publish."
+            exit 0
+          fi
+          gh release create "$TAG" "Tokalot-mac-arm64-$VERSION.zip" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Tokalot for Mac $VERSION (experimental)" --notes-file mac/RELEASE_NOTES.md

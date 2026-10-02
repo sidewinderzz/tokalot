@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Tokalot.app's description for macOS. The build fills in __VERSION__ from Tokalot.Mac.csproj. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.sidewinderzz.tokalot</string>
+  <key>CFBundleName</key>
+  <string>Tokalot</string>
+  <key>CFBundleDisplayName</key>
+  <string>Tokalot</string>
+  <key>CFBundleExecutable</key>
+  <string>Tokalot</string>
+  <key>CFBundleIconFile</key>
+  <string>Tokalot</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>__VERSION__</string>
+  <key>CFBundleVersion</key>
+  <string>__VERSION__</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+  <!-- Lives in the menu bar, with no Dock icon. -->
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <!-- Shown in macOS's "Tokalot would like to access the microphone" prompt. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Tokalot records what you say while you hold Ctrl+Cmd (or in hands-free mode) and turns it into text.</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>MIT License. github.com/sidewinderzz/tokalot</string>
+</dict>
+</plist>
