@@ -14,7 +14,8 @@ class Recorder {
 
     companion object {
         const val SAMPLE_RATE = 16000
-        private const val VOICE_RMS = 0.015f // above this counts as "someone is talking"
+        private const val VOICE_RMS = 0.015f // the most a sound ever has to reach to count as "someone is talking"
+        private const val VOICE_MIN = 0.004f // and the least, on a very quiet microphone
         private const val SPEECH_RMS = 0.008f // lower bar for "was anything said at all" (quiet mics)
         private const val MAX_SAMPLES = SAMPLE_RATE * 300 // 5 minute cap
     }
@@ -37,6 +38,8 @@ class Recorder {
     /** How much of the recording had sound in it, in samples. */
     @Volatile var speechSamples = 0
         private set
+
+    private var floor = 0.002f // running estimate of the room's background level
 
     /** Caller must already hold RECORD_AUDIO. Returns false if the mic couldn't be opened. */
     fun start(): Boolean {
@@ -62,6 +65,7 @@ class Recorder {
         lastVoiceAt = System.currentTimeMillis()
         lastVoiceSample = 0
         speechSamples = 0
+        floor = 0.002f
         record = rec
         try {
             rec.startRecording()
@@ -81,7 +85,11 @@ class Recorder {
                     for (i in 0 until n) { val v = buf[i] / 32768.0; sum += v * v }
                     level = kotlin.math.sqrt(sum / n).toFloat()
                     if (level > SPEECH_RMS) speechSamples += n
-                    if (level > VOICE_RMS) {
+                    // The bar for "talking" follows the room: three times the background level, which drops at once
+                    // in a quiet moment and creeps up slowly. A fixed bar read soft speech on a quiet mic as
+                    // silence, and auto-stop then ended the recording 30 s in, mid-sentence.
+                    floor = if (level < floor) level else minOf(level, floor * 1.003f + 0.00001f)
+                    if (level > (floor * 3).coerceIn(VOICE_MIN, VOICE_RMS)) {
                         lastVoiceAt = System.currentTimeMillis()
                         lastVoiceSample = total + n
                     }
