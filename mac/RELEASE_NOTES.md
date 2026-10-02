@@ -1,6 +1,6 @@
 **Experimental. No person has used this on a real Mac yet.** It is the Linux/Windows app ported to macOS, for Macs with Apple silicon (M1 or newer) on macOS 15 Sequoia or newer (14 may work). Hold **Ctrl+Cmd** (⌃⌘) and talk; let go and the text is pasted where your cursor is. Tap Ctrl+Cmd once for hands-free; Esc cancels.
 
-**Mac testers wanted:** if you try it, please comment on the pinned "Mac testers wanted" issue, even if everything works.
+**Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
 ## What has been checked, and how
 
