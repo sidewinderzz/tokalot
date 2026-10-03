@@ -49,8 +49,8 @@ class OfflineFlowService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: OfflineFlowService? = null
-        private const val IDLE_ALPHA = 0.85f // resting opacity: just enough to recede; colour (not transparency) does most of the quieting
-        private val IDLE_BAR = Color.parseColor("#C8C8CC") // soft grey bars while resting
+        private const val IDLE_ALPHA = 0.76f // resting opacity: just enough to recede; colour (not transparency) does most of the quieting
+        private val IDLE_BAR = Color.parseColor("#AEAEB2") // soft grey bars while resting
         private const val PAD_DP = 8        // margin inside the window around the square, for its shadow
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
@@ -73,6 +73,11 @@ class OfflineFlowService : AccessibilityService() {
     private var button: FrameLayout? = null
     private var bars: BarsView? = null
     private var cancelIcon: ImageView? = null
+    // "Slide up to cancel" guide shown above the button while recording (square style only).
+    private var track: CancelTrackView? = null
+    private var trackParams: WindowManager.LayoutParams? = null
+    private var trackAttached = false
+    private val trackTravel get() = dp(96)          // how far the button slides to reach the X
     private var buttonBg: ButtonDisc? = null
     private var params: WindowManager.LayoutParams? = null
     private var attached = false
@@ -121,10 +126,10 @@ class OfflineFlowService : AccessibilityService() {
     private val winH get() = if (!pill) dp(2 * PAD_DP + 48) else ((if (pillDock == "bottom") PillView.DEPTH else PillView.SPAN) * pillK).toInt()
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    /** The accent color with most of its saturation taken out (70% toward grey), for the resting button. */
+    /** The accent color with most of its saturation taken out (61% toward grey), for the resting button. */
     private fun washed(c: Int): Int {
         val grey = (0.3f * Color.red(c) + 0.59f * Color.green(c) + 0.11f * Color.blue(c))
-        fun mix(v: Int) = (v + (grey - v) * 0.7f).toInt().coerceIn(0, 255)
+        fun mix(v: Int) = (v + (grey - v) * 0.61f).toInt().coerceIn(0, 255)
         return Color.rgb(mix(Color.red(c)), mix(Color.green(c)), mix(Color.blue(c)))
     }
 
@@ -203,6 +208,9 @@ class OfflineFlowService : AccessibilityService() {
         cancelIcon = x
         buttonBg = bg
         pillView = null
+        track = CancelTrackView(this, dp(30).toFloat(), dp(14).toFloat()).apply {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
         params = overlayParams(winW, winH)
         buildDropZone()
     }
@@ -230,7 +238,7 @@ class OfflineFlowService : AccessibilityService() {
         frame.setOnTouchListener(DragTouch())
         button = frame
         pillView = pv
-        bars = null; cancelIcon = null; buttonBg = null
+        bars = null; cancelIcon = null; buttonBg = null; hideTrack(); track = null
         params = overlayParams(winW, winH)
         buildDropZone()
     }
@@ -262,6 +270,35 @@ class OfflineFlowService : AccessibilityService() {
             "right" -> (dm.widthPixels - winW) to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), maxOf(dp(24), bottom - winH))
             else -> (m + pillAlong * (dm.widthPixels - 2 * m) - winW / 2f).toInt().coerceIn(0, dm.widthPixels - winW) to maxOf(0, bottom - winH)
         }
+    }
+
+    /** Show the slide-to-cancel guide above the button (below it if the button is near the top). */
+    private fun showTrack() {
+        val t = track ?: return
+        val p = params ?: return
+        if (!attached || pill) return
+        val h = trackTravel + dp(14) + dp(2)
+        val centre = p.y + winH / 2
+        t.up = centre - h >= dp(24)
+        t.progress = 0f
+        val tp = trackParams ?: overlayParams(winW, h).also {
+            it.flags = it.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            trackParams = it
+        }
+        tp.width = winW; tp.height = h
+        tp.x = p.x
+        tp.y = if (t.up) centre - h else centre
+        try {
+            if (trackAttached) wm.updateViewLayout(t, tp)
+            else { t.alpha = 0f; wm.addView(t, tp); trackAttached = true }
+            t.animate().alpha(1f).setDuration(160).start()
+        } catch (_: Exception) {}
+    }
+
+    private fun hideTrack() {
+        if (!trackAttached) return
+        try { wm.removeView(track) } catch (_: Exception) {}
+        trackAttached = false
     }
 
     /** Red gradient with an X along the top edge. Fades in while you drag the button. */
@@ -322,8 +359,8 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     /**
-     * Tap mode:  tap = start/stop, long-press = cancel, drag = move.
-     * Hold mode: hold = talk, release = finish, slide away then release = cancel,
+     * Tap mode:  tap = start/stop, long-press = cancel, drag = move; while recording, slide up to the X = cancel.
+     * Hold mode: hold = talk, release = finish, slide up to the X (square) or away (pill) then release = cancel,
      *            move right away (before the hold kicks in) = drag.
      */
     private inner class DragTouch : View.OnTouchListener {
@@ -336,6 +373,8 @@ class OfflineFlowService : AccessibilityService() {
         private var longPressed = false
         private var holding = false   // hold-to-talk recording in progress
         private var inCancelZone = false
+        private var sliding = false   // square style, recording: sliding toward the cancel X
+        private var slideP = 0f
         private val longPress = Runnable {
             if (!dragging) {
                 longPressed = true
@@ -358,6 +397,7 @@ class OfflineFlowService : AccessibilityService() {
                     downX = e.rawX; downY = e.rawY
                     startX = p.x; startY = p.y
                     dragging = false; longPressed = false; holding = false; inCancelZone = false
+                    sliding = false; slideP = 0f
                     inDropZone = false
                     v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90).start() // a small press-in
                     if (holdMode && state == State.IDLE) handler.postDelayed(holdStart, 220)
@@ -366,7 +406,26 @@ class OfflineFlowService : AccessibilityService() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - downX
                     val dy = e.rawY - downY
-                    if (holding) {
+                    val canSlide = !pill && (holding || state == State.RECORDING)
+                    if (canSlide && (sliding || abs(dx) > slop || abs(dy) > slop)) {
+                        // Square style while recording: the button only moves along the guide toward
+                        // the X. Most of the way there and a release cancels.
+                        if (!sliding) {
+                            sliding = true
+                            handler.removeCallbacks(longPress)
+                            if (!trackAttached) showTrack()
+                        }
+                        val up = track?.up ?: true
+                        val toward = if (up) -dy else dy
+                        val pNew = (toward / trackTravel).coerceIn(0f, 1f)
+                        if ((pNew >= CancelTrackView.ARM) != (slideP >= CancelTrackView.ARM))
+                            Haptics.play(this@OfflineFlowService, Haptics.Kind.TICK)
+                        slideP = pNew
+                        track?.progress = pNew
+                        p.x = startX
+                        p.y = startY + ((if (up) -1 else 1) * pNew * trackTravel).toInt()
+                        try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                    } else if (holding) {
                         // Slide well away from the button to arm cancel; the button dims to show it.
                         val far = kotlin.math.hypot(dx, dy) > dp(90)
                         if (far != inCancelZone) {
@@ -402,6 +461,17 @@ class OfflineFlowService : AccessibilityService() {
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(holdStart)
                     when {
+                        sliding -> {
+                            // Back to where it started, then cancel or carry on.
+                            val armed = slideP >= CancelTrackView.ARM
+                            p.x = startX; p.y = startY
+                            try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                            track?.progress = 0f
+                            when {
+                                armed -> cancel()
+                                holding -> finishRecording()
+                            }
+                        }
                         holding -> { v.alpha = 1f; if (inCancelZone) cancel() else finishRecording() }
                         dragging -> {
                             if (inDropZone && state == State.IDLE) {
@@ -426,6 +496,7 @@ class OfflineFlowService : AccessibilityService() {
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(holdStart)
                     if (dragging) showDropZone(false)
+                    if (sliding) { p.x = startX; p.y = startY; try { wm.updateViewLayout(v, p) } catch (_: Exception) {}; track?.progress = 0f }
                     if (holding) finishRecording()
                     holding = false
                     releasePress(v)
@@ -534,6 +605,7 @@ class OfflineFlowService : AccessibilityService() {
         val (tx, ty) = targetPosition()
         p.x = tx; p.y = ty
         try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
+        if (state == State.RECORDING) showTrack() // keep the cancel guide with the button
         val rest = if (state == State.IDLE && !pill) IDLE_ALPHA else 1f
         button?.animate()?.alpha(rest)?.setDuration(140)?.start()
     }
@@ -588,6 +660,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun detach() {
         touching = false
+        hideTrack()
         if (attached) {
             try { wm.removeView(button) } catch (_: Exception) {}
             attached = false
@@ -650,6 +723,7 @@ class OfflineFlowService : AccessibilityService() {
             State.IDLE -> washed(accent)
             else -> accent
         }
+        if (s == State.RECORDING) showTrack() else hideTrack()
         bars?.mode = when (s) {
             State.IDLE, State.STARTING -> BarsView.Mode.IDLE
             State.RECORDING -> BarsView.Mode.LISTENING

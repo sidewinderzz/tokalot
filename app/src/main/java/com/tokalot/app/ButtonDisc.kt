@@ -61,7 +61,7 @@ class ButtonDisc(
         fill.shader = LinearGradient(
             0f, box.top, 0f, box.bottom,
             if (active) intArrayOf(0xFF2A2A2E.toInt(), 0xFF0F0F11.toInt())
-            else intArrayOf(0xFF3C3C41.toInt(), 0xFF1F1F22.toInt()),
+            else intArrayOf(0xFF505055.toInt(), 0xFF333336.toInt()), // resting: a lighter, softer graphite
             null, Shader.TileMode.CLAMP
         )
         rim.strokeWidth = hairline
@@ -77,12 +77,14 @@ class ButtonDisc(
         // The shadow sits a little below the square, and ends inside the window so it is never clipped.
         val drop = inset * 0.3f
         val spread = inset * 0.7f
+        shadow.color = if (active) 0x08000000 else 0x06000000 // resting shadow ~77% of full
         for (i in SHADOW_STEPS downTo 1) {
             val e = spread * i / SHADOW_STEPS
             tmp.set(box.left - e, box.top - e + drop, box.right + e, box.bottom + e + drop)
             canvas.drawRoundRect(tmp, radius + e, radius + e, shadow)
         }
         canvas.drawRoundRect(box, radius, radius, fill)
+        if (!active) return // resting: no rim, so it sits quietly
         tmp.set(box)
         tmp.inset(hairline / 2f, hairline / 2f)
         canvas.drawRoundRect(tmp, radius - hairline / 2f, radius - hairline / 2f, rim)
