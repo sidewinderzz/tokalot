@@ -17,7 +17,7 @@ import kotlin.math.min
  *
  * It is drawn by hand rather than with view elevation, because the button lives in an overlay
  * window where elevation shadows are unreliable. [inset] is the margin kept free around the
- * square (inside the window) for that shadow and for the listening halo; [corner] is its corner
+ * square (inside the window) for that shadow; [corner] is its corner
  * radius.
  */
 class ButtonDisc(

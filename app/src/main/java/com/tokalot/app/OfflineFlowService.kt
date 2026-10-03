@@ -49,8 +49,9 @@ class OfflineFlowService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: OfflineFlowService? = null
-        private const val IDLE_ALPHA = 0.9f // resting opacity; the disc is solid, this is what lets it recede
-        private const val PAD_DP = 8        // margin inside the window around the disc, for its shadow and halo
+        private const val IDLE_ALPHA = 0.85f // resting opacity: just enough to recede; colour (not transparency) does most of the quieting
+        private val IDLE_BAR = Color.parseColor("#C8C8CC") // soft grey bars while resting
+        private const val PAD_DP = 8        // margin inside the window around the square, for its shadow
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
         private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
@@ -73,7 +74,6 @@ class OfflineFlowService : AccessibilityService() {
     private var bars: BarsView? = null
     private var cancelIcon: ImageView? = null
     private var buttonBg: ButtonDisc? = null
-    private var halo: HaloView? = null
     private var params: WindowManager.LayoutParams? = null
     private var attached = false
     private var touching = false // don't snap the button back while a finger is on it
@@ -109,7 +109,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private val recheck = Runnable { updateButton() }
 
-    // The window is the button body plus a margin on every side (for the shadow and the listening halo).
+    // The window is the button body plus a margin on every side (for the shadow).
     // Square style: 48dp square. Pill style: the desktop's ripple pill, attached to the bottom (keyboard),
     // left or right edge; the window is long along that edge.
     private var pill = false
@@ -120,6 +120,13 @@ class OfflineFlowService : AccessibilityService() {
     private val winW get() = if (!pill) dp(2 * PAD_DP + 48) else ((if (pillDock == "bottom") PillView.SPAN else PillView.DEPTH) * pillK).toInt()
     private val winH get() = if (!pill) dp(2 * PAD_DP + 48) else ((if (pillDock == "bottom") PillView.DEPTH else PillView.SPAN) * pillK).toInt()
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /** The accent color with most of its saturation taken out (70% toward grey), for the resting button. */
+    private fun washed(c: Int): Int {
+        val grey = (0.3f * Color.red(c) + 0.59f * Color.green(c) + 0.11f * Color.blue(c))
+        fun mix(v: Int) = (v + (grey - v) * 0.7f).toInt().coerceIn(0, 255)
+        return Color.rgb(mix(Color.red(c)), mix(Color.green(c)), mix(Color.blue(c)))
+    }
 
     override fun onServiceConnected() {
         instance = this
@@ -163,16 +170,11 @@ class OfflineFlowService : AccessibilityService() {
         pill = Prefs(this).buttonStyle == "pill"
         if (pill) { buildPillButton(); return }
         val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat(), dp(14).toFloat())
-        // A ring of accent light that swells with your voice while listening (invisible otherwise).
-        val h = HaloView(this, dp(PAD_DP).toFloat(), dp(14).toFloat()).apply {
-            level = { recorder.level }
-            color = Prefs(this@OfflineFlowService).accent
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
         val b = BarsView(this).apply {
             level = { recorder.level }
-            // Idle: the tall bar carries the accent color, as in the launcher icon.
-            accentColor = Prefs(this@OfflineFlowService).accent
+            // Resting: soft grey bars, the tall one a washed-out accent (full colour comes in when you use it).
+            barColor = IDLE_BAR
+            accentColor = washed(Prefs(this@OfflineFlowService).accent)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO // the frame speaks for it
         }
         // Shown over the dimmed bars while transcribing, when a tap cancels.
@@ -184,7 +186,6 @@ class OfflineFlowService : AccessibilityService() {
         val frame = FrameLayout(this).apply {
             background = bg
             alpha = IDLE_ALPHA
-            addView(h, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             addView(b, FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER))
             addView(x, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
             // For screen readers: one labelled, clickable button. Their "activate" arrives as a
@@ -200,14 +201,13 @@ class OfflineFlowService : AccessibilityService() {
         button = frame
         bars = b
         cancelIcon = x
-        halo = h
         buttonBg = bg
         pillView = null
         params = overlayParams(winW, winH)
         buildDropZone()
     }
 
-    /** The pill style: just the desktop ripple pill, no frame, halo or bars. */
+    /** The pill style: just the desktop ripple pill, no square or bars. */
     @SuppressLint("ClickableViewAccessibility")
     private fun buildPillButton() {
         val sp = overlayPrefs()
@@ -230,7 +230,7 @@ class OfflineFlowService : AccessibilityService() {
         frame.setOnTouchListener(DragTouch())
         button = frame
         pillView = pv
-        bars = null; cancelIcon = null; halo = null; buttonBg = null
+        bars = null; cancelIcon = null; buttonBg = null
         params = overlayParams(winW, winH)
         buildDropZone()
     }
@@ -636,14 +636,20 @@ class OfflineFlowService : AccessibilityService() {
             p.flags = if (s == State.IDLE) p.flags and keepOn.inv() else p.flags or keepOn
             if (attached) try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
         }
-        // Listening: bars and halo in the accent color (amber by default). Transcribing: white ripple.
-        // Idle: white bars with the tall one in the accent color, like the launcher icon.
+        // Resting: soft grey with a washed-out accent bar, so it sits quietly but is still easy to find.
+        // Listening: bars in full accent color (amber by default). Transcribing: white ripple.
         val accent = Prefs(this).accent
         val listening = s == State.STARTING || s == State.RECORDING
-        bars?.barColor = if (listening) accent else Color.WHITE
-        bars?.accentColor = if (s == State.WORKING) null else accent
-        halo?.color = accent
-        halo?.listening = s == State.RECORDING
+        bars?.barColor = when {
+            listening -> accent
+            s == State.WORKING -> Color.WHITE
+            else -> IDLE_BAR
+        }
+        bars?.accentColor = when (s) {
+            State.WORKING -> null
+            State.IDLE -> washed(accent)
+            else -> accent
+        }
         bars?.mode = when (s) {
             State.IDLE, State.STARTING -> BarsView.Mode.IDLE
             State.RECORDING -> BarsView.Mode.LISTENING
