@@ -51,6 +51,7 @@ class OfflineFlowService : AccessibilityService() {
         @Volatile var instance: OfflineFlowService? = null
         private const val IDLE_ALPHA = 0.76f // resting opacity: just enough to recede; colour (not transparency) does most of the quieting
         private val IDLE_BAR = Color.parseColor("#AEAEB2") // soft grey bars while resting
+        private val BUBBLE_TEXT = Color.parseColor("#E2E2E6") // undo / copied hint text, a touch softer than white
         private const val PAD_DP = 8        // margin inside the window around the square, for its shadow
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
@@ -115,15 +116,8 @@ class OfflineFlowService : AccessibilityService() {
     private val recheck = Runnable { updateButton() }
 
     // The window is the button body plus a margin on every side (for the shadow).
-    // Square style: 48dp square. Pill style: the desktop's ripple pill, attached to the bottom (keyboard),
-    // left or right edge; the window is long along that edge.
-    private var pill = false
-    private var pillDock = "bottom"
-    private var pillAlong = 0.85f   // 0..1 position along the edge
-    private var pillView: PillView? = null
-    private val pillK get() = resources.displayMetrics.density * PillView.SCALE
-    private val winW get() = if (!pill) dp(2 * PAD_DP + 48) else ((if (pillDock == "bottom") PillView.SPAN else PillView.DEPTH) * pillK).toInt()
-    private val winH get() = if (!pill) dp(2 * PAD_DP + 48) else ((if (pillDock == "bottom") PillView.DEPTH else PillView.SPAN) * pillK).toInt()
+    private val winW get() = dp(2 * PAD_DP + 48)
+    private val winH get() = dp(2 * PAD_DP + 48)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     /** The accent color with most of its saturation taken out (61% toward grey), for the resting button. */
@@ -172,8 +166,6 @@ class OfflineFlowService : AccessibilityService() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildButton() {
-        pill = Prefs(this).buttonStyle == "pill"
-        if (pill) { buildPillButton(); return }
         val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat(), dp(14).toFloat())
         val b = BarsView(this).apply {
             level = { recorder.level }
@@ -207,7 +199,6 @@ class OfflineFlowService : AccessibilityService() {
         bars = b
         cancelIcon = x
         buttonBg = bg
-        pillView = null
         track = CancelTrackView(this, dp(30).toFloat(), dp(14).toFloat()).apply {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
@@ -215,69 +206,12 @@ class OfflineFlowService : AccessibilityService() {
         buildDropZone()
     }
 
-    /** The pill style: just the desktop ripple pill, no square or bars. */
-    @SuppressLint("ClickableViewAccessibility")
-    private fun buildPillButton() {
-        val sp = overlayPrefs()
-        pillDock = sp.safeString("pdock", "bottom").let { if (it == "left" || it == "right") it else "bottom" }
-        pillAlong = (sp.safeInt("palong", 850) / 1000f).coerceIn(0f, 1f)
-        val pv = PillView(this).apply {
-            level = { recorder.level }
-            dock = pillDock
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-        }
-        val frame = FrameLayout(this).apply {
-            alpha = 1f
-            addView(pv, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-            isClickable = true
-            isFocusable = true
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-            contentDescription = describe(State.IDLE)
-            setOnClickListener { onTap() }
-        }
-        frame.setOnTouchListener(DragTouch())
-        button = frame
-        pillView = pv
-        bars = null; cancelIcon = null; buttonBg = null; hideTrack(); track = null
-        params = overlayParams(winW, winH)
-        buildDropZone()
-    }
-
-    /** Pill drag: like the desktop, snap to whichever of the bottom (keyboard), left or right edge is nearest the finger. */
-    private fun snapPill(p: WindowManager.LayoutParams, fx: Float, fy: Float) {
-        val dm = resources.displayMetrics
-        val bottom = anchor()
-        val dl = fx
-        val dr = dm.widthPixels - fx
-        val db = maxOf(0f, bottom - fy)
-        pillDock = if (dl <= dr && dl < db) "left" else if (dr < dl && dr < db) "right" else "bottom"
-        val m = dp(40)
-        val along = if (pillDock == "bottom") (fx - m) / maxOf(1, dm.widthPixels - 2 * m)
-        else (fy - dp(24) - m) / maxOf(1, bottom - dp(24) - 2 * m)
-        pillAlong = along.coerceIn(0f, 1f)
-        pillView?.dock = pillDock
-        p.width = winW; p.height = winH
-        val (x, y) = pillTarget()
-        p.x = x; p.y = y
-    }
-
-    private fun pillTarget(): Pair<Int, Int> {
-        val dm = resources.displayMetrics
-        val bottom = anchor()
-        val m = dp(40)
-        return when (pillDock) {
-            "left" -> 0 to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), maxOf(dp(24), bottom - winH))
-            "right" -> (dm.widthPixels - winW) to (dp(24) + m + pillAlong * (bottom - dp(24) - 2 * m) - winH / 2f).toInt().coerceIn(dp(24), maxOf(dp(24), bottom - winH))
-            else -> (m + pillAlong * (dm.widthPixels - 2 * m) - winW / 2f).toInt().coerceIn(0, dm.widthPixels - winW) to maxOf(0, bottom - winH)
-        }
-    }
-
     /** Show the slide-to-cancel guide above the button (below it if the button is near the top). */
     private fun showTrack() {
         val t = track ?: return
         val p = params ?: return
-        if (!attached || pill) return
-        val h = trackTravel + dp(14) + dp(2)
+        if (!attached) return
+        val h = trackTravel + dp(26) // room for the X at full size plus its shadow, so it never gets clipped
         val centre = p.y + winH / 2
         t.up = centre - h >= dp(24)
         t.progress = 0f
@@ -360,7 +294,7 @@ class OfflineFlowService : AccessibilityService() {
 
     /**
      * Tap mode:  tap = start/stop, long-press = cancel, drag = move; while recording, slide up to the X = cancel.
-     * Hold mode: hold = talk, release = finish, slide up to the X (square) or away (pill) then release = cancel,
+     * Hold mode: hold = talk, release = finish, slide up to the X then release = cancel,
      *            move right away (before the hold kicks in) = drag.
      */
     private inner class DragTouch : View.OnTouchListener {
@@ -406,7 +340,7 @@ class OfflineFlowService : AccessibilityService() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - downX
                     val dy = e.rawY - downY
-                    val canSlide = !pill && (holding || state == State.RECORDING)
+                    val canSlide = holding || state == State.RECORDING
                     if (canSlide && (sliding || abs(dx) > slop || abs(dy) > slop)) {
                         // Square style while recording: the button only moves along the guide toward
                         // the X. Most of the way there and a release cancels.
@@ -444,13 +378,9 @@ class OfflineFlowService : AccessibilityService() {
                         if (dragging) {
                             // Only an idle button can be thrown away; mid-recording it stays put.
                             val canDismiss = state == State.IDLE
-                            if (pill && !(canDismiss && e.rawY <= dp(110))) {
-                                snapPill(p, e.rawX, e.rawY) // the pill clings to the nearest edge, like the desktop's
-                            } else {
-                                p.x = startX + dx.toInt()
-                                p.y = startY + dy.toInt()
-                                clamp(p, allowTop = canDismiss)
-                            }
+                            p.x = startX + dx.toInt()
+                            p.y = startY + dy.toInt()
+                            clamp(p, allowTop = canDismiss)
                             try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                             if (canDismiss) updateDropHover(p)
                         }
@@ -479,10 +409,9 @@ class OfflineFlowService : AccessibilityService() {
                             } else {
                                 showDropZone(false)
                                 clamp(p)
-                                if (pill) pillTarget().let { (x, y) -> p.x = x; p.y = y } // land back on its edge
                                 try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                                 savePosition(p)
-                                if (state == State.IDLE && !pill) v.alpha = IDLE_ALPHA
+                                if (state == State.IDLE) v.alpha = IDLE_ALPHA
                             }
                         }
                         holdMode && state == State.IDLE -> toast("Hold the button to talk")
@@ -553,7 +482,6 @@ class OfflineFlowService : AccessibilityService() {
             return
         }
         if (touching) return
-        syncStyle()
         val p = params ?: return
         val (tx, ty) = targetPosition()
         if (!attached) {
@@ -606,7 +534,7 @@ class OfflineFlowService : AccessibilityService() {
         p.x = tx; p.y = ty
         try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
         if (state == State.RECORDING) showTrack() // keep the cancel guide with the button
-        val rest = if (state == State.IDLE && !pill) IDLE_ALPHA else 1f
+        val rest = if (state == State.IDLE) IDLE_ALPHA else 1f
         button?.animate()?.alpha(rest)?.setDuration(140)?.start()
     }
 
@@ -623,7 +551,6 @@ class OfflineFlowService : AccessibilityService() {
     private fun overlayPrefs() = getSharedPreferences("overlay", Context.MODE_PRIVATE)
 
     private fun targetPosition(): Pair<Int, Int> {
-        if (pill) return pillTarget()
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
         // Defaults leave the same visible gap as before; the window now carries PAD_DP of margin of its own.
@@ -638,19 +565,7 @@ class OfflineFlowService : AccessibilityService() {
         p.y = p.y.coerceIn(if (allowTop) 0 else dp(24), dm.heightPixels - winH)
     }
 
-    /** Settings may have switched the button's shape since it was built; rebuild it while it is hidden. */
-    private fun syncStyle() {
-        if (!attached && !zoneAttached && (Prefs(this).buttonStyle == "pill") != pill) {
-            buildButton()
-            setState(state)
-        }
-    }
-
     private fun savePosition(p: WindowManager.LayoutParams) {
-        if (pill) {
-            overlayPrefs().edit().putString("pdock", pillDock).putInt("palong", (pillAlong * 1000).toInt()).apply()
-            return
-        }
         val e = overlayPrefs().edit().putInt("x", p.x)
         // The height is measured from the keyboard. With no keyboard on screen (dragged while
         // recording after it closed) keep the old height, or the button turns up somewhere odd next time.
@@ -696,13 +611,8 @@ class OfflineFlowService : AccessibilityService() {
         bars?.alpha = 1f
         if (s == State.WORKING) handler.postDelayed(showCancel, CANCEL_SHOW_MS)
         buttonBg?.active = s != State.IDLE
-        pillView?.mode = when (s) {
-            State.IDLE -> PillView.Mode.IDLE
-            State.STARTING, State.RECORDING -> PillView.Mode.LISTENING
-            State.WORKING -> PillView.Mode.WORKING
-        }
         button?.animate()?.cancel()
-        button?.alpha = if (s == State.IDLE && !pill) IDLE_ALPHA else 1f
+        button?.alpha = if (s == State.IDLE) IDLE_ALPHA else 1f
         // Keep the screen awake from tap to finished text, so it can't sleep mid-sentence.
         params?.let { p ->
             val keepOn = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
@@ -739,22 +649,25 @@ class OfflineFlowService : AccessibilityService() {
         val dm = resources.displayMetrics
         val tv = TextView(this).apply {
             text = label.replace('\n', ' ')
-            setTextColor(Color.WHITE)
-            textSize = 14f
+            setTextColor(BUBBLE_TEXT)
+            textSize = 13f
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             background = bubbleBackground()
-            elevation = dp(6).toFloat()
             maxWidth = dm.widthPixels - dp(24)
             setOnClickListener { removeBubble(); onClick() }
         }
         attachBubble(tv, durationMs)
     }
 
-    private fun bubbleBackground() = GradientDrawable().apply {
-        cornerRadius = dp(18).toFloat()
-        setColor(Color.parseColor("#F21C1C1E"))
+    /** Same graphite as the resting button, with the same 14dp corners and a faint rim, so it reads as part of it. */
+    private fun bubbleBackground() = GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(Color.parseColor("#E6505055"), Color.parseColor("#E6333336"))
+    ).apply {
+        cornerRadius = dp(14).toFloat()
+        setStroke(dp(1), Color.parseColor("#1FFFFFFF"))
     }
 
     /**
@@ -765,13 +678,13 @@ class OfflineFlowService : AccessibilityService() {
         removeBubble()
         fun part(label: String, desc: String, onClick: () -> Unit) = TextView(this).apply {
             text = label
-            setTextColor(Color.WHITE)
-            textSize = 14f
+            setTextColor(BUBBLE_TEXT)
+            textSize = 13f
             maxLines = 1
             gravity = Gravity.CENTER
-            minHeight = dp(48)
-            minWidth = dp(64)
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            minHeight = dp(40)
+            minWidth = dp(56)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
             contentDescription = desc
             setOnClickListener { removeBubble(); onClick() }
         }
@@ -779,12 +692,11 @@ class OfflineFlowService : AccessibilityService() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = bubbleBackground()
-            elevation = dp(6).toFloat()
             addView(part("↶  Undo", "Undo the dictation") { undoInsert() })
             addView(View(this@OfflineFlowService).apply {
-                setBackgroundColor(Color.parseColor("#40FFFFFF"))
+                setBackgroundColor(Color.parseColor("#26FFFFFF"))
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(1), dp(22)))
+            }, LinearLayout.LayoutParams(dp(1), dp(18)))
             addView(part("My wording", "Use my own wording") { useMyWording(plain, entryId) })
         }
         attachBubble(pill, durationMs)

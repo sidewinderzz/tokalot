@@ -357,11 +357,6 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("hold", false)
         set(v) = sp.edit().putBoolean("hold", v).apply()
 
-    /** Floating button shape: "square" (rounded square) or "pill" (capsule that lies along the nearest screen side). */
-    var buttonStyle: String
-        get() = sp.safeString("buttonStyle", "square").let { if (it == "pill") "pill" else "square" }
-        set(v) = sp.edit().putString("buttonStyle", v).apply()
-
     /** Vibration feedback from the floating button. */
     var haptics: Boolean
         get() = sp.safeBoolean("haptics", true)

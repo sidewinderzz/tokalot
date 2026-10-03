@@ -76,8 +76,8 @@ class ButtonDisc(
         if (half <= 0f) return
         // The shadow sits a little below the square, and ends inside the window so it is never clipped.
         val drop = inset * 0.3f
-        val spread = inset * 0.7f
-        shadow.color = if (active) 0x08000000 else 0x06000000 // resting shadow ~77% of full
+        val spread = inset * 0.5f
+        shadow.color = if (active) 0x04000000 else 0x03000000 // a faint shadow, just enough to lift it off light apps
         for (i in SHADOW_STEPS downTo 1) {
             val e = spread * i / SHADOW_STEPS
             tmp.set(box.left - e, box.top - e + drop, box.right + e, box.bottom + e + drop)

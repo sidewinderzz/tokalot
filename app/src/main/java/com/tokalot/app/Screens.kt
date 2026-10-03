@@ -384,10 +384,6 @@ class SettingsScreen(private val a: MainActivity) {
             prefs.autoStop = it
         })
         rc.addView(divider())
-        rc.addView(switchRow("Pill-shaped button", "The desktop app's ripple pill: a slim capsule that clings to the nearest screen edge and ripples with your voice, instead of the rounded square. Takes effect the next time the button appears.", prefs.buttonStyle == "pill") {
-            prefs.buttonStyle = if (it) "pill" else "square"
-        })
-        rc.addView(divider())
         rc.addView(switchRow("Haptics", "A small buzz when recording starts, stops, finishes or fails.", prefs.haptics) {
             prefs.haptics = it
             if (it) Haptics.play(this, Haptics.Kind.DONE)

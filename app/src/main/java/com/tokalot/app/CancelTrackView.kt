@@ -42,12 +42,14 @@ class CancelTrackView(context: Context, private val startGap: Float, private val
         val armed = progress >= ARM
         // Ends of the track: from just past the button's edge to the X's centre.
         val near = if (up) height - startGap else startGap
-        val far = if (up) xRadius + 2 * d else height - xRadius - 2 * d
+        // Leave room for the X at full size (it grows 30%) plus its shadow, so it stays perfectly round.
+        val room = xRadius * 1.3f + 6 * d
+        val far = if (up) room else height - room
 
         // Dots: dim overall, brighter along the part the button has already travelled.
         line.color = 0x59FFFFFF   // ~35% white
         line.setShadowLayer(2f * d, 0f, 0f, 0x66000000) // keeps the dots visible on light apps
-        canvas.drawLine(cx, near, cx, far + (if (up) xRadius else -xRadius), line)
+        canvas.drawLine(cx, near, cx, far + (if (up) xRadius * 1.3f else -xRadius * 1.3f), line)
 
         // The X: a small dark disc that grows and turns red as you get close.
         val grow = 1f + 0.3f * progress
