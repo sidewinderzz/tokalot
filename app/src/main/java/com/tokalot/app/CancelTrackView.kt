@@ -51,12 +51,15 @@ class CancelTrackView(context: Context, private val startGap: Float, private val
         line.setShadowLayer(2f * d, 0f, 0f, 0x66000000) // keeps the dots visible on light apps
         canvas.drawLine(cx, near, cx, far + (if (up) xRadius * 1.3f else -xRadius * 1.3f), line)
 
-        // The X: a small dark disc that grows and turns red as you get close.
+        // The X: a small dark rounded square that grows and turns red as you get close.
         val grow = 1f + 0.3f * progress
         val r = xRadius * grow
         disc.color = if (armed) 0xF2D93A3A.toInt() else blend(0xB31C1C1E.toInt(), 0xE6B23A3A.toInt(), progress)
         disc.setShadowLayer(3f * d, 0f, d, 0x55000000)
-        canvas.drawCircle(cx, far, r, disc)
+        // A small, slightly rounded square rather than a circle, to match the button.
+        val half = r * 0.9f
+        val corner = 6f * d * grow
+        canvas.drawRoundRect(cx - half, far - half, cx + half, far + half, corner, corner, disc)
         val s = r * 0.38f
         cross.alpha = (150 + 105 * progress).toInt().coerceAtMost(255)
         canvas.drawLine(cx - s, far - s, cx + s, far + s, cross)

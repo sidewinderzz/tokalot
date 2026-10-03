@@ -643,7 +643,7 @@ class OfflineFlowService : AccessibilityService() {
 
     // ---------- result bubble ("hint") ----------
 
-    /** Small dark pill near the button (e.g. "Copied ✓ …" or "Undo"). */
+    /** Small graphite label near the button (e.g. "Copied ✓ …"). */
     private fun showBubble(label: String, durationMs: Long = 4000, onClick: () -> Unit) {
         removeBubble()
         val dm = resources.displayMetrics
@@ -661,17 +661,34 @@ class OfflineFlowService : AccessibilityService() {
         attachBubble(tv, durationMs)
     }
 
-    /** Same graphite as the resting button, with the same 14dp corners and a faint rim, so it reads as part of it. */
+    /** Same graphite as the resting button, slightly rounded corners and a faint rim, so it reads as part of it. */
+    /** Just the undo arrow in a small graphite rounded square. */
+    private fun showUndoChip(durationMs: Long) {
+        removeBubble()
+        val iv = ImageView(this).apply {
+            setImageDrawable(this@OfflineFlowService.getDrawable(R.drawable.ic_undo)?.mutate()?.apply { setTint(BUBBLE_TEXT) })
+            background = bubbleBackground()
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            contentDescription = "Undo the dictation"
+            setOnClickListener { removeBubble(); undoInsert() }
+        }
+        attachBubble(FrameLayout(this).apply {
+            // 36dp to look at; the frame keeps it a comfortable size to tap
+            addView(iv, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+            minimumWidth = winW; minimumHeight = dp(44) // as wide as the button window, so it sits centred over it
+        }, durationMs)
+    }
+
     private fun bubbleBackground() = GradientDrawable(
         GradientDrawable.Orientation.TOP_BOTTOM,
         intArrayOf(Color.parseColor("#E6505055"), Color.parseColor("#E6333336"))
     ).apply {
-        cornerRadius = dp(14).toFloat()
+        cornerRadius = dp(8).toFloat()
         setStroke(dp(1), Color.parseColor("#1FFFFFFF"))
     }
 
     /**
-     * The same pill with two separately tappable halves: "Undo" and "My wording", which swaps the
+     * The same pill with two separately tappable halves: the undo arrow and "My wording", which swaps the
      * AI's polished text for the user's own words. Shown when "Polish my wording" is on.
      */
     private fun showSwapBubble(plain: String, entryId: Long?, durationMs: Long) {
@@ -692,7 +709,12 @@ class OfflineFlowService : AccessibilityService() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = bubbleBackground()
-            addView(part("↶  Undo", "Undo the dictation") { undoInsert() })
+            addView(ImageView(this@OfflineFlowService).apply {
+                setImageDrawable(this@OfflineFlowService.getDrawable(R.drawable.ic_undo)?.mutate()?.apply { setTint(BUBBLE_TEXT) })
+                setPadding(dp(12), dp(10), dp(10), dp(10))
+                contentDescription = "Undo the dictation"
+                setOnClickListener { removeBubble(); undoInsert() }
+            }, LinearLayout.LayoutParams(dp(42), dp(40)))
             addView(View(this@OfflineFlowService).apply {
                 setBackgroundColor(Color.parseColor("#26FFFFFF"))
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -897,7 +919,7 @@ class OfflineFlowService : AccessibilityService() {
         } else if (lastInsert != null) {
             // plain: the AI polished the wording, so offer the user's own words next to Undo.
             if (plain != null) showSwapBubble(plain, entryId, 7000)
-            else showBubble("↶  Undo", 5000) { undoInsert() }
+            else showUndoChip(5000)
         }
     }
 
@@ -939,7 +961,7 @@ class OfflineFlowService : AccessibilityService() {
             is LastInsert.Rewritten -> swapRewritten(li, plain)
             null -> false
         }
-        if (ok) showBubble("↶  Undo", 5000) { undoInsert() }
+        if (ok) showUndoChip(5000)
         else toast("Couldn't swap it here. Your wording is in history.")
     }
 
