@@ -49,9 +49,10 @@ class OfflineFlowService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: OfflineFlowService? = null
-        private val COLOR_IDLE = Color.parseColor("#8C3A3A3C")   // grey, semi-transparent
-        private val COLOR_ACTIVE = Color.parseColor("#E61C1C1E") // dark while listening/transcribing
-        private const val IDLE_ALPHA = 0.75f
+        private const val IDLE_ALPHA = 0.76f // resting opacity: just enough to recede; colour (not transparency) does most of the quieting
+        private val IDLE_BAR = Color.parseColor("#AEAEB2") // soft grey bars while resting
+        private val BUBBLE_TEXT = Color.parseColor("#E2E2E6") // undo / copied hint text, a touch softer than white
+        private const val PAD_DP = 8        // margin inside the window around the square, for its shadow
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
         private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
@@ -73,7 +74,12 @@ class OfflineFlowService : AccessibilityService() {
     private var button: FrameLayout? = null
     private var bars: BarsView? = null
     private var cancelIcon: ImageView? = null
-    private var buttonBg: GradientDrawable? = null
+    // "Slide up to cancel" guide shown above the button while recording (square style only).
+    private var track: CancelTrackView? = null
+    private var trackParams: WindowManager.LayoutParams? = null
+    private var trackAttached = false
+    private val trackTravel get() = dp(96)          // how far the button slides to reach the X
+    private var buttonBg: ButtonDisc? = null
     private var params: WindowManager.LayoutParams? = null
     private var attached = false
     private var touching = false // don't snap the button back while a finger is on it
@@ -109,8 +115,17 @@ class OfflineFlowService : AccessibilityService() {
 
     private val recheck = Runnable { updateButton() }
 
-    private val sizePx get() = dp(48)
+    // The window is the button body plus a margin on every side (for the shadow).
+    private val winW get() = dp(2 * PAD_DP + 48)
+    private val winH get() = dp(2 * PAD_DP + 48)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /** The accent color with most of its saturation taken out (61% toward grey), for the resting button. */
+    private fun washed(c: Int): Int {
+        val grey = (0.3f * Color.red(c) + 0.59f * Color.green(c) + 0.11f * Color.blue(c))
+        fun mix(v: Int) = (v + (grey - v) * 0.61f).toInt().coerceIn(0, 255)
+        return Color.rgb(mix(Color.red(c)), mix(Color.green(c)), mix(Color.blue(c)))
+    }
 
     override fun onServiceConnected() {
         instance = this
@@ -151,13 +166,12 @@ class OfflineFlowService : AccessibilityService() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun buildButton() {
-        val bg = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(COLOR_IDLE)
-            setStroke(dp(1), Color.parseColor("#66FFFFFF")) // a light rim, so the grey button shows on dark apps too
-        }
+        val bg = ButtonDisc(dp(PAD_DP).toFloat(), dp(1).toFloat(), dp(14).toFloat())
         val b = BarsView(this).apply {
             level = { recorder.level }
+            // Resting: soft grey bars, the tall one a washed-out accent (full colour comes in when you use it).
+            barColor = IDLE_BAR
+            accentColor = washed(Prefs(this@OfflineFlowService).accent)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO // the frame speaks for it
         }
         // Shown over the dimmed bars while transcribing, when a tap cancels.
@@ -169,8 +183,8 @@ class OfflineFlowService : AccessibilityService() {
         val frame = FrameLayout(this).apply {
             background = bg
             alpha = IDLE_ALPHA
-            addView(b, FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER))
-            addView(x, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.CENTER))
+            addView(b, FrameLayout.LayoutParams(dp(64), dp(64), Gravity.CENTER))
+            addView(x, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
             // For screen readers: one labelled, clickable button. Their "activate" arrives as a
             // click rather than a touch, so it is routed to the same tap action (start / stop /
             // cancel, whatever the hold-to-talk setting, since a screen reader can't hold).
@@ -185,8 +199,40 @@ class OfflineFlowService : AccessibilityService() {
         bars = b
         cancelIcon = x
         buttonBg = bg
-        params = overlayParams(sizePx, sizePx)
+        track = CancelTrackView(this, dp(30).toFloat(), dp(14).toFloat()).apply {
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        params = overlayParams(winW, winH)
         buildDropZone()
+    }
+
+    /** Show the slide-to-cancel guide above the button (below it if the button is near the top). */
+    private fun showTrack() {
+        val t = track ?: return
+        val p = params ?: return
+        if (!attached) return
+        val h = trackTravel + dp(26) // room for the X at full size plus its shadow, so it never gets clipped
+        val centre = p.y + winH / 2
+        t.up = centre - h >= dp(24)
+        t.progress = 0f
+        val tp = trackParams ?: overlayParams(winW, h).also {
+            it.flags = it.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            trackParams = it
+        }
+        tp.width = winW; tp.height = h
+        tp.x = p.x
+        tp.y = if (t.up) centre - h else centre
+        try {
+            if (trackAttached) wm.updateViewLayout(t, tp)
+            else { t.alpha = 0f; wm.addView(t, tp); trackAttached = true }
+            t.animate().alpha(1f).setDuration(160).start()
+        } catch (_: Exception) {}
+    }
+
+    private fun hideTrack() {
+        if (!trackAttached) return
+        try { wm.removeView(track) } catch (_: Exception) {}
+        trackAttached = false
     }
 
     /** Red gradient with an X along the top edge. Fades in while you drag the button. */
@@ -218,7 +264,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private val zoneHeight get() = dp(150)
     /** The button counts as "in the zone" once its centre is inside the red area. */
-    private fun overZone(p: WindowManager.LayoutParams) = p.y + sizePx / 2 <= dp(110)
+    private fun overZone(p: WindowManager.LayoutParams) = p.y + winH / 2 <= dp(110)
 
     private fun showDropZone(show: Boolean) {
         dropZone?.animate()?.alpha(if (show) 1f else 0f)?.setDuration(140)?.start()
@@ -247,8 +293,8 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     /**
-     * Tap mode:  tap = start/stop, long-press = cancel, drag = move.
-     * Hold mode: hold = talk, release = finish, slide away then release = cancel,
+     * Tap mode:  tap = start/stop, long-press = cancel, drag = move; while recording, slide up to the X = cancel.
+     * Hold mode: hold = talk, release = finish, slide up to the X then release = cancel,
      *            move right away (before the hold kicks in) = drag.
      */
     private inner class DragTouch : View.OnTouchListener {
@@ -261,6 +307,8 @@ class OfflineFlowService : AccessibilityService() {
         private var longPressed = false
         private var holding = false   // hold-to-talk recording in progress
         private var inCancelZone = false
+        private var sliding = false   // square style, recording: sliding toward the cancel X
+        private var slideP = 0f
         private val longPress = Runnable {
             if (!dragging) {
                 longPressed = true
@@ -283,14 +331,35 @@ class OfflineFlowService : AccessibilityService() {
                     downX = e.rawX; downY = e.rawY
                     startX = p.x; startY = p.y
                     dragging = false; longPressed = false; holding = false; inCancelZone = false
+                    sliding = false; slideP = 0f
                     inDropZone = false
+                    v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90).start() // a small press-in
                     if (holdMode && state == State.IDLE) handler.postDelayed(holdStart, 220)
                     else handler.postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = e.rawX - downX
                     val dy = e.rawY - downY
-                    if (holding) {
+                    val canSlide = holding || state == State.RECORDING
+                    if (canSlide && (sliding || abs(dx) > slop || abs(dy) > slop)) {
+                        // Square style while recording: the button only moves along the guide toward
+                        // the X. Most of the way there and a release cancels.
+                        if (!sliding) {
+                            sliding = true
+                            handler.removeCallbacks(longPress)
+                            if (!trackAttached) showTrack()
+                        }
+                        val up = track?.up ?: true
+                        val toward = if (up) -dy else dy
+                        val pNew = (toward / trackTravel).coerceIn(0f, 1f)
+                        if ((pNew >= CancelTrackView.ARM) != (slideP >= CancelTrackView.ARM))
+                            Haptics.play(this@OfflineFlowService, Haptics.Kind.TICK)
+                        slideP = pNew
+                        track?.progress = pNew
+                        p.x = startX
+                        p.y = startY + ((if (up) -1 else 1) * pNew * trackTravel).toInt()
+                        try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                    } else if (holding) {
                         // Slide well away from the button to arm cancel; the button dims to show it.
                         val far = kotlin.math.hypot(dx, dy) > dp(90)
                         if (far != inCancelZone) {
@@ -307,10 +376,10 @@ class OfflineFlowService : AccessibilityService() {
                             if (state == State.IDLE) showDropZone(true)
                         }
                         if (dragging) {
-                            p.x = startX + dx.toInt()
-                            p.y = startY + dy.toInt()
                             // Only an idle button can be thrown away; mid-recording it stays put.
                             val canDismiss = state == State.IDLE
+                            p.x = startX + dx.toInt()
+                            p.y = startY + dy.toInt()
                             clamp(p, allowTop = canDismiss)
                             try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
                             if (canDismiss) updateDropHover(p)
@@ -322,6 +391,17 @@ class OfflineFlowService : AccessibilityService() {
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(holdStart)
                     when {
+                        sliding -> {
+                            // Back to where it started, then cancel or carry on.
+                            val armed = slideP >= CancelTrackView.ARM
+                            p.x = startX; p.y = startY
+                            try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                            track?.progress = 0f
+                            when {
+                                armed -> cancel()
+                                holding -> finishRecording()
+                            }
+                        }
                         holding -> { v.alpha = 1f; if (inCancelZone) cancel() else finishRecording() }
                         dragging -> {
                             if (inDropZone && state == State.IDLE) {
@@ -338,17 +418,25 @@ class OfflineFlowService : AccessibilityService() {
                         !longPressed -> onTap()
                     }
                     holding = false
+                    releasePress(v) // after the action, so a state change's animation reset can't leave it half-scaled
                 }
                 MotionEvent.ACTION_CANCEL -> {
                     touching = false
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(holdStart)
                     if (dragging) showDropZone(false)
+                    if (sliding) { p.x = startX; p.y = startY; try { wm.updateViewLayout(v, p) } catch (_: Exception) {}; track?.progress = 0f }
                     if (holding) finishRecording()
                     holding = false
+                    releasePress(v)
                 }
             }
             return true
+        }
+
+        private fun releasePress(v: View) {
+            v.animate().scaleX(1f).scaleY(1f).setDuration(180)
+                .setInterpolator(android.view.animation.OvershootInterpolator(2.2f)).start()
         }
     }
 
@@ -400,6 +488,7 @@ class OfflineFlowService : AccessibilityService() {
             // Appear invisibly, then fade in once the keyboard has finished sliding up.
             p.x = tx; p.y = ty
             button?.alpha = 0f
+            button?.scaleX = 1f; button?.scaleY = 1f // never come back mid-press
             try {
                 // The drop zone goes in first (invisible) so it sits underneath the button.
                 if (!zoneAttached) {
@@ -444,6 +533,7 @@ class OfflineFlowService : AccessibilityService() {
         val (tx, ty) = targetPosition()
         p.x = tx; p.y = ty
         try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
+        if (state == State.RECORDING) showTrack() // keep the cancel guide with the button
         val rest = if (state == State.IDLE) IDLE_ALPHA else 1f
         button?.animate()?.alpha(rest)?.setDuration(140)?.start()
     }
@@ -463,27 +553,29 @@ class OfflineFlowService : AccessibilityService() {
     private fun targetPosition(): Pair<Int, Int> {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
-        val x = sp.safeInt("x", dm.widthPixels - sizePx - dp(12)).coerceIn(0, dm.widthPixels - sizePx)
-        val y = (anchor() - sizePx - sp.safeInt("above", dp(8))).coerceIn(dp(24), dm.heightPixels - sizePx)
+        // Defaults leave the same visible gap as before; the window now carries PAD_DP of margin of its own.
+        val x = sp.safeInt("x", dm.widthPixels - winW - dp(12 - PAD_DP)).coerceIn(0, dm.widthPixels - winW)
+        val y = (anchor() - winH - sp.safeInt("above", dp(8 - PAD_DP))).coerceIn(dp(24), dm.heightPixels - winH)
         return x to y
     }
 
     private fun clamp(p: WindowManager.LayoutParams, allowTop: Boolean = false) {
         val dm = resources.displayMetrics
-        p.x = p.x.coerceIn(0, dm.widthPixels - sizePx)
-        p.y = p.y.coerceIn(if (allowTop) 0 else dp(24), dm.heightPixels - sizePx)
+        p.x = p.x.coerceIn(0, dm.widthPixels - winW)
+        p.y = p.y.coerceIn(if (allowTop) 0 else dp(24), dm.heightPixels - winH)
     }
 
     private fun savePosition(p: WindowManager.LayoutParams) {
         val e = overlayPrefs().edit().putInt("x", p.x)
         // The height is measured from the keyboard. With no keyboard on screen (dragged while
         // recording after it closed) keep the old height, or the button turns up somewhere odd next time.
-        keyboardTop()?.let { e.putInt("above", it - sizePx - p.y) }
+        keyboardTop()?.let { e.putInt("above", it - winH - p.y) }
         e.apply()
     }
 
     private fun detach() {
         touching = false
+        hideTrack()
         if (attached) {
             try { wm.removeView(button) } catch (_: Exception) {}
             attached = false
@@ -518,12 +610,7 @@ class OfflineFlowService : AccessibilityService() {
         cancelIcon?.visibility = View.GONE
         bars?.alpha = 1f
         if (s == State.WORKING) handler.postDelayed(showCancel, CANCEL_SHOW_MS)
-        buttonBg?.setColor(
-            when (s) {
-                State.IDLE -> COLOR_IDLE
-                State.STARTING, State.RECORDING, State.WORKING -> COLOR_ACTIVE
-            }
-        )
+        buttonBg?.active = s != State.IDLE
         button?.animate()?.cancel()
         button?.alpha = if (s == State.IDLE) IDLE_ALPHA else 1f
         // Keep the screen awake from tap to finished text, so it can't sleep mid-sentence.
@@ -532,8 +619,21 @@ class OfflineFlowService : AccessibilityService() {
             p.flags = if (s == State.IDLE) p.flags and keepOn.inv() else p.flags or keepOn
             if (attached) try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
         }
-        // Listening: bars in the accent color (amber by default). Transcribing: white ripple.
-        bars?.barColor = if (s == State.STARTING || s == State.RECORDING) Prefs(this).accent else Color.WHITE
+        // Resting: soft grey with a washed-out accent bar, so it sits quietly but is still easy to find.
+        // Listening: bars in full accent color (amber by default). Transcribing: white ripple.
+        val accent = Prefs(this).accent
+        val listening = s == State.STARTING || s == State.RECORDING
+        bars?.barColor = when {
+            listening -> accent
+            s == State.WORKING -> Color.WHITE
+            else -> IDLE_BAR
+        }
+        bars?.accentColor = when (s) {
+            State.WORKING -> null
+            State.IDLE -> washed(accent)
+            else -> accent
+        }
+        if (s == State.RECORDING) showTrack() else hideTrack()
         bars?.mode = when (s) {
             State.IDLE, State.STARTING -> BarsView.Mode.IDLE
             State.RECORDING -> BarsView.Mode.LISTENING
@@ -543,45 +643,65 @@ class OfflineFlowService : AccessibilityService() {
 
     // ---------- result bubble ("hint") ----------
 
-    /** Small dark pill near the button (e.g. "Copied ✓ …" or "Undo"). */
+    /** Small graphite label near the button (e.g. "Copied ✓ …"). */
     private fun showBubble(label: String, durationMs: Long = 4000, onClick: () -> Unit) {
         removeBubble()
         val dm = resources.displayMetrics
         val tv = TextView(this).apply {
             text = label.replace('\n', ' ')
-            setTextColor(Color.WHITE)
-            textSize = 14f
+            setTextColor(BUBBLE_TEXT)
+            textSize = 13f
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
             background = bubbleBackground()
-            elevation = dp(6).toFloat()
             maxWidth = dm.widthPixels - dp(24)
             setOnClickListener { removeBubble(); onClick() }
         }
         attachBubble(tv, durationMs)
     }
 
-    private fun bubbleBackground() = GradientDrawable().apply {
-        cornerRadius = dp(18).toFloat()
-        setColor(Color.parseColor("#F21C1C1E"))
+    /** Same graphite as the resting button, slightly rounded corners and a faint rim, so it reads as part of it. */
+    /** Just the undo arrow in a small graphite rounded square. */
+    private fun showUndoChip(durationMs: Long) {
+        removeBubble()
+        val iv = ImageView(this).apply {
+            setImageDrawable(this@OfflineFlowService.getDrawable(R.drawable.ic_undo)?.mutate()?.apply { setTint(BUBBLE_TEXT) })
+            background = bubbleBackground()
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            contentDescription = "Undo the dictation"
+            setOnClickListener { removeBubble(); undoInsert() }
+        }
+        attachBubble(FrameLayout(this).apply {
+            // 36dp to look at; the frame keeps it a comfortable size to tap
+            addView(iv, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+            minimumWidth = winW; minimumHeight = dp(44) // as wide as the button window, so it sits centred over it
+        }, durationMs)
+    }
+
+    private fun bubbleBackground() = GradientDrawable(
+        GradientDrawable.Orientation.TOP_BOTTOM,
+        intArrayOf(Color.parseColor("#E6505055"), Color.parseColor("#E6333336"))
+    ).apply {
+        cornerRadius = dp(8).toFloat()
+        setStroke(dp(1), Color.parseColor("#1FFFFFFF"))
     }
 
     /**
-     * The same pill with two separately tappable halves: "Undo" and "My wording", which swaps the
+     * The same pill with two separately tappable halves: the undo arrow and "My wording", which swaps the
      * AI's polished text for the user's own words. Shown when "Polish my wording" is on.
      */
     private fun showSwapBubble(plain: String, entryId: Long?, durationMs: Long) {
         removeBubble()
         fun part(label: String, desc: String, onClick: () -> Unit) = TextView(this).apply {
             text = label
-            setTextColor(Color.WHITE)
-            textSize = 14f
+            setTextColor(BUBBLE_TEXT)
+            textSize = 13f
             maxLines = 1
             gravity = Gravity.CENTER
-            minHeight = dp(48)
-            minWidth = dp(64)
-            setPadding(dp(16), dp(10), dp(16), dp(10))
+            minHeight = dp(40)
+            minWidth = dp(56)
+            setPadding(dp(12), dp(6), dp(12), dp(6))
             contentDescription = desc
             setOnClickListener { removeBubble(); onClick() }
         }
@@ -589,12 +709,16 @@ class OfflineFlowService : AccessibilityService() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             background = bubbleBackground()
-            elevation = dp(6).toFloat()
-            addView(part("↶  Undo", "Undo the dictation") { undoInsert() })
+            addView(ImageView(this@OfflineFlowService).apply {
+                setImageDrawable(this@OfflineFlowService.getDrawable(R.drawable.ic_undo)?.mutate()?.apply { setTint(BUBBLE_TEXT) })
+                setPadding(dp(12), dp(10), dp(10), dp(10))
+                contentDescription = "Undo the dictation"
+                setOnClickListener { removeBubble(); undoInsert() }
+            }, LinearLayout.LayoutParams(dp(42), dp(40)))
             addView(View(this@OfflineFlowService).apply {
-                setBackgroundColor(Color.parseColor("#40FFFFFF"))
+                setBackgroundColor(Color.parseColor("#26FFFFFF"))
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }, LinearLayout.LayoutParams(dp(1), dp(22)))
+            }, LinearLayout.LayoutParams(dp(1), dp(18)))
             addView(part("My wording", "Use my own wording") { useMyWording(plain, entryId) })
         }
         attachBubble(pill, durationMs)
@@ -605,14 +729,14 @@ class OfflineFlowService : AccessibilityService() {
         val bp = params ?: return
         val p = overlayParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT)
         // Line the bubble up with whichever side of the screen the button is on.
-        if (bp.x + sizePx / 2 > dm.widthPixels / 2) {
+        if (bp.x + winW / 2 > dm.widthPixels / 2) {
             p.gravity = Gravity.TOP or Gravity.END
-            p.x = dm.widthPixels - bp.x - sizePx
+            p.x = dm.widthPixels - bp.x - winW
         } else {
             p.gravity = Gravity.TOP or Gravity.START
             p.x = bp.x
         }
-        p.y = if (bp.y > dp(90)) bp.y - dp(56) else bp.y + sizePx + dp(8)
+        p.y = if (bp.y > dp(90)) bp.y - dp(56) else bp.y + winH + dp(8)
         try {
             wm.addView(view, p)
             bubble = view
@@ -795,7 +919,7 @@ class OfflineFlowService : AccessibilityService() {
         } else if (lastInsert != null) {
             // plain: the AI polished the wording, so offer the user's own words next to Undo.
             if (plain != null) showSwapBubble(plain, entryId, 7000)
-            else showBubble("↶  Undo", 5000) { undoInsert() }
+            else showUndoChip(5000)
         }
     }
 
@@ -837,7 +961,7 @@ class OfflineFlowService : AccessibilityService() {
             is LastInsert.Rewritten -> swapRewritten(li, plain)
             null -> false
         }
-        if (ok) showBubble("↶  Undo", 5000) { undoInsert() }
+        if (ok) showUndoChip(5000)
         else toast("Couldn't swap it here. Your wording is in history.")
     }
 
