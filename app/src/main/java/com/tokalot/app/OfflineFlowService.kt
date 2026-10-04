@@ -309,8 +309,6 @@ class OfflineFlowService : AccessibilityService() {
         dismissed = true
         showDropZone(false)
         Haptics.play(this, Haptics.Kind.CANCEL)
-        handler.removeCallbacks(settle)
-        settling = false
         detach()
     }
 
@@ -498,8 +496,6 @@ class OfflineFlowService : AccessibilityService() {
                 handler.removeCallbacks(recheck)
                 handler.postDelayed(recheck, 300)
             }
-            handler.removeCallbacks(settle)
-            settling = false
             detach()
             return
         }
@@ -507,7 +503,6 @@ class OfflineFlowService : AccessibilityService() {
         val p = params ?: return
         val (tx, ty) = targetPosition()
         if (!attached) {
-            // Appear invisibly, then fade in once the keyboard has finished sliding up.
             p.x = tx; p.y = ty
             button?.alpha = 0f
             button?.scaleX = 1f; button?.scaleY = 1f // never come back mid-press
@@ -524,40 +519,15 @@ class OfflineFlowService : AccessibilityService() {
                 wm.addView(button, params)
                 attached = true
             } catch (_: Exception) { return }
-            beginSettle()
+            button?.animate()?.alpha(if (state == State.IDLE) IDLE_ALPHA else 1f)?.setDuration(140)?.start()
             return
         }
-        if (abs(tx - p.x) > dp(12) || abs(ty - p.y) > dp(12)) {
-            // The keyboard is moving (closing, opening or resizing). Don't chase its
-            // animation; fade out and reappear where it comes to rest.
-            if (state == State.IDLE) button?.animate()?.alpha(0f)?.setDuration(90)?.start()
-            beginSettle()
+        if (tx != p.x || ty != p.y) {
+            // The spot only changes when the screen turns or the position was reset in the app.
+            p.x = tx; p.y = ty
+            try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
+            if (state == State.RECORDING) showTrack() // keep the cancel guide with the button
         }
-    }
-
-    private var settling = false
-    private val settle = Runnable { settling = false; applySettled() }
-
-    private fun beginSettle() {
-        settling = true
-        handler.removeCallbacks(settle)
-        handler.postDelayed(settle, 180)
-    }
-
-    /** Called once the keyboard has stopped moving: final position, then fade back in. */
-    private fun applySettled() {
-        if (state == State.IDLE && (dismissed || keyboardTop() == null || focusedEditable() == null)) {
-            updateButton() // hides it, and looks again shortly if the keyboard is up but the field wasn't found
-            return
-        }
-        val p = params ?: return
-        if (!attached || touching) return
-        val (tx, ty) = targetPosition()
-        p.x = tx; p.y = ty
-        try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
-        if (state == State.RECORDING) showTrack() // keep the cancel guide with the button
-        val rest = if (state == State.IDLE) IDLE_ALPHA else 1f
-        button?.animate()?.alpha(rest)?.setDuration(140)?.start()
     }
 
     private fun keyboardTop(): Int? {
@@ -567,17 +537,25 @@ class OfflineFlowService : AccessibilityService() {
         return if (r.height() > 0) r.top else null
     }
 
-    // Position is stored as x plus "height above the keyboard", so the button rides with
-    // the keyboard wherever you drag it. Without a keyboard, the screen bottom is the anchor.
-    private fun anchor() = keyboardTop() ?: resources.displayMetrics.heightPixels
+    // The button is pinned: it sits at the screen position it was last dragged to and never follows the
+    // keyboard. Upright and sideways each keep their own spot ("px"/"py" and "lx"/"ly").
     private fun overlayPrefs() = getSharedPreferences("overlay", Context.MODE_PRIVATE)
+    private fun sideways() = resources.displayMetrics.let { it.widthPixels > it.heightPixels }
 
     private fun targetPosition(): Pair<Int, Int> {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
-        // Defaults leave the same visible gap as before; the window now carries PAD_DP of margin of its own.
-        val x = sp.safeInt("x", dm.widthPixels - winW - dp(12 - PAD_DP)).coerceIn(0, dm.widthPixels - winW)
-        val y = (anchor() - winH - sp.safeInt("above", dp(8 - PAD_DP))).coerceIn(dp(24), dm.heightPixels - winH)
+        val (kx, ky) = if (sideways()) "lx" to "ly" else "px" to "py"
+        val maxX = dm.widthPixels - winW
+        val maxY = dm.heightPixels - winH
+        if (sp.contains(kx) && sp.contains(ky))
+            return sp.safeInt(kx, 0).coerceIn(0, maxX) to sp.safeInt(ky, 0).coerceIn(dp(24), maxY)
+        // No spot yet: the right edge, just above the keyboard. Measured once, then kept. ("x" and "above"
+        // are where earlier versions kept a position that moved with the keyboard.)
+        val x = sp.safeInt("x", dm.widthPixels - winW - dp(12 - PAD_DP)).coerceIn(0, maxX)
+        val top = keyboardTop() ?: return x to (dm.heightPixels * 55 / 100).coerceIn(dp(24), maxY)
+        val y = (top - winH - sp.safeInt("above", dp(8 - PAD_DP))).coerceIn(dp(24), maxY)
+        sp.edit().putInt(kx, x).putInt(ky, y).apply()
         return x to y
     }
 
@@ -588,11 +566,8 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun savePosition(p: WindowManager.LayoutParams) {
-        val e = overlayPrefs().edit().putInt("x", p.x)
-        // The height is measured from the keyboard. With no keyboard on screen (dragged while
-        // recording after it closed) keep the old height, or the button turns up somewhere odd next time.
-        keyboardTop()?.let { e.putInt("above", it - winH - p.y) }
-        e.apply()
+        val (kx, ky) = if (sideways()) "lx" to "ly" else "px" to "py"
+        overlayPrefs().edit().putInt(kx, p.x).putInt(ky, p.y).apply()
     }
 
     private fun detach() {

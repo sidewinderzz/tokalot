@@ -394,11 +394,11 @@ class SettingsScreen(private val a: MainActivity) {
         })
         col.addView(rc)
         col.addView(row(
-            text("The floating button sits where you last dragged it, measured from the top of the keyboard.", 14f, C.SUB).apply {
+            text("The floating button stays where you last dragged it.", 14f, C.SUB).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             },
             pill("Reset position") {
-                getSharedPreferences("overlay", android.content.Context.MODE_PRIVATE).edit().remove("x").remove("above").apply()
+                getSharedPreferences("overlay", android.content.Context.MODE_PRIVATE).edit().clear().apply()
                 android.widget.Toast.makeText(this, "Back at the right edge, just above the keyboard", android.widget.Toast.LENGTH_SHORT).show()
             }
         ), lp().margins(this, t = 8, l = 4))
