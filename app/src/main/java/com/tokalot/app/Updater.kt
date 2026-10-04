@@ -17,7 +17,7 @@ import java.net.URL
  */
 object Updater {
     const val REPO = "sidewinderzz/tokalot"
-    private const val CHECK_EVERY_MS = 6 * 3600 * 1000L
+    private const val CHECK_EVERY_MS = 3 * 3600 * 1000L
 
     class Release(val version: String, val apkUrl: String, val size: Long, val notes: String)
 
@@ -38,6 +38,18 @@ object Updater {
         if (!isNewer(v, currentVersion(ctx))) return null
         if (s.getString("dismissed", null) == v) return null
         return Release(v, s.getString("url", "")!!, s.getLong("size", 0), s.getString("notes", "")!!)
+    }
+
+    /**
+     * The version to tell the user about, once: a newer release that hasn't been announced or dismissed yet.
+     * The floating button's service uses this, since most days the app itself is never opened.
+     */
+    fun announceOnce(ctx: Context): String? {
+        val r = available(ctx) ?: return null
+        val s = sp(ctx)
+        if (s.getString("announced", null) == r.version) return null
+        s.edit().putString("announced", r.version).apply()
+        return r.version
     }
 
     fun dismiss(ctx: Context, version: String) = sp(ctx).edit().putString("dismissed", version).apply()

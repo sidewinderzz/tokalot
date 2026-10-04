@@ -142,10 +142,32 @@ class OfflineFlowService : AccessibilityService() {
         ) {
             dismissed = false
         }
+        lookForUpdate()
         lookAgain = 6
         // Debounce: keyboard open/close fires a burst of window events.
         handler.removeCallbacks(recheck)
         handler.postDelayed(recheck, 150)
+    }
+
+    private var lastUpdateLook = 0L
+
+    /**
+     * Looks for a new version now and then while the keyboard is in use (the check itself is limited to once
+     * every few hours) and says so once per version. Without this, an update only showed up after opening the app.
+     */
+    private fun lookForUpdate() {
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateLook < 30 * 60 * 1000L) return
+        lastUpdateLook = now
+        val app = applicationContext
+        Thread {
+            runCatching {
+                Updater.check(app)
+                Updater.announceOnce(app)?.let { v ->
+                    handler.post { toast("Tokalot $v is available. Open Tokalot to update.") }
+                }
+            }
+        }.start()
     }
 
     override fun onInterrupt() {}
