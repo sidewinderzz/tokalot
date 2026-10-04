@@ -30,6 +30,9 @@ public static class Updater
 
     public static string? AvailableVersion => pending?.TargetFullRelease.Version.ToString();
 
+    /** The last Check() couldn't reach GitHub (as opposed to finding nothing new). */
+    public static bool LastCheckFailed { get; private set; }
+
     /** Checks GitHub for a newer desktop release. Returns the version, or null. */
     public static async Task<string?> Check()
     {
@@ -37,9 +40,14 @@ public static class Updater
         try
         {
             pending = await Manager.CheckForUpdatesAsync();
+            LastCheckFailed = false;
             return AvailableVersion;
         }
-        catch { return null; }
+        catch
+        {
+            LastCheckFailed = true;
+            return null;
+        }
     }
 
     /** Downloads the pending update, then restarts into it. */

@@ -153,6 +153,8 @@ public sealed class App : Application
         window.Show();
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();
+        // Opening the window is a good moment to look for an update, if it hasn't been checked lately.
+        if (UpdateVersion == null && DateTime.UtcNow - lastUpdateCheck > TimeSpan.FromMinutes(20)) _ = CheckForUpdates();
     }
 
     /** Re-applies the theme (light/dark) by rebuilding the window. */
@@ -227,21 +229,27 @@ public sealed class App : Application
     public string? UpdateVersion { get; private set; }
     public int? UpdateProgress { get; private set; }
 
+    private DateTime lastUpdateCheck;
+
     private async Task CheckForUpdatesLoop()
     {
-        await Task.Delay(TimeSpan.FromSeconds(8));
+        await Task.Delay(TimeSpan.FromSeconds(20));
         while (true)
         {
             await CheckForUpdates();
-            await Task.Delay(TimeSpan.FromHours(6));
+            // Just after sign-in the network often isn't up yet: try again soon rather than in hours.
+            await Task.Delay(Updater.LastCheckFailed ? TimeSpan.FromMinutes(3) : TimeSpan.FromHours(3));
         }
     }
 
     public async Task<string?> CheckForUpdates()
     {
+        lastUpdateCheck = DateTime.UtcNow;
         var v = await Updater.Check();
         if (v != null && v != UpdateVersion)
         {
+            // Tokalot usually sits in the tray with no window open, so say it there too (once per version).
+            tray?.ShowBalloonTip(8000, "Tokalot " + v + " is available", "Open Tokalot and choose Update.", System.Windows.Forms.ToolTipIcon.Info);
             UpdateVersion = v;
             if (updateItem != null) { updateItem.Text = $"Update to {v}"; updateItem.Visible = true; }
             Refresh();
@@ -323,7 +331,32 @@ public sealed class Controller : IDisposable
         hook.Escape += () => ui.BeginInvoke(() => { if (state == State.Processing) CancelWork(); else Cancel(true); });
         tick = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal, (_, _) => Tick(), ui);
         tick.Stop();
+        App.Log("Shortcut listener " + (hook.Installed ? "installed" : "FAILED to install"));
+
+        // Windows can drop the shortcut listener without saying so (most often while the PC is busy just after
+        // sign-in, or across sleep and the lock screen). Put it back regularly, and whenever the PC wakes or unlocks.
+        var rehookLogged = false;
+        void Rehook()
+        {
+            if (state != State.Idle) return;
+            hook.Refresh();
+            if (rehookLogged) return;
+            rehookLogged = true; // once is enough to show in the log that refreshing works on this PC
+            Task.Delay(1000).ContinueWith(_ => App.Log("Shortcut listener refreshed: " + (hook.Installed ? "installed" : "FAILED")));
+        }
+        rehook = new DispatcherTimer(TimeSpan.FromSeconds(45), DispatcherPriority.Background, (_, _) => Rehook(), ui);
+        Microsoft.Win32.SystemEvents.SessionSwitch += (_, e) =>
+        {
+            if (e.Reason is Microsoft.Win32.SessionSwitchReason.SessionUnlock or Microsoft.Win32.SessionSwitchReason.SessionLogon)
+                ui.BeginInvoke(Rehook);
+        };
+        Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) =>
+        {
+            if (e.Mode == Microsoft.Win32.PowerModes.Resume) ui.BeginInvoke(Rehook);
+        };
     }
+
+    private readonly DispatcherTimer rehook;
 
     public bool HotkeyWorks => hook.Installed;
 

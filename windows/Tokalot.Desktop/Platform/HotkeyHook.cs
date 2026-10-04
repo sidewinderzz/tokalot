@@ -59,19 +59,67 @@ public sealed class HotkeyHook : IDisposable
     public HotkeyHook()
     {
         proc = Callback;
+        WarmUp();
         using var ready = new System.Threading.ManualResetEventSlim();
         var t = new System.Threading.Thread(() =>
         {
             threadId = GetCurrentThreadId();
-            using (var cur = Process.GetCurrentProcess())
-                hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(cur.MainModule?.ModuleName), 0);
+            Install();
             ready.Set();
-            while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0) { }
+            while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
+            {
+                if (msg.message != WM_REHOOK) continue;
+                // Take the hook out and put it back. If Windows had dropped it, this is what brings it back.
+                if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
+                ctrl = win = active = comboUsed = false;
+                Install();
+            }
             if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
             hook = IntPtr.Zero;
-        }) { IsBackground = true, Name = "Tokalot hotkey", Priority = System.Threading.ThreadPriority.AboveNormal };
+        }) { IsBackground = true, Name = "Tokalot hotkey", Priority = System.Threading.ThreadPriority.Highest };
         t.Start();
         ready.Wait(3000);
+    }
+
+    private const uint WM_REHOOK = 0x8001; // WM_APP + 1
+
+    private void Install()
+    {
+        using var cur = Process.GetCurrentProcess();
+        hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(cur.MainModule?.ModuleName), 0);
+    }
+
+    /**
+     * Windows stops calling a low-level hook that answers too slowly, without telling the app, and never
+     * says whether a hook is still in place. Right after sign-in the PC is busy, and the first key press
+     * also had to compile this code, which is the likeliest moment to be too slow. So the code is compiled
+     * up front here, and Refresh() re-installs the hook now and then in case it was dropped anyway.
+     */
+    private void WarmUp()
+    {
+        try
+        {
+            const System.Reflection.BindingFlags f = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static;
+            foreach (var name in new[] { nameof(Callback), nameof(SendMaskedWinUp), nameof(Held) })
+                if (typeof(HotkeyHook).GetMethod(name, f) is { } m)
+                    System.Runtime.CompilerServices.RuntimeHelpers.PrepareMethod(m.MethodHandle);
+            _ = ComboHeld; // loads the key-state call
+            var size = Marshal.SizeOf<KBDLLHOOKSTRUCT>();
+            var p = Marshal.AllocHGlobal(size);
+            try
+            {
+                Marshal.Copy(new byte[size], 0, p, size);
+                _ = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(p);
+            }
+            finally { Marshal.FreeHGlobal(p); }
+        }
+        catch { }
+    }
+
+    /** Re-installs the hook. Call only while nothing is being recorded and the shortcut isn't held. */
+    public void Refresh()
+    {
+        if (threadId != 0 && !ComboHeld) PostThreadMessage(threadId, WM_REHOOK, IntPtr.Zero, IntPtr.Zero);
     }
 
     public bool Installed => hook != IntPtr.Zero;
