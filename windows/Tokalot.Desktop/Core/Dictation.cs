@@ -41,16 +41,9 @@ public sealed class Dictation : IDisposable
         });
     }
 
-    /** sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence. */
-    /** ct: the user cancelled. entryId: re-transcribing a saved recording, so update that history entry instead of adding one. */
-    public async Task<Outcome> Process(float[] samples, ActiveApp? app, bool sparse = false, CancellationToken ct = default, long? entryId = null)
+    /** The dictionary as a hint for the speech model. Its prompt holds ~224 tokens; this stays well under that (newest words win). */
+    public static string Hint(Settings s)
     {
-        var s = Settings.Current;
-        var warnings = new List<string>();
-        var seconds = samples.Length / (double)Recorder.SampleRate;
-        var category = AppDetect.Categorize(app, s);
-
-        // Whisper's prompt holds ~224 tokens; keep the hint well under that (newest words win).
         var hint = new StringBuilder();
         foreach (var w in Enumerable.Reverse(s.Words))
         {
@@ -58,15 +51,41 @@ public sealed class Dictation : IDisposable
             if (hint.Length > 0) hint.Append(", ");
             hint.Append(w);
         }
+        return hint.ToString();
+    }
+
+    /** How the last dictation's wait was spent, for the log. */
+    public static string LastTiming { get; private set; } = "";
+
+    /** sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence. */
+    /** ct: the user cancelled. entryId: re-transcribing a saved recording, so update that history entry instead of adding one. */
+    /** live: the pieces already sent off while the user was talking, if any. */
+    public async Task<Outcome> Process(float[] samples, ActiveApp? app, bool sparse = false, CancellationToken ct = default, long? entryId = null,
+        LiveStt? live = null)
+    {
+        var s = Settings.Current;
+        var warnings = new List<string>();
+        var seconds = samples.Length / (double)Recorder.SampleRate;
+        var category = AppDetect.Categorize(app, s);
+        var hint = Hint(s);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        LastTiming = "";
 
         // 1. Speech to text
         string? raw = null;
         var usedLocal = false;
-        foreach (var c in SttOrder(s))
+        var inPieces = false;
+        if (live != null)
+        {
+            raw = await live.Finish(samples, ct);
+            inPieces = raw != null;
+            if (inPieces) Usage.RecordStt(s.Stt, seconds);
+        }
+        foreach (var c in raw != null ? Array.Empty<SttOption>() : SttOrder(s))
         {
             try
             {
-                raw = await CloudStt.Transcribe(c.BaseUrl, s.Key(c.Service), s.SttModel(c), samples, hint.ToString(), !s.AutoLanguage, ct);
+                raw = await CloudStt.Transcribe(c.BaseUrl, s.Key(c.Service), s.SttModel(c), samples, hint, !s.AutoLanguage, ct);
                 Usage.RecordStt(c.Id, seconds);
                 if (c.Id != s.Stt) warnings.Add($"{s.SttOption.Label} unavailable, used {c.Label}");
                 break;
@@ -83,9 +102,10 @@ public sealed class Dictation : IDisposable
                 throw new InvalidOperationException(warnings.Count == 0
                     ? "No speech model: add a Groq key or download the offline model in Settings"
                     : warnings[0] + ", and the offline model isn't downloaded");
-            raw = await local.Transcribe(samples, hint.ToString(), !s.AutoLanguage, ct);
+            raw = await local.Transcribe(samples, hint, !s.AutoLanguage, ct);
             usedLocal = true;
         }
+        var sttMs = clock.ElapsedMilliseconds;
         var baseText = TextTools.StripNoise(raw);
         if (baseText.Length == 0 || (sparse && TextTools.IsPhantom(baseText))) return new Outcome("", warnings.FirstOrDefault(), null);
 
@@ -98,7 +118,7 @@ public sealed class Dictation : IDisposable
         {
             try
             {
-                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label, ct);
+                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label, ct, inPieces);
                 Usage.RecordLlm(c.Id, r.InTokens, r.OutTokens);
                 cleaned = true;
                 final = TextTools.Restore(r.Text, map);
@@ -114,6 +134,9 @@ public sealed class Dictation : IDisposable
         if (!cleaned && cleanupErr != null) warnings.Add(cleanupErr);
         final ??= TextTools.Restore(TextTools.BasicClean(protectedText), map);
 
+        LastTiming = $"{seconds:0.0} s of audio: speech to text {sttMs} ms" +
+            (inPieces ? $" ({live!.Pieces} pieces, all but the last sent while talking)" : usedLocal ? " (on this PC)" : "") +
+            $", cleanup {clock.ElapsedMilliseconds - sttMs} ms";
         ct.ThrowIfCancellationRequested();
         var now = entryId ?? DateTimeOffset.Now.ToUnixTimeMilliseconds();
         // A history file that's briefly locked must not stop the text from being pasted.

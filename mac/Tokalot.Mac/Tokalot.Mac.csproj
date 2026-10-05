@@ -10,7 +10,7 @@
     <RootNamespace>Tokalot.Desktop</RootNamespace>
     <Product>Tokalot</Product>
     <Company>sidewinderzz</Company>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <!-- Apple silicon unless another one is asked for (-r osx-x64 for Intel Macs; -r linux-x64 runs the screenshot mode on Linux). -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">osx-arm64</RuntimeIdentifier>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
@@ -39,7 +39,9 @@
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Catalog.cs" Link="Shared\Core\Catalog.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Cleanup.cs" Link="Shared\Core\Cleanup.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Dictation.cs" Link="Shared\Core\Dictation.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Flac.cs" Link="Shared\Core\Flac.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\History.cs" Link="Shared\Core\History.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\LiveStt.cs" Link="Shared\Core\LiveStt.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\LocalWhisper.cs" Link="Shared\Core\LocalWhisper.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Net.cs" Link="Shared\Core\Net.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Sync.cs" Link="Shared\Core\Sync.cs" />

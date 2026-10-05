@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -39,6 +40,7 @@ internal static class Shots
         MenuShot(dir);
         AudioRoundTrip(dir);
         SyncChecks(dir);
+        LiveChecks(dir);
     }
 
     /** The sync merge cases the Android app is tested against too; writes PASS/FAIL per case. */
@@ -72,6 +74,86 @@ internal static class Shots
     }
 
     /** Saves two seconds of tone and reads it back, the path "Transcribe" on a failed entry relies on. */
+    /** Transcribing while talking, and the compressed upload, against a stand-in speech service on this PC. */
+    private static void LiveChecks(string dir)
+    {
+        var lines = new List<string>();
+        void Check(string name, bool ok) => lines.Add((ok ? "PASS " : "FAIL ") + name);
+        const int R = Recorder.SampleRate;
+
+        Check("cut: not while talking", LiveStt.NextCut(0, R * 20, R * 20 - 100) == -1);
+        Check("cut: not before 10 s have been said", LiveStt.NextCut(0, R * 9, R * 8) == -1);
+        Check("cut: in the middle of the pause", LiveStt.NextCut(0, R * 13, R * 12) == R * 12 + R / 4);
+        Check("cut: counts from the last cut", LiveStt.NextCut(R * 12, R * 20, R * 19) == -1 && LiveStt.NextCut(R * 12, R * 24, R * 23) == R * 23 + R / 4);
+
+        // A 40 s "recording": tone where there is speech, silence in the pauses and for the last 6 s.
+        var audio = new float[R * 40];
+        bool Speaking(int i) => i < R * 34 && (i / R) % 12 < 11; // an 11 s phrase, then a 1 s pause
+        for (int i = 0; i < audio.Length; i++) audio[i] = Speaking(i) ? (float)Math.Sin(i * 0.2) * 0.2f : 0f;
+        float[] Take(int from, int to) => audio[from..Math.Min(to, audio.Length)];
+        int LastVoice(int count) { int i = count - 1; while (i > 0 && !Speaking(i)) i--; return i + 1; }
+
+        var got = new List<int>();
+        async System.Threading.Tasks.Task<string> Fake(float[] piece, System.Threading.CancellationToken ct)
+        {
+            await System.Threading.Tasks.Task.Delay(30, ct);
+            lock (got) got.Add(piece.Length);
+            return "Piece of " + (piece.Length / (double)R).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " seconds.";
+        }
+        var live = new LiveStt(Settings.Current, Fake);
+        for (int count = R / 4; count <= audio.Length; count += R / 4) live.Feed(count, LastVoice(count), Take);
+        Check("pieces sent while talking: " + live.Pieces, live.Pieces == 3);
+        var text = System.Threading.Tasks.Task.Run(() => live.Finish(audio, default)).GetAwaiter().GetResult();
+        Check("joined in order, silent tail skipped: " + text, text == "Piece of 11.25 seconds. Piece of 12.00 seconds. Piece of 11.00 seconds.");
+
+        var failing = new LiveStt(Settings.Current, (p, ct) => p.Length > R * 11.5 ? throw new IOException("down") : System.Threading.Tasks.Task.FromResult("ok"));
+        for (int count = R / 4; count <= audio.Length; count += R / 4) failing.Feed(count, LastVoice(count), Take);
+        Check("a failed piece falls back to the whole recording", System.Threading.Tasks.Task.Run(() => failing.Finish(audio, default)).GetAwaiter().GetResult() == null);
+        Check("nothing sent early in a short recording", System.Threading.Tasks.Task.Run(() => new LiveStt(Settings.Current, Fake).Finish(audio[..(R * 5)], default)).GetAwaiter().GetResult() == null);
+
+        // The upload itself: FLAC first, WAV when the service turns FLAC down.
+        var seen = new List<string>();
+        using var http = new System.Net.HttpListener();
+        var port = 47000 + Environment.ProcessId % 1000;
+        http.Prefixes.Add($"http://127.0.0.1:{port}/");
+        http.Start();
+        bool refuseFlac = false;
+        _ = System.Threading.Tasks.Task.Run(async () =>
+        {
+            while (http.IsListening)
+            {
+                System.Net.HttpListenerContext c;
+                try { c = await http.GetContextAsync(); } catch { return; }
+                using var ms = new MemoryStream();
+                await c.Request.InputStream.CopyToAsync(ms);
+                var body = System.Text.Encoding.Latin1.GetString(ms.ToArray());
+                var flac = body.Contains("audio.flac");
+                var magic = body.Contains("\r\n\r\nfLaC") ? "fLaC" : body.Contains("\r\n\r\nRIFF") ? "RIFF" : "?";
+                lock (seen) seen.Add((flac ? "flac" : "wav") + ":" + magic + ":" + ms.Length);
+                var reply = flac && refuseFlac ? "{\"error\":{\"message\":\"unsupported file\"}}" : "{\"text\":\"hello there\"}";
+                c.Response.StatusCode = flac && refuseFlac ? 400 : 200;
+                var bytes = System.Text.Encoding.UTF8.GetBytes(reply);
+                await c.Response.OutputStream.WriteAsync(bytes);
+                c.Response.Close();
+            }
+        });
+        var url = $"http://127.0.0.1:{port}/v1";
+        var clip = audio[..(R * 12)];
+        var t1 = System.Threading.Tasks.Task.Run(() => CloudStt.Transcribe(url, "test", "m", clip, "", true)).GetAwaiter().GetResult();
+        Check("upload goes as FLAC: " + string.Join(" ", seen), t1 == "hello there" && seen.Count == 1 && seen[0].StartsWith("flac:fLaC"));
+        var flacBytes = seen.Count > 0 ? seen[0].Split(':')[2] : "?";
+        refuseFlac = true;
+        seen.Clear();
+        var t2 = System.Threading.Tasks.Task.Run(() => CloudStt.Transcribe(url, "test", "m", clip, "", true)).GetAwaiter().GetResult();
+        Check("FLAC refused: sent again as WAV: " + string.Join(" ", seen), t2 == "hello there" && seen.Count == 2 && seen[1].StartsWith("wav:RIFF"));
+        seen.Clear();
+        _ = System.Threading.Tasks.Task.Run(() => CloudStt.Transcribe(url, "test", "m", clip, "", true)).GetAwaiter().GetResult();
+        Check("and WAV straight away after that: " + string.Join(" ", seen), seen.Count == 1 && seen[0].StartsWith("wav"));
+        lines.Add($"12 s clip: FLAC request {flacBytes} bytes, WAV request {(seen.Count > 0 ? seen[0].Split(':')[2] : "?")} bytes (a pure tone; real speech compresses less)");
+        http.Stop();
+        File.WriteAllLines(Path.Combine(dir, "live-checks.txt"), lines);
+    }
+
     private static void AudioRoundTrip(string dir)
     {
         var probe = new float[Recorder.SampleRate * 2];

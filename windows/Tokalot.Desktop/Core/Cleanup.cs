@@ -62,12 +62,13 @@ public static class Cleanup
 
     /** Throws on any failure so the caller can fall back. */
     public static async Task<Result> Run(Settings s, CleanupOption choice, string text, bool hasSnippets,
-        AppCategory category, string? appLabel, CancellationToken ct = default)
+        AppCategory category, string? appLabel, CancellationToken ct = default, bool pieces = false)
     {
         var timeoutMs = 15000 + text.Length * 5; // long dictations take longer to rewrite
         var key = s.Key(choice.Service);
         var model = s.CleanupModel(choice);
         var system = SystemPrompt(s.StyleFor(category), category, appLabel, s.Words, s.CustomInstructions, hasSnippets, s.AutoLanguage, s.Polish);
+        if (pieces) system = system.TrimEnd() + "\n\n" + LiveStt.CleanupNote;
         var user = "<transcript>\n" + text + "\n</transcript>";
         long inTok = 0, outTok = 0;
         string output;

@@ -10,7 +10,7 @@ class Recorder {
     private var thread: Thread? = null
     @Volatile private var running = false
     private val chunks = ArrayList<ShortArray>()
-    private var total = 0
+    @Volatile private var total = 0
 
     companion object {
         const val SAMPLE_RATE = 16000
@@ -94,14 +94,35 @@ class Recorder {
                         lastVoiceSample = total + n
                     }
                     if (total < MAX_SAMPLES) {
-                        chunks.add(buf.copyOf(n))
-                        total += n
+                        synchronized(chunks) {
+                            chunks.add(buf.copyOf(n))
+                            total += n
+                        }
                         if (total >= MAX_SAMPLES) onFull?.invoke()
                     }
                 } else if (n < 0) break
             }
         }.also { it.start() }
         return true
+    }
+
+    /** How much has been recorded so far, in samples. */
+    val count: Int get() = total
+
+    /** A copy of part of the recording so far, as floats in [-1, 1], while it carries on. */
+    fun snapshot(from: Int, to: Int): FloatArray = synchronized(chunks) {
+        val end = minOf(to, total)
+        if (from < 0 || from >= end) return FloatArray(0)
+        val out = FloatArray(end - from)
+        var pos = 0 // index of the current chunk's first sample
+        for (c in chunks) {
+            if (pos >= end) break
+            if (pos + c.size > from) {
+                for (i in maxOf(from, pos) until minOf(end, pos + c.size)) out[i - from] = c[i - pos] / 32768f
+            }
+            pos += c.size
+        }
+        out
     }
 
     /** Stops the mic immediately and returns the audio as floats in [-1, 1]. */
@@ -115,11 +136,13 @@ class Recorder {
             it.release()
         }
         record = null
-        val out = FloatArray(total)
-        var i = 0
-        for (c in chunks) for (s in c) out[i++] = s / 32768f
-        chunks.clear()
-        total = 0
-        return out
+        return synchronized(chunks) {
+            val out = FloatArray(total)
+            var i = 0
+            for (c in chunks) for (s in c) out[i++] = s / 32768f
+            chunks.clear()
+            total = 0
+            out
+        }
     }
 }

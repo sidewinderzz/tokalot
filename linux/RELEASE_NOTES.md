@@ -1,5 +1,11 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.4.0
+
+- Long dictations come back faster: each time you pause, what you've said so far is sent to the speech service in the background, so when you stop only the last few seconds are left to transcribe. Nothing is pasted until you finish. Needs a cloud speech service and AI cleanup; Settings › Recording › "Transcribe while I talk" turns it off.
+- Smaller uploads: audio is sent as FLAC (the same sound in about half the data) instead of WAV.
+- The log (`Tokalot --diagnose` says where it is) now records how long speech-to-text and cleanup took for each dictation.
+
 ## New in 0.3.1
 
 - No more freezes under fractional scaling: on X11, when a monitor is set to 125%, 150% and so on, the window now draws with the processor instead of the graphics card, which could stall it for many seconds. Start with `--gpu` to keep the graphics card anyway.

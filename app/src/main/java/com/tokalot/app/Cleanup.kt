@@ -64,11 +64,12 @@ object Cleanup {
     fun run(
         prefs: Prefs, choice: CleanupChoice, text: String, hasSnippets: Boolean,
         category: AppCategory = AppCategory.OTHER, appLabel: String? = null, call: Call? = null,
-        polish: Boolean = prefs.polish,
+        polish: Boolean = prefs.polish, pieces: Boolean = false,
     ): Result {
         val key = prefs.key(choice.service)
         val model = prefs.cleanupModel(choice)
         val system = systemPrompt(prefs.styleFor(category), category, appLabel, prefs.words, prefs.customInstructions, hasSnippets, prefs.autoLanguage, polish)
+            .let { if (pieces) it.trimEnd() + "\n\n" + LiveStt.CLEANUP_NOTE else it }
         val user = "<transcript>\n$text\n</transcript>"
 
         var inTok = 0L

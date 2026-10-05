@@ -102,24 +102,45 @@ public static class CloudStt
         // Long recordings are bigger uploads and take longer to transcribe: allow half their length on top.
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(25000 + samples.Length / (Recorder.SampleRate / 500));
+        try
+        {
+            // FLAC is the same audio in about half the bytes. A service that won't take it gets WAV.
+            if (flacRefused != baseUrl)
+            {
+                var (code, body) = await Send(baseUrl, key, model, Flac.Encode(samples), "audio/flac", "audio.flac", prompt, english, cts.Token);
+                if (code is >= 200 and < 300) return JsonNode.Parse(body)?["text"]?.ToString() ?? "";
+                if (code != 400 && code != 415) throw new IOException($"HTTP {code}: {Net.ErrorMessage(body)}");
+                flacRefused = baseUrl;
+            }
+            var (c, text) = await Send(baseUrl, key, model, Net.Wav(samples), "audio/wav", "audio.wav", prompt, english, cts.Token);
+            if (c is < 200 or >= 300)
+            {
+                // The WAV was refused too, so the format wasn't the problem: try FLAC again next time.
+                if (flacRefused == baseUrl && c is 400 or 415) flacRefused = null;
+                throw new IOException($"HTTP {c}: {Net.ErrorMessage(text)}");
+            }
+            return JsonNode.Parse(text)?["text"]?.ToString() ?? "";
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Timed out"); }
+    }
+
+    private static volatile string? flacRefused; // the service that last turned FLAC down
+
+    private static async Task<(int Code, string Body)> Send(string baseUrl, string key, string model, byte[] audio, string mime, string name,
+        string prompt, bool english, CancellationToken ct)
+    {
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent(model), "model");
         if (english) form.Add(new StringContent("en"), "language"); // omitted = the model detects it
         form.Add(new StringContent("json"), "response_format");
         if (!string.IsNullOrWhiteSpace(prompt)) form.Add(new StringContent(prompt), "prompt");
-        var file = new ByteArrayContent(Net.Wav(samples));
-        file.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-        form.Add(file, "file", "audio.wav");
+        var file = new ByteArrayContent(audio);
+        file.Headers.ContentType = new MediaTypeHeaderValue(mime);
+        form.Add(file, "file", name);
 
         using var req = new HttpRequestMessage(HttpMethod.Post, baseUrl + "/audio/transcriptions") { Content = form };
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-        try
-        {
-            using var res = await Net.Http.SendAsync(req, cts.Token);
-            var text = await res.Content.ReadAsStringAsync(cts.Token);
-            if (!res.IsSuccessStatusCode) throw new IOException($"HTTP {(int)res.StatusCode}: {Net.ErrorMessage(text)}");
-            return JsonNode.Parse(text)?["text"]?.ToString() ?? "";
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Timed out"); }
+        using var res = await Net.Http.SendAsync(req, ct);
+        return ((int)res.StatusCode, await res.Content.ReadAsStringAsync(ct));
     }
 }

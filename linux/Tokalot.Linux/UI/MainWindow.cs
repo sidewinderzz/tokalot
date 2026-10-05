@@ -974,6 +974,8 @@ public sealed partial class MainWindow : Window
                 Ui.Text($"Hold {Host.Shortcut} while you talk and let go to paste. Or tap {Host.Shortcut} once for hands-free, then tap again to finish. Esc cancels.", 13.5, C.Sub)), 20, 13, 18, 13),
             Ui.SettingRow("Auto-stop after 30 s of silence", "Hands-free mode only. Long pauses to think are fine.",
                 Ui.Switch(S.AutoStop, v => { S.AutoStop = v; S.Save(); })),
+            Ui.SettingRow("Transcribe while I talk", "In a long dictation, what you've said so far is sent to the speech service each time you pause, so the wait at the end stays short. Nothing appears until you finish. Needs a cloud speech service and AI cleanup.",
+                Ui.Switch(S.LiveStt, v => { S.LiveStt = v; S.Save(); })),
             Ui.SettingRow("Hands-free reminder", "A short note above the indicator when hands-free starts. Its X turns this off.",
                 Ui.Switch(!S.HideHandsFreeHint, v => { S.HideHandsFreeHint = !v; S.Save(); })),
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",

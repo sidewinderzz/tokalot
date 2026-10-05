@@ -41,7 +41,7 @@ class Dictation(context: Context) {
     }
 
     /** One process() call: what cancel() and the deadline act on. */
-    private inner class Job(val onDone: (Outcome?, String?) -> Unit) {
+    private inner class Job(val live: LiveStt?, val onDone: (Outcome?, String?) -> Unit) {
         val call = Call()
         /** CANCELLED or TIMED_OUT once the job was stopped from outside. */
         @Volatile var halted: String? = null
@@ -53,6 +53,7 @@ class Dictation(context: Context) {
             if (delivered) return
             halted = reason
             call.cancel()
+            live?.cancel()
             if (localRunning) WhisperBridge.setAbort(true)
             deliver(null, reason)
         }
@@ -87,6 +88,30 @@ class Dictation(context: Context) {
         }.start()
     }
 
+    /**
+     * For a recording that is about to start: sends it for transcription in pieces while the user talks
+     * (see [LiveStt]). Null when that's switched off, or there is no cloud speech service or no AI cleanup
+     * (cleanup is what smooths the joins between pieces).
+     */
+    fun newLive(): LiveStt? {
+        val prefs = Prefs(app)
+        if (!prefs.liveStt || !prefs.cloudSttReady || !prefs.cleanupReady) return null
+        val c = prefs.stt
+        val hint = hint(prefs)
+        return LiveStt { piece, call ->
+            sendPcm(prefs, c, piece, hint, piece.size * 1000L / Recorder.SAMPLE_RATE, call)
+        }
+    }
+
+    /** The dictionary as a hint for the speech model. Its prompt holds ~224 tokens; this stays well under that (newest words win). */
+    private fun hint(prefs: Prefs) = buildString {
+        for (w in prefs.words.asReversed()) {
+            if (length + w.length + 2 > 600) break
+            if (isNotEmpty()) append(", ")
+            append(w)
+        }
+    }
+
     /** Main thread. Aborts the dictation in progress, if any; its onDone gets [CANCELLED]. */
     fun cancel() { current?.halt(CANCELLED) }
 
@@ -94,13 +119,14 @@ class Dictation(context: Context) {
      * Call on the main thread. onDone runs on the main thread with either an outcome or an error message.
      * sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence.
      * retry: the failed or cancelled history entry these samples belong to; the result replaces it.
+     * live: the pieces of this recording already sent off while the user was talking, if any.
      */
     fun process(
-        samples: FloatArray, appPkg: String?, sparse: Boolean = false, retry: Entry? = null,
+        samples: FloatArray, appPkg: String?, sparse: Boolean = false, retry: Entry? = null, live: LiveStt? = null,
         onDone: (Outcome?, String?) -> Unit,
     ) {
         main.removeCallbacks(unload)
-        val job = Job(onDone)
+        val job = Job(live, onDone)
         current = job
         val audioMs = samples.size * 1000L / Recorder.SAMPLE_RATE
         main.postDelayed(job.deadline, Timeouts.deadlineMs(audioMs))
@@ -158,27 +184,29 @@ class Dictation(context: Context) {
         val category = AppContext.categorize(appPkg, prefs)
         val appLabel = appPkg?.let { AppContext.label(app, it) }
         val warnings = ArrayList<String>()
-        // Whisper's prompt holds ~224 tokens; keep the hint well under that (newest words win).
         // The cleanup model still gets the full dictionary.
-        val hint = buildString {
-            for (w in prefs.words.asReversed()) {
-                if (length + w.length + 2 > 600) break
-                if (isNotEmpty()) append(", ")
-                append(w)
-            }
-        }
+        val hint = hint(prefs)
         val seconds = samples.size.toDouble() / Recorder.SAMPLE_RATE
         val audioMs = (seconds * 1000).toLong()
+        val began = System.nanoTime()
 
-        // 1. Speech to text: chosen cloud provider, then any other cloud provider with a key, then on-device.
-        val order = sttOrder(prefs)
+        // 1. Speech to text: the pieces sent while talking, if there are any; otherwise the chosen cloud
+        // provider, then any other cloud provider with a key, then on-device.
+        var raw: String? = null
+        val live = job.live
+        if (live != null) {
+            raw = live.finish(samples)
+            call.check()
+            if (raw != null) Usage.recordStt(app, prefs.stt, seconds)
+        }
+        val inPieces = raw != null
+        val order = if (inPieces) emptyList() else sttOrder(prefs)
         // Long recordings go up as the small AAC file (about a tenth of the WAV) so a slow
         // connection doesn't time out. Short ones stay WAV: encoding first would only add delay.
         var m4a = AudioStore.file(app, id).takeIf { it.exists() }
         if (m4a == null && order.isNotEmpty() && seconds >= COMPRESS_FROM_S && AudioStore.save(app, id, samples)) {
             m4a = AudioStore.file(app, id)
         }
-        var raw: String? = null
         var usedLocal = false
         for (c in order) {
             call.check()
@@ -202,6 +230,7 @@ class Dictation(context: Context) {
             raw = transcribeLocal(job, samples, hint)
             usedLocal = true
         }
+        val sttMs = (System.nanoTime() - began) / 1_000_000
         val base = TextTools.stripNoise(raw)
         if (base.isBlank() || (sparse && TextTools.isPhantom(base))) return Outcome("", warnings.firstOrNull())
 
@@ -215,7 +244,7 @@ class Dictation(context: Context) {
         for (c in cleanupOrder(prefs)) {
             call.check()
             try {
-                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish)
+                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces)
                 Usage.recordLlm(app, c, r.inTokens, r.outTokens)
                 cleaned = true
                 finalText = TextTools.restore(r.text, map)
@@ -231,6 +260,14 @@ class Dictation(context: Context) {
         if (finalText == null) finalText = basic
         val plain = basic.takeIf { polish && cleaned && it != finalText }
 
+        runCatching {
+            android.util.Log.i(
+                "Tokalot", "Dictation: %.1f s of audio: speech to text %d ms%s, cleanup %d ms".format(
+                    seconds, sttMs, if (inPieces) " (${live?.pieceCount} pieces, all but the last sent while talking)" else if (usedLocal) " (on device)" else "",
+                    (System.nanoTime() - began) / 1_000_000 - sttMs
+                )
+            )
+        }
         call.check() // cancelled at the last moment: don't save a transcript nobody will get
         History.put(app, Entry(id, retry?.time ?: id, finalText, base, audioMs, cleaned, appPkg ?: ""))
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
@@ -253,8 +290,33 @@ class Dictation(context: Context) {
                 if (e.code != 400 && e.code != 415) throw e
             }
         }
-        return send(Upload.wav(samples))
+        return sendPcm(prefs, c, samples, hint, audioMs, call)
     }
+
+    /** Sends the audio as FLAC (the same sound in about half the bytes); a provider that won't take it gets WAV. */
+    private fun sendPcm(prefs: Prefs, c: SttChoice, samples: FloatArray, hint: String, audioMs: Long, call: Call): String {
+        fun send(audio: Upload) = CloudStt.transcribe(
+            c.baseUrl, prefs.key(c.service), prefs.sttModel(c), audio, hint,
+            english = !prefs.autoLanguage, audioMs = audioMs, call = call
+        )
+        if (flacRefused != c.baseUrl) {
+            try {
+                return send(Upload.flac(samples))
+            } catch (e: HttpException) {
+                if (e.code != 400 && e.code != 415) throw e
+                flacRefused = c.baseUrl
+            }
+        }
+        try {
+            return send(Upload.wav(samples))
+        } catch (e: HttpException) {
+            // The WAV was refused too, so the format wasn't the problem: try FLAC again next time.
+            if (e.code == 400 || e.code == 415) flacRefused = null
+            throw e
+        }
+    }
+
+    @Volatile private var flacRefused: String? = null // the service that last turned FLAC down
 
     /** Chosen cloud STT first (if keyed), then the other keyed cloud options. Empty = on-device. */
     private fun sttOrder(p: Prefs): List<SttChoice> {

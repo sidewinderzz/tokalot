@@ -90,6 +90,22 @@ public sealed class Recorder : IDisposable
         }
     }
 
+    /** How much has been recorded so far, in samples. */
+    public int Count { get { lock (gate) return samples.Count; } }
+
+    /** A copy of part of the recording so far, as floats in [-1, 1], while it carries on. */
+    public float[] Snapshot(int from, int to)
+    {
+        lock (gate)
+        {
+            to = Math.Min(to, samples.Count);
+            if (from < 0 || from >= to) return Array.Empty<float>();
+            var outp = new float[to - from];
+            for (int i = 0; i < outp.Length; i++) outp[i] = samples[from + i] / 32768f;
+            return outp;
+        }
+    }
+
     /** Stops the mic and returns the audio as floats in [-1, 1]. */
     public float[] Stop()
     {

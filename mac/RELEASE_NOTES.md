@@ -2,6 +2,13 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.2.0
+
+- Long dictations come back faster: each time you pause, what you've said so far is sent to the speech service in the background, so when you stop only the last few seconds are left to transcribe. Nothing is pasted until you finish. Needs a cloud speech service and AI cleanup; Settings › Recording › "Transcribe while I talk" turns it off.
+- Smaller uploads: audio is sent as FLAC (the same sound in about half the data) instead of WAV.
+
+Like the rest of the Mac app, these have not been tried by a person on a real Mac.
+
 ## What has been checked, and how
 
 Every build is run on one of GitHub's macOS 15 machines (Apple silicon, a virtual machine with no person at it) before it is published. This release passed all of these there:

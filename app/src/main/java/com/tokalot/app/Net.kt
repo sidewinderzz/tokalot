@@ -138,6 +138,12 @@ class Upload(val fileName: String, val mime: String, val length: Long, val write
             return Upload("audio.wav", "audio/wav", bytes.size.toLong()) { it.write(bytes) }
         }
 
+        /** Lossless, about half the size of the WAV, and quick enough to make for any length. */
+        fun flac(samples: FloatArray): Upload {
+            val bytes = Flac.encode(samples)
+            return Upload("audio.flac", "audio/flac", bytes.size.toLong()) { it.write(bytes) }
+        }
+
         /** The AAC file AudioStore writes: about a tenth of the WAV, so long recordings upload far faster. */
         fun m4a(file: File): Upload {
             val bytes = file.readBytes() // ~3 KB per second of audio; read once so the length can't drift

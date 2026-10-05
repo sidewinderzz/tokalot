@@ -79,6 +79,8 @@ public sealed class Settings
     public List<string> Words { get; set; } = new();
     public List<Snippet> Snippets { get; set; } = new();
     public bool AutoStop { get; set; } = true;
+    /** Send long dictations to the speech service in pieces while they are still being spoken. */
+    public bool LiveStt { get; set; } = true;
     public bool AutoLanguage { get; set; }
     public bool Sounds { get; set; } = true;
     public string Theme { get; set; } = "system";

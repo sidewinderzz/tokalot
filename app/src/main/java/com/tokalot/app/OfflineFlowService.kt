@@ -176,6 +176,7 @@ class OfflineFlowService : AccessibilityService() {
         instance = null
         handler.removeCallbacksAndMessages(null)
         button?.animate()?.cancel()
+        takeLive()?.cancel()
         if (recorder.isRecording) recorder.stop()
         RecordingService.stop(this)
         detach()
@@ -807,6 +808,8 @@ class OfflineFlowService : AccessibilityService() {
                     }
                 }
                 if (recorder.start()) {
+                    live = dictation.newLive()
+                    if (live != null) handler.postDelayed(liveFeed, 300)
                     setState(State.RECORDING)
                     Haptics.play(this, Haptics.Kind.START)
                     when {
@@ -833,10 +836,28 @@ class OfflineFlowService : AccessibilityService() {
         handler.postDelayed({ begin() }, 1000) // safety net if the service never reports back
     }
 
+    /** Long dictations: the part said so far is sent for transcription at each pause (see [LiveStt]). */
+    private var live: LiveStt? = null
+    private val liveFeed = object : Runnable {
+        override fun run() {
+            val l = live ?: return
+            if (state != State.RECORDING) return
+            l.feed(recorder.count, recorder.lastVoiceSample, recorder::snapshot)
+            handler.postDelayed(this, 300)
+        }
+    }
+
+    /** Takes the pieces sent so far out of the recording loop; the caller either uses them or cancels them. */
+    private fun takeLive(): LiveStt? {
+        handler.removeCallbacks(liveFeed)
+        return live.also { live = null }
+    }
+
     private fun cancel() {
         if (state == State.STARTING) { pendingCancel = true; return }
         if (state == State.WORKING) { dictation.cancel(); return }
         if (state != State.RECORDING) return
+        takeLive()?.cancel()
         handler.removeCallbacks(silenceCheck)
         Haptics.play(this, Haptics.Kind.CANCEL)
         recorder.stop()
@@ -847,6 +868,7 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun stopAndTranscribe() {
+        val early = takeLive()
         handler.removeCallbacks(silenceCheck)
         Haptics.play(this, Haptics.Kind.STOP)
         val voiceEnd = recorder.lastVoiceSample
@@ -860,6 +882,7 @@ class OfflineFlowService : AccessibilityService() {
         }
         RecordingService.stop(this)
         if (samples.size < MIN_SAMPLES) {
+            early?.cancel()
             setState(State.IDLE)
             updateButton()
             return
@@ -867,6 +890,7 @@ class OfflineFlowService : AccessibilityService() {
         // Android feeds silence (not an error) when it blocks background mic access.
         val peak = samples.maxOf { abs(it) }
         if (peak < 0.0005f) {
+            early?.cancel()
             setState(State.IDLE)
             Haptics.play(this, Haptics.Kind.ERROR)
             toast("The mic only picked up silence. Android may have blocked it.")
@@ -876,6 +900,7 @@ class OfflineFlowService : AccessibilityService() {
         // A quick tap with nothing said: Whisper turns room noise into "Thank you." (300 ms of sound = speech).
         val heard = speech >= Recorder.SAMPLE_RATE * 3 / 10
         if (!heard && samples.size < Recorder.SAMPLE_RATE * 5 / 2) {
+            early?.cancel()
             setState(State.IDLE)
             toast("Didn't catch anything")
             updateButton()
@@ -883,7 +908,7 @@ class OfflineFlowService : AccessibilityService() {
         }
         setState(State.WORKING)
         workingSince = SystemClock.elapsedRealtime()
-        dictation.process(samples, targetApp, sparse = !heard) { outcome, err ->
+        dictation.process(samples, targetApp, sparse = !heard, live = early) { outcome, err ->
             setState(State.IDLE)
             when {
                 // Nothing is typed; the recording is in the app's history with a Transcribe button.

@@ -384,6 +384,10 @@ class SettingsScreen(private val a: MainActivity) {
             prefs.autoStop = it
         })
         rc.addView(divider())
+        rc.addView(switchRow("Transcribe while I talk", "In a long dictation, what you've said so far is sent to the speech service each time you pause, so the wait at the end stays short. Nothing is typed until you finish. Needs a cloud speech service and AI cleanup.", prefs.liveStt) {
+            prefs.liveStt = it
+        })
+        rc.addView(divider())
         rc.addView(switchRow("Haptics", "A small buzz when recording starts, stops, finishes or fails.", prefs.haptics) {
             prefs.haptics = it
             if (it) Haptics.play(this, Haptics.Kind.DONE)

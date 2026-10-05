@@ -120,6 +120,7 @@ public sealed class Controller : IDisposable
         pressedAt = DateTime.UtcNow;
         hook.Listening = true;
         dictation.WarmUp();
+        live = LiveStt.Usable(Settings.Current) ? new LiveStt(Settings.Current) : null;
         Sounds.Play(Sounds.Kind.Start);
         indicator.SetMode(IndicatorView.Mode.Listening);
         tick.Start();
@@ -157,6 +158,7 @@ public sealed class Controller : IDisposable
     {
         if (state != State.Recording) { tick.Stop(); return; }
         var s = Settings.Current;
+        live?.Feed(recorder); // long dictations: send what's been said so far at each pause
         // In hold mode, ask the keyboards what is really held, in case a key-up never arrived.
         if (!handsFree) hook.Poll();
         if (recorder.Full)
@@ -171,11 +173,15 @@ public sealed class Controller : IDisposable
             Finish();
     }
 
+    private LiveStt? live; // pieces of the current recording already sent for transcription
+
     /** Stops recording without transcribing. */
     public void Cancel(bool audible)
     {
         if (state != State.Recording) return;
         var samples = recorder.Stop();
+        live?.Cancel();
+        live = null;
         Reset();
         app = FoundApp();
         indicator.SetMode(IndicatorView.Mode.Idle);
@@ -363,10 +369,13 @@ public sealed class Controller : IDisposable
         Sounds.Play(Sounds.Kind.Stop);
         indicator.SetMode(IndicatorView.Mode.Working);
         var target = app;
+        var early = live;
+        live = null;
         var ct = StartWork(samples.Length);
         try
         {
-            var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct));
+            var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early));
+            if (Dictation.LastTiming.Length > 0) App.Log("Dictation: " + Dictation.LastTiming);
             hook.Listening = false;
             var pasted = TextInjector.Result.Pasted;
             if (outcome.Text.Length > 0)

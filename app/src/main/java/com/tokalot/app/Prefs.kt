@@ -362,6 +362,11 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("haptics", true)
         set(v) = sp.edit().putBoolean("haptics", v).apply()
 
+    /** Send long dictations to the speech service in pieces while they are still being spoken. */
+    var liveStt: Boolean
+        get() = sp.safeBoolean("live_stt", true)
+        set(v) = sp.edit().putBoolean("live_stt", v).apply()
+
     /** Stop automatically after 30 s of silence (tap mode only). */
     var autoStop: Boolean
         get() = sp.safeBoolean("autostop", true)
