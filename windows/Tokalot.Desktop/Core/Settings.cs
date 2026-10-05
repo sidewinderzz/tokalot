@@ -71,6 +71,10 @@ public sealed class Settings
     public bool HideShortcutTip { get; set; }
     /** The "Hands-free · Ctrl+Win to finish" reminder above the indicator was closed. */
     public bool HideHandsFreeHint { get; set; }
+    /** Learn names and terms from the user's corrections after a dictation (see Learn). Off unless switched on. */
+    public bool LearnWords { get; set; }
+    /** The dictionary words that were learned rather than typed in, so the Dictionary page can mark them. */
+    public List<string> LearnedWords { get; set; } = new();
     /** Optional sync: the shared file's path on this PC ("" = off), and whether this PC puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }

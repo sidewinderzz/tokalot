@@ -304,6 +304,7 @@ public sealed class Controller : IDisposable
     private readonly Recorder recorder = new();
     private readonly Dictation dictation = new();
     private readonly Pill pill;               // short messages, shown next to the indicator
+    private readonly Learner learner;         // learns names from corrections, when that's switched on
     private readonly IndicatorWindow indicator;
     private readonly DispatcherTimer tick;
     private State state = State.Idle;
@@ -322,6 +323,16 @@ public sealed class Controller : IDisposable
     {
         this.ui = ui;
         pill = new Pill(() => 0);
+        learner = new Learner(ui);
+        learner.Learned += word =>
+        {
+            pill.HintNear($"Learned “{word}” · click to undo", indicator.Bounds, indicator.Dock, 6000, () =>
+            {
+                Learner.Forget(word);
+                App.Current.RefreshAfterDictation();
+            });
+            App.Current.RefreshAfterDictation();
+        };
         indicator = new IndicatorWindow(() => recorder.Level);
         indicator.Clicked += OnClicked;
         hook = new HotkeyHook();
@@ -396,6 +407,7 @@ public sealed class Controller : IDisposable
 
     private bool Begin(bool handsFreeMode)
     {
+        learner.Stop(learn: true); // a correction made before this dictation still counts
         app = AppDetect.Detect();
         recorder.CueSamples = Settings.Current.Sounds ? Recorder.SampleRate * 6 / 10 : 0;
         if (!recorder.Start())
@@ -491,6 +503,7 @@ public sealed class Controller : IDisposable
         var id = plainEntry;
         plainText = null;
         if (text == null) return;
+        learner.Stop(learn: false);
         state = State.Processing; // no new recording while keys are being sent
         try
         {
@@ -648,6 +661,7 @@ public sealed class Controller : IDisposable
             {
                 await TextInjector.Paste(outcome.Text);
                 Sounds.Play(Sounds.Kind.Done);
+                learner.Watch(outcome.Text);
             }
             indicator.SetMode(IndicatorView.Mode.Idle);
             plainText = outcome.Plain;

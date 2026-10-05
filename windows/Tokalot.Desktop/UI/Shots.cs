@@ -41,6 +41,7 @@ internal static class Shots
         AudioRoundTrip(dir);
         SyncChecks(dir);
         LiveChecks(dir);
+        LearnChecks(dir);
     }
 
     /** The sync merge cases the Android app is tested against too; writes PASS/FAIL per case. */
@@ -152,6 +153,37 @@ internal static class Shots
         lines.Add($"12 s clip: FLAC request {flacBytes} bytes, WAV request {(seen.Count > 0 ? seen[0].Split(':')[2] : "?")} bytes (a pure tone; real speech compresses less)");
         http.Stop();
         File.WriteAllLines(Path.Combine(dir, "live-checks.txt"), lines);
+    }
+
+    /** Learning words from corrections: the rule cases the Android app is tested against too. */
+    private static void LearnChecks(string dir)
+    {
+        var lines = new List<string>();
+        void Check(string name, bool ok) => lines.Add((ok ? "PASS " : "FAIL ") + name);
+        var none = Array.Empty<string>();
+        const string typed = "I talked to Kaitlin about the get hub repo on Tuesday.";
+        string? L(string field, string[]? known = null) => Learn.Look(typed, field, known ?? none).Word;
+
+        Check("a respelled name is learned", L("I talked to Caitlyn about the get hub repo on Tuesday.") == "Caitlyn");
+        Check("with other text around it", L("Earlier text. I talked to Caitlyn about the get hub repo on Tuesday. And more after.") == "Caitlyn");
+        Check("possessive dropped", L("I talked to Caitlyn's about the get hub repo on Tuesday.") == "Caitlyn");
+        Check("untouched text teaches nothing", L(typed) == null && Learn.Look(typed, "before " + typed + " after", none).Found);
+        Check("rewritten text teaches nothing", L("I spoke with Caitlyn about the repo.") == null);
+        Check("sent (box empty) is 'gone'", !Learn.Look(typed, "", none).Found);
+        Check("too short to recognise", !Learn.Look("Hi Kaitlin", "Hi Caitlyn", none).Found);
+        Check("lower-case respelling not learned", L("I talked to Kaitlin about the git hub repo on Tuesday.") == null);
+        Check("a different word not learned", L("I spoke to Kaitlin about the get hub repo on Tuesday.") == null);
+        Check("only a capital not learned", L("I talked to Kaitlin about The get hub repo on Tuesday.") == null);
+        Check("another day not learned", L("I talked to Kaitlin about the get hub repo on Thursday.") == null);
+        Check("a different person not learned", L("I talked to Robert about the get hub repo on Tuesday.") == null);
+        Check("capital at the start of a sentence not learned", L("We talked to Kaitlin about the get hub repo on Tuesday.") == null);
+        Check("GitHub, iPhone, K8s, NASA are", Learn.Worth("github", "GitHub", false, none) && Learn.Worth("iphone", "iPhone", true, none)
+            && Learn.Worth("kates", "K8s", false, none) && Learn.Worth("nasa's", "NASA", false, none));
+        Check("STOP and Apple are not", !Learn.Worth("stop", "STOP", false, none) && !Learn.Worth("apple", "Apple", false, none));
+        Check("already known is skipped", L("I talked to Caitlyn about the get hub repo on Tuesday.", new[] { "caitlyn" }) == null);
+        Check("edit distance", Learn.Distance("same", "same") == 0 && Learn.Distance("kaitlin", "caitlyn") == 2 && Learn.Distance("kitten", "sitting") == 3);
+
+        File.WriteAllLines(Path.Combine(dir, "learn-checks.txt"), lines);
     }
 
     private static void AudioRoundTrip(string dir)

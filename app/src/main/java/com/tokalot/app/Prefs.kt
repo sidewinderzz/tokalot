@@ -265,6 +265,19 @@ class Prefs(ctx: Context) {
             Sync.changed(app)
         }
 
+    /** Learn names and terms from the user's corrections after a dictation (see [Learn]). Off unless switched on. */
+    var learnWords: Boolean
+        get() = sp.safeBoolean("learn_words", false)
+        set(v) = sp.edit().putBoolean("learn_words", v).apply()
+
+    /** The dictionary words that were learned rather than typed in, so the Dictionary screen can mark them. */
+    var learnedWords: Set<String>
+        get() = runCatching {
+            val arr = JSONArray(sp.safeString("learned_words", "[]"))
+            List(arr.length()) { arr.getString(it) }.toSet()
+        }.getOrDefault(emptySet())
+        set(v) = sp.edit().putString("learned_words", JSONArray(v.toList()).toString()).apply()
+
     var snippets: List<Snippet>
         get() = runCatching {
             val arr = JSONArray(sp.safeString("snippets", "[]"))

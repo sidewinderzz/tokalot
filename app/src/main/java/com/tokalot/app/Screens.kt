@@ -89,7 +89,19 @@ class DictionaryScreen(private val a: MainActivity) {
         }
         col.addView(row(weightSpacer(), add), lp().margins(this, t = 10, b = 16))
 
+        col.addView(card().apply {
+            addView(switchRow(
+                "Learn from my corrections",
+                "Off unless you turn it on. After Tokalot types a dictation, it looks at that text box again for up to two minutes. " +
+                    "If you respell one word into a name or a term (Kaitlin to Caitlyn, get hub to GitHub), the new spelling is added here, " +
+                    "and a note lets you undo it. Ordinary words are left alone. The text is only compared on this phone, " +
+                    "never saved or sent; the learned word is all that's kept.",
+                prefs.learnWords
+            ) { prefs.learnWords = it })
+        }, lp().margins(this, b = 16))
+
         val words = prefs.words
+        val learned = prefs.learnedWords
         if (words.isEmpty()) {
             col.addView(card(22).apply { addView(text("No words yet.", 16f, C.SUB)) })
         } else {
@@ -97,11 +109,14 @@ class DictionaryScreen(private val a: MainActivity) {
             words.sortedBy { it.lowercase() }.forEachIndexed { i, w ->
                 if (i > 0) c.addView(divider())
                 val remove = iconButton(R.drawable.ic_close, "Remove $w", 20, C.SUB) {
-                    prefs.words = prefs.words - w; render()
+                    prefs.words = prefs.words - w
+                    if (w in learned) prefs.learnedWords = prefs.learnedWords - w
+                    render()
                 }
                 // The X is a full 48dp target, so the row's own padding shrinks to keep its height.
                 c.addView(row(
                     text(w, 17f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                    text(if (w in learned) "learned" else "", 13f, C.SUB),
                     remove
                 ).apply { setPadding(dp(20), dp(4), dp(6), dp(4)) })
             }

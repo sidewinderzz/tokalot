@@ -56,6 +56,8 @@ class OfflineFlowService : AccessibilityService() {
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
         private const val AUTO_STOP_MS = 30_000L
         private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
+        private const val LEARN_WATCH_MS = 120_000L // how long a dictation's text box is looked at again for corrections
+        private const val LEARN_EVERY_MS = 1500L
         private const val AROUND = 64 // characters read either side of the cursor before typing
         /** Placeholders apps show in empty boxes, for apps that don't flag them as hints. */
         private val COMMON_PLACEHOLDERS = setOf(
@@ -177,6 +179,7 @@ class OfflineFlowService : AccessibilityService() {
         handler.removeCallbacksAndMessages(null)
         button?.animate()?.cancel()
         takeLive()?.cancel()
+        handler.removeCallbacks(learnLook)
         if (recorder.isRecording) recorder.stop()
         RecordingService.stop(this)
         detach()
@@ -788,6 +791,7 @@ class OfflineFlowService : AccessibilityService() {
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
+        stopWatching(learn = true) // a correction made before this dictation still counts
         removeBubble()
         lastInsert = null
         targetApp = rootInActiveWindow?.packageName?.toString()?.takeIf { it != packageName }
@@ -933,12 +937,59 @@ class OfflineFlowService : AccessibilityService() {
     // ---------- text insertion ----------
 
     /** Types into the focused field, or copies to the clipboard if there isn't one. */
+    // ---------- learning names and terms from corrections (off unless switched on; see Learn) ----------
+
+    private var learnText: String? = null   // the dictation whose text box is being looked at again
+    private var learnUntil = 0L
+    private var learnSeen: String? = null   // the corrected word found at the last look
+    private var learnStable: String? = null // the same word found two looks running (so not caught mid-typing)
+    private val learnLook = Runnable { lookForCorrection() }
+
+    private fun watchForCorrection(text: String) {
+        stopWatching(learn = false)
+        if (!Prefs(this).learnWords) return
+        learnText = text
+        learnUntil = SystemClock.elapsedRealtime() + LEARN_WATCH_MS
+        handler.postDelayed(learnLook, LEARN_EVERY_MS)
+    }
+
+    private fun lookForCorrection() {
+        val text = learnText ?: return
+        val field = runCatching { focusedEditable()?.text?.toString() }.getOrNull()
+        val seen = field?.let { Learn.look(text, it, Prefs(this).words) }
+        // The dictation is gone (sent, cleared, or the text box was left): what was last seen stands.
+        if (seen == null || !seen.found) { stopWatching(learn = true); return }
+        learnStable = seen.word?.takeIf { it == learnSeen }
+        learnSeen = seen.word
+        if (SystemClock.elapsedRealtime() > learnUntil) stopWatching(learn = true)
+        else handler.postDelayed(learnLook, LEARN_EVERY_MS)
+    }
+
+    /** learn: add the correction that was seen, if there was one. False when the dictation itself was undone. */
+    private fun stopWatching(learn: Boolean) {
+        handler.removeCallbacks(learnLook)
+        val word = learnStable
+        learnText = null; learnSeen = null; learnStable = null
+        if (!learn || word == null) return
+        val prefs = Prefs(this)
+        if (prefs.words.any { it.equals(word, ignoreCase = true) }) return
+        prefs.words = prefs.words + word
+        prefs.learnedWords = prefs.learnedWords + word
+        showBubble("Learned “$word” · tap to undo", 6000) {
+            val p = Prefs(this)
+            p.words = p.words - word
+            p.learnedWords = p.learnedWords - word
+            toast("Removed “$word”")
+        }
+    }
+
     private fun deliver(text: String, plain: String? = null, entryId: Long? = null) {
         val node = focusedEditable()
         if (node == null || !insert(node, text)) {
             copyToClipboard(text)
             showBubble("Copied ✓  $text") { copyToClipboard(text); toast("Copied") }
         } else if (lastInsert != null) {
+            watchForCorrection(text)
             // plain: the AI polished the wording, so offer the user's own words next to Undo.
             if (plain != null) showSwapBubble(plain, entryId, 7000)
             else showUndoChip(5000)
@@ -962,6 +1013,7 @@ class OfflineFlowService : AccessibilityService() {
     private fun undoInsert() {
         val li = lastInsert ?: return
         lastInsert = null
+        stopWatching(learn = false)
         val ok = when (li) {
             is LastInsert.Typed -> undoTyped(li)
             is LastInsert.Rewritten -> undoRewritten(li)
@@ -977,6 +1029,7 @@ class OfflineFlowService : AccessibilityService() {
     private fun useMyWording(plain: String, entryId: Long?) {
         val li = lastInsert
         lastInsert = null
+        stopWatching(learn = false)
         entryId?.let { History.useOwnWording(this, it, plain) }
         val ok = when (li) {
             is LastInsert.Typed -> swapTyped(li, plain)

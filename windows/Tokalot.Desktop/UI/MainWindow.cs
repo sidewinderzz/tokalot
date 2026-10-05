@@ -615,6 +615,13 @@ public sealed class MainWindow : Window
         add.HorizontalAlignment = HorizontalAlignment.Right;
         col.Children.Add(Spaced(add, 0, 10, 0, 16));
 
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Learn from my corrections",
+            "Off unless you turn it on. After Tokalot pastes a dictation, it looks at that text box again for up to two minutes. " +
+            "If you respell one word into a name or a term (Kaitlin to Caitlyn, get hub to GitHub), the new spelling is added here, " +
+            "and a note lets you undo it. Ordinary words are left alone. The text is only compared on this PC, never saved or sent; " +
+            "the learned word is all that's kept. Works in most apps, but not ones that don't let other programs read their text boxes.",
+            Ui.Switch(S.LearnWords, v => { S.LearnWords = v; S.Save(); }))), 0, 0, 0, 16));
+
         col.Children.Add(new ColBreak());
         if (S.Words.Count == 0)
         {
@@ -623,10 +630,13 @@ public sealed class MainWindow : Window
         }
         var rows = S.Words.OrderBy(w => w, StringComparer.OrdinalIgnoreCase).Select(w =>
         {
-            var remove = Ui.Button("", () => { S.Words.Remove(w); S.Save(); Render(); }, icon: "close");
+            var remove = Ui.Button("", () => { S.Words.Remove(w); S.LearnedWords.Remove(w); S.Save(); Render(); }, icon: "close");
             remove.BorderThickness = new Thickness(0);
             remove.Background = Brushes.Transparent;
-            return (UIElement)Spaced(Spread(Ui.Text(w, 16), remove), 20, 8, 12, 8);
+            var name = S.LearnedWords.Contains(w)
+                ? (UIElement)Ui.Row(Ui.Text(w, 16), Spaced(Ui.Text("learned", 12.5, C.Sub), 10, 2, 0, 0))
+                : Ui.Text(w, 16);
+            return (UIElement)Spaced(Spread(name, remove), 20, 8, 12, 8);
         }).ToArray();
         col.Children.Add(Ui.List(rows));
     }
