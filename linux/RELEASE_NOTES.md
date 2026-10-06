@@ -1,5 +1,12 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.4.1
+
+- Recording on PipeWire systems (most current distros): `pw-record` sends its audio in a different byte order from the other recorders, and Tokalot was reading it as noise. It now reads it correctly. This was found by reading the code, not on a real PipeWire machine, so please report whether recording works for you.
+- A short hold is no longer mistaken for a tap (hands-free) when the microphone is slow to open.
+- A program that isn't responding can no longer hold up the start of transcription.
+- Long dictations: if one background piece fails, Tokalot stops sending pieces and transcribes the whole recording once, and silence after your last words is no longer sent on its own.
+
 ## New in 0.4.0
 
 - Long dictations come back faster: each time you pause, what you've said so far is sent to the speech service in the background, so when you stop only the last few seconds are left to transcribe. Nothing is pasted until you finish. Needs a cloud speech service and AI cleanup; Settings › Recording › "Transcribe while I talk" turns it off.

@@ -122,7 +122,7 @@ public static class Sync
             ["app"] = "tokalot-sync",
             ["format"] = Format,
             ["updated"] = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
-            ["by"] = OperatingSystem.IsWindows() ? "Windows" : "Linux",
+            ["by"] = OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "Mac" : "Linux",
             ["words"] = new JsonArray(d.Words.Select(w => (JsonNode?)w).ToArray()),
             ["snippets"] = new JsonArray(d.Snippets.Select(s => (JsonNode?)new JsonObject { ["trigger"] = s.Trigger, ["text"] = s.Text }).ToArray()),
             ["styles"] = new JsonObject(d.Styles.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, kv.Value))),

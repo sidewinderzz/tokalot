@@ -79,6 +79,9 @@ public sealed class Settings
     public List<string> Words { get; set; } = new();
     public List<Snippet> Snippets { get; set; } = new();
     public bool AutoStop { get; set; } = true;
+    /** Windows-only features; kept here so a backup that passes through this app doesn't lose them. */
+    public bool LearnWords { get; set; }
+    public List<string> LearnedWords { get; set; } = new();
     /** Send long dictations to the speech service in pieces while they are still being spoken. */
     public bool LiveStt { get; set; } = true;
     public bool AutoLanguage { get; set; }

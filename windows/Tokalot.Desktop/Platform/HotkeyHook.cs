@@ -69,6 +69,9 @@ public sealed class HotkeyHook : IDisposable
             while (GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
             {
                 if (msg.message != WM_REHOOK) continue;
+                // Mid-shortcut (even just Win still down after Ctrl+Win) the swap would lose track of the keys
+                // and let the Start menu open. Skip it; the next refresh is under a minute away.
+                if (active || comboUsed || Held(VK_CONTROL) || Held(VK_LWIN) || Held(VK_RWIN)) continue;
                 // Take the hook out and put it back. If Windows had dropped it, this is what brings it back.
                 if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
                 ctrl = win = active = comboUsed = false;

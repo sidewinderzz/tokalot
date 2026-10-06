@@ -60,9 +60,11 @@ public sealed class Dictation : IDisposable
     /** sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence. */
     /** ct: the user cancelled. entryId: re-transcribing a saved recording, so update that history entry instead of adding one. */
     /** live: the pieces already sent off while the user was talking, if any. */
+    /** user: cancelled by the user only (ct also carries the time limit). Running out of time during cleanup falls back to basic cleanup. */
     public async Task<Outcome> Process(float[] samples, ActiveApp? app, bool sparse = false, CancellationToken ct = default, long? entryId = null,
-        LiveStt? live = null)
+        LiveStt? live = null, CancellationToken? user = null)
     {
+        var userCt = user ?? ct;
         var s = Settings.Current;
         var warnings = new List<string>();
         var seconds = samples.Length / (double)Recorder.SampleRate;
@@ -125,10 +127,11 @@ public sealed class Dictation : IDisposable
                 if (c.Id != s.Cleanup) warnings.Add($"{s.CleanupOption.Label} unavailable, cleaned with {c.Label}");
                 break;
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (OperationCanceledException) when (userCt.IsCancellationRequested) { throw; }
             catch (Exception e)
             {
-                cleanupErr ??= "Cleanup failed: " + Short(e.Message);
+                cleanupErr ??= ct.IsCancellationRequested ? "Cleanup took too long; basic cleanup used" : "Cleanup failed: " + Short(e.Message);
+                if (ct.IsCancellationRequested) break; // out of time: the text is in hand, don't try a second service
             }
         }
         if (!cleaned && cleanupErr != null) warnings.Add(cleanupErr);
@@ -137,7 +140,7 @@ public sealed class Dictation : IDisposable
         LastTiming = $"{seconds:0.0} s of audio: speech to text {sttMs} ms" +
             (inPieces ? $" ({live!.Pieces} pieces, all but the last sent while talking)" : usedLocal ? " (on this PC)" : "") +
             $", cleanup {clock.ElapsedMilliseconds - sttMs} ms";
-        ct.ThrowIfCancellationRequested();
+        userCt.ThrowIfCancellationRequested();
         var now = entryId ?? DateTimeOffset.Now.ToUnixTimeMilliseconds();
         // A history file that's briefly locked must not stop the text from being pasted.
         try

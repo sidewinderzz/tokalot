@@ -180,6 +180,10 @@ internal static class Shots
         Check("GitHub, iPhone, K8s, NASA are", Learn.Worth("github", "GitHub", false, none) && Learn.Worth("iphone", "iPhone", true, none)
             && Learn.Worth("kates", "K8s", false, none) && Learn.Worth("nasa's", "NASA", false, none));
         Check("STOP and Apple are not", !Learn.Worth("stop", "STOP", false, none) && !Learn.Worth("apple", "Apple", false, none));
+        Check("a different name is not a respelling", Learn.Worth("Katelyn", "Caitlyn", false, none) && !Learn.Worth("Sam", "Tom", false, none)
+            && !Learn.Worth("Boston", "Austin", false, none) && !Learn.Worth("Mike", "Mark", false, none));
+        Check("other languages only learn unmistakable terms", !Learn.Worth("Haus", "Maus", false, none, english: false) && Learn.Worth("github", "GitHub", false, none, english: false));
+        Check("a curly apostrophe is not a correction", Learn.Look("I'm sure that it's what Kaitlin said.", "I’m sure that it’s what Kaitlin said.", none) is { Found: true, Word: null });
         Check("already known is skipped", L("I talked to Caitlyn about the get hub repo on Tuesday.", new[] { "caitlyn" }) == null);
         Check("edit distance", Learn.Distance("same", "same") == 0 && Learn.Distance("kaitlin", "caitlyn") == 2 && Learn.Distance("kitten", "sitting") == 3);
 

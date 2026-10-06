@@ -24,6 +24,7 @@ public sealed class Recorder : IDisposable
     private Process? proc;
     private Thread? reader;
     private volatile int session;
+    private volatile bool bigEndian;                  // this recorder sends each sample high byte first (see Read)
     private float floor;                              // running estimate of the room's background level
     private readonly List<short> samples = new();
     private readonly object gate = new();
@@ -98,6 +99,7 @@ public sealed class Recorder : IDisposable
                 if (Sh.Which(tool) is not { } path) continue;
                 var p = Launch(path, args);
                 if (p == null) continue;
+                bigEndian = false;
                 var first = new ManualResetEventSlim();
                 var mine = ++session;
                 var t = new Thread(() => Read(p, tool, mine, first)) { IsBackground = true, Name = "Tokalot recorder" };
@@ -164,6 +166,15 @@ public sealed class Recorder : IDisposable
                         from = SkipWavHeader(stream, buf, ref got);
                         if (got - from < 2) { first = true; continue; }
                     }
+                    // pw-record sends an AU stream when it writes to a pipe: a ".snd" header (its length is
+                    // the second field), then the samples with their two bytes the other way round.
+                    else if (got >= 24 && buf[0] == '.' && buf[1] == 's' && buf[2] == 'n' && buf[3] == 'd')
+                    {
+                        int header = (buf[4] << 24) | (buf[5] << 16) | (buf[6] << 8) | buf[7];
+                        if (header < 24 || header > got - 2) header = 24;
+                        from = header + ((got - header) & 1); // keep whole samples
+                        bigEndian = true;
+                    }
                     proven = tool;
                     firstData.Set();
                 }
@@ -208,7 +219,9 @@ public sealed class Recorder : IDisposable
         {
             for (int i = 0; i < n; i++)
             {
-                short s = BitConverter.ToInt16(buffer, offset + i * 2);
+                short s = bigEndian
+                    ? (short)((buffer[offset + i * 2] << 8) | buffer[offset + i * 2 + 1])
+                    : BitConverter.ToInt16(buffer, offset + i * 2);
                 double v = s / 32768.0;
                 sum += v * v;
                 if (samples.Count < MaxSamples) samples.Add(s);

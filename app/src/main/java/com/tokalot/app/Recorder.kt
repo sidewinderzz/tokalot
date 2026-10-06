@@ -22,6 +22,9 @@ class Recorder {
 
     val isRecording: Boolean get() = running
 
+    /** Called once (on the recording thread) if the microphone stops delivering audio mid-recording. */
+    @Volatile var onLost: (() -> Unit)? = null
+
     /** Called once (on the recording thread) when the 5 minute cap is reached. */
     @Volatile var onFull: (() -> Unit)? = null
 
@@ -100,7 +103,11 @@ class Recorder {
                         }
                         if (total >= MAX_SAMPLES) onFull?.invoke()
                     }
-                } else if (n < 0) break
+                } else if (n < 0) {
+                    level = 0f
+                    if (running) onLost?.invoke()
+                    break
+                }
             }
         }.also { it.start() }
         return true

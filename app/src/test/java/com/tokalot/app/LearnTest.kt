@@ -43,6 +43,24 @@ class LearnTest {
         assertFalse(Learn.worth("apple", "Apple", false, emptyList()))
     }
 
+    @Test fun aDifferentNameIsNotARespelling() {
+        assertTrue(Learn.worth("Katelyn", "Caitlyn", false, emptyList()))
+        assertFalse(Learn.worth("Sam", "Tom", false, emptyList()))
+        assertFalse(Learn.worth("Boston", "Austin", false, emptyList()))
+        assertFalse(Learn.worth("Mike", "Mark", false, emptyList()))
+    }
+
+    @Test fun otherLanguagesOnlyLearnUnmistakableTerms() {
+        assertFalse(Learn.worth("Haus", "Maus", false, emptyList(), english = false)) // every German noun has a capital
+        assertTrue(Learn.worth("github", "GitHub", false, emptyList(), english = false))
+    }
+
+    @Test fun aCurlyApostropheIsNotACorrection() {
+        val typed = "I'm sure that it's what Kaitlin said."
+        assertNull(Learn.look(typed, "I’m sure that it’s what Kaitlin said.", emptyList()).word)
+        assertTrue(Learn.look(typed, "I’m sure that it’s what Kaitlin said.", emptyList()).found)
+    }
+
     @Test fun wordsAlreadyKnownAreSkipped() {
         assertNull(learned("I talked to Caitlyn about the get hub repo on Tuesday.", listOf("caitlyn")))
     }

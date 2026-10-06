@@ -554,10 +554,24 @@ class OfflineFlowService : AccessibilityService() {
         // No spot yet: the right edge, just above the keyboard. Measured once, then kept. ("x" and "above"
         // are where earlier versions kept a position that moved with the keyboard.)
         val x = sp.safeInt("x", dm.widthPixels - winW - dp(12 - PAD_DP)).coerceIn(0, maxX)
-        val top = keyboardTop() ?: return x to (dm.heightPixels * 55 / 100).coerceIn(dp(24), maxY)
+        val middle = x to (dm.heightPixels * 55 / 100).coerceIn(dp(24), maxY)
+        // A keyboard that fills the screen (sideways) leaves no "above": use the middle, and don't keep it.
+        val top = keyboardTop()?.takeIf { it > dm.heightPixels / 3 } ?: return middle
         val y = (top - winH - sp.safeInt("above", dp(8 - PAD_DP))).coerceIn(dp(24), maxY)
-        sp.edit().putInt(kx, x).putInt(ky, y).apply()
+        // Keyboards slide up and then often add a row. Keep the spot only once the same height is seen twice.
+        if (top == settledTop) sp.edit().putInt(kx, x).putInt(ky, y).apply()
+        settledTop = top
         return x to y
+    }
+
+    private var settledTop = -1 // the keyboard's top edge at the last look, while no spot is saved yet
+
+    /** The screen turned: move to that orientation's spot without waiting for an accessibility event. */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        settledTop = -1
+        handler.removeCallbacks(recheck)
+        handler.postDelayed(recheck, 300)
     }
 
     private fun clamp(p: WindowManager.LayoutParams, allowTop: Boolean = false) {
@@ -788,8 +802,8 @@ class OfflineFlowService : AccessibilityService() {
             startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             return
         }
-        stopWatching(learn = true) // a correction made before this dictation still counts
         removeBubble()
+        stopWatching(learn = true) // a correction made before this dictation still counts (its note stays up)
         lastInsert = null
         targetApp = rootInActiveWindow?.packageName?.toString()?.takeIf { it != packageName }
         pendingStop = false; pendingCancel = false; autoStopped = false
@@ -804,6 +818,14 @@ class OfflineFlowService : AccessibilityService() {
                     handler.post {
                         if (state == State.RECORDING) {
                             toast("Reached 5 minutes. Transcribing…")
+                            stopAndTranscribe()
+                        }
+                    }
+                }
+                recorder.onLost = {
+                    handler.post {
+                        if (state == State.RECORDING) {
+                            toast("The microphone stopped. Transcribing what was recorded…")
                             stopAndTranscribe()
                         }
                     }
@@ -875,6 +897,7 @@ class OfflineFlowService : AccessibilityService() {
         val voiceEnd = recorder.lastVoiceSample
         val speech = recorder.speechSamples
         var samples = recorder.stop()
+        early?.lastVoice = voiceEnd
         // After an auto-stop, drop the trailing 30 s of silence: less to upload, and Whisper
         // tends to invent words ("Thank you.") in long silences.
         if (autoStopped && voiceEnd > 0) {
@@ -939,7 +962,9 @@ class OfflineFlowService : AccessibilityService() {
     private var learnText: String? = null   // the dictation whose text box is being looked at again
     private var learnUntil = 0L
     private var learnSeen: String? = null   // the corrected word found at the last look
-    private var learnStable: String? = null // the same word found two looks running (so not caught mid-typing)
+    private var learnStable: String? = null // the same word found three looks running (unchanged for 3 s, so not caught mid-typing)
+    private var learnSame = 0               // looks in a row that found learnSeen
+    private var learnMisses = 0             // looks in a row that didn't find the dictation
     private val learnLook = Runnable { lookForCorrection() }
 
     private fun watchForCorrection(text: String) {
@@ -953,10 +978,17 @@ class OfflineFlowService : AccessibilityService() {
     private fun lookForCorrection() {
         val text = learnText ?: return
         val field = runCatching { focusedEditable()?.text?.toString() }.getOrNull()
-        val seen = field?.let { Learn.look(text, it, Prefs(this).words) }
+        val prefs = Prefs(this)
+        val seen = field?.let { Learn.look(text, it, prefs.words, english = !prefs.autoLanguage) }
         // The dictation is gone (sent, cleared, or the text box was left): what was last seen stands.
-        if (seen == null || !seen.found) { stopWatching(learn = true); return }
-        learnStable = seen.word?.takeIf { it == learnSeen }
+        // One look that finds nothing can be the app redrawing; two in a row is gone.
+        if (seen == null || !seen.found) {
+            if (++learnMisses >= 2) stopWatching(learn = true) else handler.postDelayed(learnLook, LEARN_EVERY_MS)
+            return
+        }
+        learnMisses = 0
+        learnSame = if (seen.word != null && seen.word == learnSeen) learnSame + 1 else 1
+        learnStable = seen.word?.takeIf { learnSame >= 3 }
         learnSeen = seen.word
         if (SystemClock.elapsedRealtime() > learnUntil) stopWatching(learn = true)
         else handler.postDelayed(learnLook, LEARN_EVERY_MS)
@@ -966,12 +998,17 @@ class OfflineFlowService : AccessibilityService() {
     private fun stopWatching(learn: Boolean) {
         handler.removeCallbacks(learnLook)
         val word = learnStable
-        learnText = null; learnSeen = null; learnStable = null
+        learnText = null; learnSeen = null; learnStable = null; learnMisses = 0; learnSame = 0
         if (!learn || word == null) return
         val prefs = Prefs(this)
         if (prefs.words.any { it.equals(word, ignoreCase = true) }) return
         prefs.words = prefs.words + word
         prefs.learnedWords = prefs.learnedWords + word
+        // The note sits by the button. With the button off screen, or Undo still showing there, say it another way.
+        if (!attached || bubbleAttached) {
+            toast("Tokalot learned “$word”. Remove it in Dictionary if that's wrong.")
+            return
+        }
         showBubble("Learned “$word” · tap to undo", 6000) {
             val p = Prefs(this)
             p.words = p.words - word

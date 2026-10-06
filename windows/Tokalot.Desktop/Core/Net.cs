@@ -109,7 +109,7 @@ public static class CloudStt
             {
                 var (code, body) = await Send(baseUrl, key, model, Flac.Encode(samples), "audio/flac", "audio.flac", prompt, english, cts.Token);
                 if (code is >= 200 and < 300) return JsonNode.Parse(body)?["text"]?.ToString() ?? "";
-                if (code != 400 && code != 415) throw new IOException($"HTTP {code}: {Net.ErrorMessage(body)}");
+                if (!FormatRefused(code, body)) throw new IOException($"HTTP {code}: {Net.ErrorMessage(body)}");
                 flacRefused = baseUrl;
             }
             var (c, text) = await Send(baseUrl, key, model, Net.Wav(samples), "audio/wav", "audio.wav", prompt, english, cts.Token);
@@ -125,6 +125,15 @@ public static class CloudStt
     }
 
     private static volatile string? flacRefused; // the service that last turned FLAC down
+
+    /** A 400 can be about anything (a retired model, a blocked account); only one about the audio file means "send WAV". */
+    private static bool FormatRefused(int code, string body)
+    {
+        if (code == 415) return true;
+        if (code != 400) return false;
+        var m = body.ToLowerInvariant();
+        return m.Contains("file") || m.Contains("format") || m.Contains("audio") || m.Contains("decod") || m.Contains("media");
+    }
 
     private static async Task<(int Code, string Body)> Send(string baseUrl, string key, string model, byte[] audio, string mime, string name,
         string prompt, bool english, CancellationToken ct)

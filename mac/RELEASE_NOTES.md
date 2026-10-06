@@ -2,6 +2,12 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.2.1
+
+- A short hold is no longer mistaken for a tap (hands-free) when the microphone is slow to open.
+- A program that isn't responding can no longer hold up the start of transcription.
+- Long dictations: if one background piece fails, Tokalot stops sending pieces and transcribes the whole recording once, and silence after your last words is no longer sent on its own.
+
 ## New in 0.2.0
 
 - Long dictations come back faster: each time you pause, what you've said so far is sent to the speech service in the background, so when you stop only the last few seconds are left to transcribe. Nothing is pasted until you finish. Needs a cloud speech service and AI cleanup; Settings › Recording › "Transcribe while I talk" turns it off.
@@ -40,7 +46,7 @@ GitHub's build machine already allows the keyboard, key presses and the micropho
 
 ## Install
 
-1. Download **Tokalot-mac-arm64-0.1.0.zip** below and double-click it to unzip.
+1. Download the **Tokalot-mac-arm64** zip below and double-click it to unzip.
 2. Drag **Tokalot.app** into **Applications**.
 3. Open it. It isn't signed by Apple yet, so macOS refuses the first time:
    - **macOS 15 Sequoia or newer:** click **Done** on "“Tokalot” Not Opened", then go to **System Settings › Privacy & Security**, scroll down, click **Open Anyway** next to the Tokalot message and confirm.

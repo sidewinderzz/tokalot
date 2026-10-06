@@ -71,21 +71,25 @@ object Cleanup {
         val system = systemPrompt(prefs.styleFor(category), category, appLabel, prefs.words, prefs.customInstructions, hasSnippets, prefs.autoLanguage, polish)
             .let { if (pieces) it.trimEnd() + "\n\n" + LiveStt.CLEANUP_NOTE else it }
         val user = "<transcript>\n$text\n</transcript>"
+        // A long dictation takes the model longer to write out again: 15 s plus 1 s per 200 characters, up to a minute.
+        val waitMs = (15_000 + text.length * 5).coerceAtMost(60_000)
 
         var inTok = 0L
         var outTok = 0L
         val out = if (choice == CleanupChoice.CLAUDE) {
             val body = JSONObject()
                 .put("model", model)
-                .put("max_tokens", 2048)
+                .put("max_tokens", 8192)
                 .put("temperature", 0)
                 .put("system", system)
                 .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
             val res = Net.postJson(
                 "${choice.baseUrl}/messages",
                 mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01"),
-                body, call = call
+                body, readTimeoutMs = waitMs, call = call
             )
+            // Hit the length limit: the text stops mid-sentence. Failing here hands over to the backup or basic cleanup.
+            if (res.optString("stop_reason") == "max_tokens") throw java.io.IOException("Cleanup was cut off")
             res.optJSONObject("usage")?.let {
                 inTok = it.optLong("input_tokens"); outTok = it.optLong("output_tokens")
             }
@@ -110,8 +114,10 @@ object Cleanup {
             val res = Net.postJson(
                 "${choice.baseUrl}/chat/completions",
                 mapOf("Authorization" to "Bearer $key"),
-                body, call = call
+                body, readTimeoutMs = waitMs, call = call
             )
+            if (res.getJSONArray("choices").getJSONObject(0).optString("finish_reason") == "length")
+                throw java.io.IOException("Cleanup was cut off")
             res.optJSONObject("usage")?.let {
                 inTok = it.optLong("prompt_tokens"); outTok = it.optLong("completion_tokens")
             }

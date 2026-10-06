@@ -53,8 +53,16 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
 
     val pieceCount: Int get() = pieces.size
 
+    /**
+     * Where speech was last heard in the finished recording (a sample index), when the recorder knows.
+     * If that is before the last cut, nothing was said after it and the tail isn't sent at all.
+     */
+    var lastVoice = -1
+
     /** Call a few times a second while recording (always from the same thread). */
     fun feed(count: Int, lastVoice: Int, snapshot: (Int, Int) -> FloatArray) {
+        // A piece already failed: the whole recording will be transcribed at the end, so more pieces are wasted uploads.
+        if (failed) return
         val cut = nextCut(sent, count, lastVoice)
         if (cut < 0) return
         val piece = snapshot(sent, cut)
@@ -63,11 +71,30 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
         pieces.add(exec.submit<String> { one(piece) })
     }
 
-    private fun one(piece: FloatArray): String {
-        val v = voiced(piece)
-        if (v < 3) return "" // silence makes the speech model invent words
-        val text = TextTools.stripNoise(transcribe(piece, call))
-        return if (v < 6 && TextTools.isPhantom(text)) "" else text
+    @Volatile private var failed = false
+
+    /**
+     * tail: what was recorded after the last cut. That can be nothing but room noise and the tap on the
+     * button, which the speech model turns into "Thank you.", so it needs half a second of sound to be sent
+     * and a stock phrase from it is dropped. Earlier pieces were cut because speech was heard in them.
+     */
+    private fun one(piece: FloatArray, tail: Boolean = false): String {
+        if (tail && voiced(piece) < 10) return ""
+        val text = try {
+            TextTools.stripNoise(
+                try {
+                    transcribe(piece, call)
+                } catch (e: Exception) {
+                    // One more try for a passing error (a dropped connection, a busy server). A timeout has cost enough already.
+                    if (call.cancelled || e is java.net.SocketTimeoutException) throw e
+                    transcribe(piece, call)
+                }
+            )
+        } catch (e: Exception) {
+            failed = true
+            throw e
+        }
+        return if (tail && TextTools.isPhantom(text)) "" else text
     }
 
     /**
@@ -77,13 +104,16 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
      */
     fun finish(all: FloatArray): String? {
         if (pieces.isEmpty()) return null
+        // A piece has already failed: don't make the user wait for the tail before starting over.
+        if (failed) { cancel(); exec.shutdown(); return null }
         return try {
-            if (sent < all.size) {
+            if (sent < all.size && (lastVoice < 0 || lastVoice > sent)) {
                 val tail = all.copyOfRange(sent, all.size)
-                pieces.add(exec.submit<String> { one(tail) })
+                pieces.add(exec.submit<String> { one(tail, tail = true) })
             }
             pieces.map { it.get() }.filter { it.isNotEmpty() }.joinToString(" ")
         } catch (_: Exception) {
+            cancel() // stop the pieces still on their way, so they don't compete with the whole recording
             null
         } finally {
             exec.shutdown()

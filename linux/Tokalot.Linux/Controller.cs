@@ -108,6 +108,9 @@ public sealed class Controller : IDisposable
         // only needed once the recording is over.
         app = null;
         appLookup = Task.Run(AppDetect.Detect);
+        // Timed before the microphone opens (which can take half a second): a short hold must not be
+        // measured from when the mic was ready and so be taken for a tap.
+        pressedAt = DateTime.UtcNow;
         recorder.CueSamples = Settings.Current.Sounds ? Recorder.SampleRate * 6 / 10 : 0;
         if (!recorder.Start())
         {
@@ -117,7 +120,6 @@ public sealed class Controller : IDisposable
         }
         state = State.Recording;
         handsFree = handsFreeMode;
-        pressedAt = DateTime.UtcNow;
         hook.Listening = true;
         dictation.WarmUp();
         live = LiveStt.Usable(Settings.Current) ? new LiveStt(Settings.Current) : null;
@@ -327,7 +329,12 @@ public sealed class Controller : IDisposable
         var samples = await Task.Run(() => recorder.Stop());
         var lastVoice = recorder.LastVoiceSample;
         int speech = recorder.SpeechChunks, lateSpeech = recorder.LateSpeechChunks;
-        try { if (appLookup != null) app = await appLookup; } catch { }
+        // The look-up usually finished long ago. An app that isn't answering must not hold up the transcription.
+        try
+        {
+            if (appLookup != null && await Task.WhenAny(appLookup, Task.Delay(400)) == appLookup) app = await appLookup;
+        }
+        catch { }
 
         // Auto-stop: drop the long silent tail (keep half a second after the last speech).
         if (trimSilence && lastVoice > 0)
@@ -371,6 +378,7 @@ public sealed class Controller : IDisposable
         var target = app;
         var early = live;
         live = null;
+        if (early != null) early.LastVoice = lastVoice;
         var ct = StartWork(samples.Length);
         try
         {

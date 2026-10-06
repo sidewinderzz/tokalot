@@ -32,6 +32,12 @@ public sealed class LiveStt
 
     public int Pieces => pieces.Count;
 
+    /**
+     * Where speech was last heard in the finished recording (a sample index), when the recorder knows.
+     * If that is before the last cut, nothing was said after it and the tail isn't sent at all.
+     */
+    public int LastVoice { get; set; } = -1;
+
     /** Needs a cloud speech service, and AI cleanup to smooth the joins between pieces. */
     public static bool Usable(Settings s) => s.LiveStt && s.CloudSttReady && s.CleanupReady;
 
@@ -60,6 +66,8 @@ public sealed class LiveStt
 
     public void Feed(int count, int lastVoice, Func<int, int, float[]> snapshot)
     {
+        // A piece already failed: the whole recording will be transcribed at the end, so more pieces are wasted uploads.
+        if (pieces.Exists(p => p.IsFaulted || p.IsCanceled)) return;
         int cut = NextCut(sent, count, lastVoice);
         if (cut < 0) return;
         var piece = snapshot(sent, cut);
@@ -68,13 +76,23 @@ public sealed class LiveStt
         pieces.Add(Task.Run(() => One(piece)));
     }
 
-    private async Task<string> One(float[] piece)
+    /**
+     * tail: what was recorded after the last cut. That can be nothing but room noise and the key click,
+     * which the speech model turns into "Thank you.", so it needs half a second of sound to be sent and a
+     * stock phrase from it is dropped. Earlier pieces were cut because speech was heard in them.
+     */
+    private async Task<string> One(float[] piece, bool tail = false)
     {
-        int voiced = Voiced(piece);
-        if (voiced < 3) return ""; // silence makes the speech model invent words
-        var raw = await transcribe(piece, cts.Token);
+        if (tail && Voiced(piece) < 10) return "";
+        string raw;
+        try { raw = await transcribe(piece, cts.Token); }
+        // One more try for a passing error (a dropped connection, a busy server). A timeout has cost enough already.
+        catch (Exception e) when (e is not OperationCanceledException and not TimeoutException && !cts.IsCancellationRequested)
+        {
+            raw = await transcribe(piece, cts.Token);
+        }
         var text = TextTools.StripNoise(raw);
-        return voiced < 6 && TextTools.IsPhantom(text) ? "" : text;
+        return tail && TextTools.IsPhantom(text) ? "" : text;
     }
 
     /**
@@ -87,16 +105,22 @@ public sealed class LiveStt
         using var reg = ct.Register(cts.Cancel);
         try
         {
-            if (sent < all.Length)
+            // A piece has already failed: don't make the user wait for the tail before starting over.
+            if (pieces.Exists(p => p.IsFaulted || p.IsCanceled)) { Cancel(); return null; }
+            if (sent < all.Length && (LastVoice < 0 || LastVoice > sent))
             {
                 var tail = all[sent..];
-                pieces.Add(One(tail));
+                pieces.Add(One(tail, tail: true));
             }
             var texts = await Task.WhenAll(pieces);
             return string.Join(" ", texts.Where(t => t.Length > 0));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch { return null; }
+        catch
+        {
+            Cancel(); // stop the pieces still on their way
+            return null;
+        }
     }
 
     /** The recording was thrown away: stop the uploads. */

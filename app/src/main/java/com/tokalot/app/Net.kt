@@ -50,6 +50,21 @@ class Call {
     }
 }
 
+/** What kind of connection the phone is on right now. */
+object Link {
+    /**
+     * True on mobile data, or on any connection Android rates under 2 Mbit/s up. There the upload is what
+     * the user waits for, so audio goes as AAC (about 3 KB a second) rather than FLAC (about 16 KB a second).
+     * On good Wi-Fi the upload is instant either way and FLAC needs no encoding time. Unknown counts as fast.
+     */
+    fun slow(ctx: android.content.Context): Boolean = runCatching {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        caps != null && (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) ||
+            caps.linkUpstreamBandwidthKbps in 1 until 2000)
+    }.getOrDefault(false)
+}
+
 /** How long things may take, scaled by how much audio there is. */
 object Timeouts {
     /** The whole dictation: 30 s plus twice the audio length, capped at 10 minutes. */
@@ -145,10 +160,9 @@ class Upload(val fileName: String, val mime: String, val length: Long, val write
         }
 
         /** The AAC file AudioStore writes: about a tenth of the WAV, so long recordings upload far faster. */
-        fun m4a(file: File): Upload {
-            val bytes = file.readBytes() // ~3 KB per second of audio; read once so the length can't drift
-            return Upload("audio.m4a", "audio/mp4", bytes.size.toLong()) { it.write(bytes) }
-        }
+        fun m4a(file: File): Upload = m4a(file.readBytes()) // ~3 KB per second of audio; read once so the length can't drift
+
+        fun m4a(bytes: ByteArray) = Upload("audio.m4a", "audio/mp4", bytes.size.toLong()) { it.write(bytes) }
     }
 }
 

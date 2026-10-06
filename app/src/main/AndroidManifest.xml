@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Cloud speech/cleanup when a key is set, and the one-time on-device model download. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only to tell mobile data from Wi-Fi, so audio can be compressed harder on a slow connection. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Keeps the mic alive while recording even if the text field closes. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />

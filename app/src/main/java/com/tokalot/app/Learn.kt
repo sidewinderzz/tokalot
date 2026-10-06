@@ -21,7 +21,8 @@ object Learn {
     private const val MIN_WORDS = 4      // fewer words than this is too little to recognise the dictation by
     private const val MAX_FIELD = 20_000 // only the end of a very long document is compared
 
-    private fun tokens(s: String) = s.split(Regex("\\s+")).filter { it.isNotEmpty() }
+    // Some apps turn ' into ’ as you type; that is not a correction.
+    private fun tokens(s: String) = s.replace('’', '\'').split(Regex("\\s+")).filter { it.isNotEmpty() }
 
     /** A word without the punctuation around it or a possessive 's. */
     fun bare(token: String): String {
@@ -33,7 +34,7 @@ object Learn {
     /**
      * inserted: what Tokalot typed. field: what the text box holds now. known: the dictionary.
      */
-    fun look(inserted: String, field: String, known: Collection<String>): Seen {
+    fun look(inserted: String, field: String, known: Collection<String>, english: Boolean = true): Seen {
         val typed = tokens(inserted)
         if (typed.size < MIN_WORDS) return NOT_FOUND
         val now = tokens(if (field.length > MAX_FIELD) field.takeLast(MAX_FIELD) else field)
@@ -53,7 +54,7 @@ object Learn {
                 val at = start + changed
                 val sentenceStart = at == 0 || now[at - 1].last() in ".!?:"
                 val word = bare(now[at])
-                oneOff = Seen(true, word.takeIf { worth(bare(typed[changed]), it, sentenceStart, known) })
+                oneOff = Seen(true, word.takeIf { worth(bare(typed[changed]), it, sentenceStart, known, english) })
             }
         }
         return oneOff ?: NOT_FOUND
@@ -63,7 +64,7 @@ object Learn {
      * Is [new] a respelling of [old] that belongs in the dictionary? Yes for names and terms
      * (Caitlyn, GitHub, K8s, NASA); no for ordinary words, different words, and plain capitalisation.
      */
-    fun worth(old: String, new: String, sentenceStart: Boolean, known: Collection<String>): Boolean {
+    fun worth(old: String, new: String, sentenceStart: Boolean, known: Collection<String>, english: Boolean = true): Boolean {
         if (new.length !in 2..40 || old.isEmpty() || new == old) return false
         if (new.none { it.isLetter() } || new.any { !(it.isLetterOrDigit() || it in "'’-.") }) return false
         if (known.any { it.equals(new, ignoreCase = true) }) return false
@@ -76,15 +77,19 @@ object Learn {
 
         // Only the capitals changed: that's worth keeping for GitHub or iPhone, not for "Apple" or "STOP".
         if (old.equals(new, ignoreCase = true)) return mixed
-        val looksLikeATerm = mixed || digits || acronym || (capital && !sentenceStart)
-        if (!looksLikeATerm) return false
+        // Unusual capitals or digits can only be a term. A plain capital mid-sentence means a name in English,
+        // but not in a language such as German, where every noun has one.
+        val term = mixed || digits || acronym
+        val name = english && capital && !sentenceStart
+        if (!term && !name) return false
 
-        // A respelling of what was heard, not a different word put in its place. Mishearings can be some way off
-        // in letters ("Katelyn" for "Caitlyn"), so this is loose; swapping one day or month for another is not one.
+        // A respelling of what was heard, not a different word put in its place: Katelyn to Caitlyn is,
+        // Sam to Tom or Boston to Austin is not. Terms get more room (kates to K8s). Days and months never count.
         val a = old.lowercase()
         val b = new.lowercase()
         if (b in CALENDAR) return false
-        return distance(a, b) <= maxOf(2, maxOf(a.length, b.length) * 2 / 3)
+        val longest = maxOf(a.length, b.length)
+        return distance(a, b) <= if (term) maxOf(2, longest * 2 / 3) else maxOf(1, longest * 3 / 7)
     }
 
     private val CALENDAR = setOf(

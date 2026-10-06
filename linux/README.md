@@ -56,8 +56,11 @@ real loosening.
 What Tokalot itself does with it: it follows Ctrl, Super, Shift and Alt (down or up) and Esc. While
 the shortcut is held, or a recording or transcription is under way, it also notices *that* some
 other key was pressed (so Ctrl+Super+arrow stays a desktop shortcut and doesn't start dictation),
-not which text you type. Nothing it sees is stored or logged. It does nothing while the screen is
-locked or another user is switched in. Its virtual keyboard can only press Ctrl, Shift, V and Insert.
+and whether that key was Z (Ctrl+Super+Z puts your own wording back after a polished dictation), not
+which text you type. Nothing it sees is stored or logged. A recording can't be started while the
+screen is locked or another user is switched in; a hands-free recording that is already running
+carries on until you stop it or auto-stop ends it. Its virtual keyboard can only press Ctrl, Shift,
+V, Z and Insert.
 
 If you would rather not grant the first permission, Tokalot still works by clicking the small
 indicator at the edge of the screen. Without the second, text is copied to the clipboard and you

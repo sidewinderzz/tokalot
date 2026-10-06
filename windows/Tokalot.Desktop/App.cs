@@ -209,7 +209,7 @@ public sealed class App : Application
             var last = History.All().FirstOrDefault(e => !e.Pending);
             if (last != null) _ = TextInjector.Copy(last.Text);
         });
-        updateItem = new System.Windows.Forms.ToolStripMenuItem("Update available", null, (_, _) => { ShowWindow(); }) { Visible = false };
+        updateItem = new System.Windows.Forms.ToolStripMenuItem("Update available", null, (_, _) => { ShowWindow(); window?.Go(UI.MainWindow.Page.Home); }) { Visible = false };
         menu.Items.Add(updateItem);
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Quit Tokalot", null, (_, _) => Quit());
@@ -250,7 +250,15 @@ public sealed class App : Application
         {
             UpdateVersion = v;
             if (updateItem != null) { updateItem.Text = $"Update to {v}"; updateItem.Visible = true; }
-            Refresh();
+            // The banner lives on Home. Rebuilding another page would wipe whatever is being typed there.
+            if (window?.CurrentPage == UI.MainWindow.Page.Home) Refresh();
+        }
+        // The release was withdrawn or replaced since the last look: a banner for it could only fail.
+        else if (v == null && !Updater.LastCheckFailed && UpdateVersion != null && UpdateProgress == null)
+        {
+            UpdateVersion = null;
+            if (updateItem != null) updateItem.Visible = false;
+            if (window?.CurrentPage == UI.MainWindow.Page.Home) Refresh();
         }
         return v;
     }
@@ -267,12 +275,15 @@ public sealed class App : Application
                 UpdateProgress = p;
                 window?.SetBannerProgress(p);
             }));
+            // Still here: there was nothing to install after all.
+            UpdateProgress = null;
+            Refresh();
         }
         catch (Exception e)
         {
             UpdateProgress = null;
             Log("Update failed: " + e.Message);
-            Ui.Dialog(window, "The update couldn't be downloaded just now. A new version may still be publishing; try again in a few minutes.\n\n(" + e.Message + ")", cancel: null);
+            if (window is { IsVisible: true }) Ui.Dialog(window, "The update couldn't be downloaded just now. A new version may still be publishing; try again in a few minutes.\n\n(" + e.Message + ")", cancel: null);
             Refresh();
         }
     }
@@ -303,6 +314,9 @@ public sealed class Controller : IDisposable
     private readonly Dictation dictation = new();
     private readonly Pill pill;               // short messages, shown next to the indicator
     private readonly Learner learner;         // learns names from corrections, when that's switched on
+    private string? learnedNote;              // a learned word whose note hasn't been shown yet
+    private DispatcherTimer? learnedTimer;
+    private DateTime quietAt;                 // when the message now showing will be gone
     private readonly IndicatorWindow indicator;
     private readonly DispatcherTimer tick;
     private State state = State.Idle;
@@ -324,13 +338,27 @@ public sealed class Controller : IDisposable
         learner = new Learner(ui);
         learner.Learned += word =>
         {
+            learnedNote = word;
+            learnedTimer!.Start();
+            App.Current.RefreshAfterDictation();
+        };
+        // Learning usually happens just as the next dictation starts, when other messages are about to show.
+        // The note (with its undo) waits until nothing is being recorded or processed and the last message has gone.
+        learnedTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) =>
+        {
+            if (learnedNote == null) { learnedTimer!.Stop(); return; }
+            if (state != State.Idle || DateTime.UtcNow < quietAt) return;
+            var word = learnedNote;
+            learnedNote = null;
+            learnedTimer!.Stop();
+            quietAt = DateTime.UtcNow.AddMilliseconds(6000);
             pill.HintNear($"Learned “{word}” · click to undo", indicator.Bounds, indicator.Dock, 6000, () =>
             {
                 Learner.Forget(word);
                 App.Current.RefreshAfterDictation();
             });
-            App.Current.RefreshAfterDictation();
-        };
+        }, ui);
+        learnedTimer.Stop();
         indicator = new IndicatorWindow(() => recorder.Level);
         indicator.Clicked += OnClicked;
         hook = new HotkeyHook();
@@ -372,13 +400,18 @@ public sealed class Controller : IDisposable
     /** Re-reads the indicator's style, edge and idle visibility (after a Settings change). */
     public void RefreshIndicator() => indicator.ApplySettings();
 
-    private void Say(string text, int ms) => pill.FlashNear(text, indicator.Bounds, indicator.Dock, ms);
+    private void Say(string text, int ms)
+    {
+        quietAt = DateTime.UtcNow.AddMilliseconds(ms + 300);
+        pill.FlashNear(text, indicator.Bounds, indicator.Dock, ms);
+    }
 
     /** A reminder of how hands-free works. It has an X; once closed it never shows again (Settings can bring it back). */
     private void Hint(string text, int ms)
     {
         var s = Settings.Current;
         if (s.HideHandsFreeHint) return;
+        quietAt = DateTime.UtcNow.AddMilliseconds(ms + 300);
         pill.HintNear(text, indicator.Bounds, indicator.Dock, ms, () => { s.HideHandsFreeHint = true; s.Save(); });
     }
 
@@ -528,13 +561,16 @@ public sealed class Controller : IDisposable
     {
         if (work == null) return;
         userCancelled = true;
-        try { work.Cancel(); } catch { }
+        try { userWork?.Cancel(); } catch { }
     }
 
     /** Gives up after a while even on a dead connection: a minute plus twice the recording's length. */
+    private CancellationTokenSource? userWork; // cancelled only by the user; `work` also ends when time runs out
+
     private CancellationToken StartWork(int sampleCount)
     {
-        work = new CancellationTokenSource();
+        userWork = new CancellationTokenSource();
+        work = CancellationTokenSource.CreateLinkedTokenSource(userWork.Token);
         userCancelled = false;
         work.CancelAfter(TimeSpan.FromSeconds(60 + 2.0 * sampleCount / Recorder.SampleRate));
         hook.Listening = true; // so Esc is reported while working
@@ -546,6 +582,8 @@ public sealed class Controller : IDisposable
         hook.Listening = false;
         work?.Dispose();
         work = null;
+        userWork?.Dispose();
+        userWork = null;
     }
 
     /** Transcribes a saved recording again (one that failed or was cancelled) and copies the result. */
@@ -649,10 +687,12 @@ public sealed class Controller : IDisposable
         var target = app;
         var early = live;
         live = null;
+        if (early != null) early.LastVoice = lastVoice;
         var ct = StartWork(samples.Length);
+        var userCt = userWork!.Token;
         try
         {
-            var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early));
+            var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early, user: userCt));
             if (Dictation.LastTiming.Length > 0) App.Log("Dictation: " + Dictation.LastTiming);
             hook.Listening = false;
             if (outcome.Text.Length > 0)

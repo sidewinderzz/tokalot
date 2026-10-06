@@ -123,6 +123,22 @@ object AudioStore {
         return FloatArray(shorts.remaining() / channels) { shorts.get(it * channels) / 32768f }
     }
 
+    /**
+     * The audio as an AAC (.m4a) file in memory, about a tenth of the WAV, for uploading over a slow
+     * connection. Null if this phone's encoder fails.
+     */
+    fun aac(ctx: Context, samples: FloatArray): ByteArray? {
+        val tmp = File.createTempFile("piece", ".m4a", ctx.applicationContext.cacheDir)
+        return try {
+            encode(samples, tmp)
+            tmp.readBytes()
+        } catch (_: Exception) {
+            null
+        } finally {
+            tmp.delete()
+        }
+    }
+
     private fun encode(samples: FloatArray, dest: File) {
         val rate = Recorder.SAMPLE_RATE
         val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)

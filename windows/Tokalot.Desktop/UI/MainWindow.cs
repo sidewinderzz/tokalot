@@ -106,7 +106,11 @@ public sealed class MainWindow : Window
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); };
         SourceInitialized += (_, _) => DarkTitleBar();
         Activated += (_, _) => Sync.Queue();
-        onSync = changed => Dispatcher.BeginInvoke(() => { if (changed || CurrentPage == Page.Settings) Render(); });
+        // A sync that changed nothing only updates the status line on Settings: not worth taking the cursor out of a box being typed in.
+        onSync = changed => Dispatcher.BeginInvoke(() =>
+        {
+            if (changed || (CurrentPage == Page.Settings && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase)) Render();
+        });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
         PreviewKeyDown += (_, e) =>

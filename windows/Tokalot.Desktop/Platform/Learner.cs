@@ -20,7 +20,9 @@ public sealed class Learner
     private string? text;    // the dictation being watched
     private DateTime until;
     private string? seen;    // the corrected word found at the last look
-    private string? stable;  // the same word found two looks running (so not caught mid-typing)
+    private string? stable;  // the same word found three looks running (unchanged for 3 s, so not caught mid-typing)
+    private int same;        // looks in a row that found `seen`
+    private int misses;      // looks in a row that didn't find the dictation
     private bool busy;
 
     /** A word was added to the dictionary. */
@@ -57,10 +59,17 @@ public sealed class Learner
         finally { busy = false; }
         if (text != watching) return; // stopped, or a newer dictation, while reading
 
-        var now = field == null ? null : Learn.Look(watching, field, Settings.Current.Words);
+        var now = field == null ? null : Learn.Look(watching, field, Settings.Current.Words, !Settings.Current.AutoLanguage);
         // The dictation is gone (sent, cleared, or the text box was left): what was last seen stands.
-        if (now == null || !now.Found) { Stop(learn: true); return; }
-        stable = now.Word != null && now.Word == seen ? now.Word : null;
+        // One look that finds nothing can be a slow app or a glance at another window; two in a row is gone.
+        if (now == null || !now.Found)
+        {
+            if (++misses >= 2) Stop(learn: true);
+            return;
+        }
+        misses = 0;
+        same = now.Word != null && now.Word == seen ? same + 1 : 1;
+        stable = now.Word != null && same >= 3 ? now.Word : null;
         seen = now.Word;
         if (DateTime.UtcNow > until) Stop(learn: true);
     }
@@ -70,7 +79,7 @@ public sealed class Learner
     {
         timer.Stop();
         var word = stable;
-        text = null; seen = null; stable = null;
+        text = null; seen = null; stable = null; same = 0; misses = 0;
         if (!learn || word == null) return;
         var s = Settings.Current;
         if (s.Words.Any(w => string.Equals(w, word, StringComparison.OrdinalIgnoreCase))) return;

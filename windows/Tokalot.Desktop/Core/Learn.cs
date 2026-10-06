@@ -27,7 +27,8 @@ public static class Learn
         "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
     };
 
-    private static string[] Tokens(string s) => s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+    // Some apps turn ' into ’ as you type; that is not a correction.
+    private static string[] Tokens(string s) => s.Replace('’', '\'').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
 
     /** A word without the punctuation around it or a possessive 's. */
     public static string Bare(string token)
@@ -41,7 +42,7 @@ public static class Learn
     }
 
     /** inserted: what Tokalot pasted. field: what the text box holds now. known: the dictionary. */
-    public static Seen Look(string inserted, string field, ICollection<string> known)
+    public static Seen Look(string inserted, string field, ICollection<string> known, bool english = true)
     {
         var typed = Tokens(inserted);
         if (typed.Length < MinWords) return NotFound;
@@ -62,7 +63,7 @@ public static class Learn
                 int at = start + changed;
                 bool sentenceStart = at == 0 || ".!?:".Contains(now[at - 1][^1]);
                 var word = Bare(now[at]);
-                oneOff = new Seen(true, Worth(Bare(typed[changed]), word, sentenceStart, known) ? word : null);
+                oneOff = new Seen(true, Worth(Bare(typed[changed]), word, sentenceStart, known, english) ? word : null);
             }
         }
         return oneOff ?? NotFound;
@@ -72,7 +73,7 @@ public static class Learn
      * Is `fresh` a respelling of `old` that belongs in the dictionary? Yes for names and terms
      * (Caitlyn, GitHub, K8s, NASA); no for ordinary words, different words, and plain capitalisation.
      */
-    public static bool Worth(string old, string fresh, bool sentenceStart, ICollection<string> known)
+    public static bool Worth(string old, string fresh, bool sentenceStart, ICollection<string> known, bool english = true)
     {
         if (fresh.Length < 2 || fresh.Length > 40 || old.Length == 0 || fresh == old) return false;
         if (!fresh.Any(char.IsLetter) || fresh.Any(c => !(char.IsLetterOrDigit(c) || "'’-.".Contains(c)))) return false;
@@ -86,14 +87,19 @@ public static class Learn
 
         // Only the capitals changed: that's worth keeping for GitHub or iPhone, not for "Apple" or "STOP".
         if (string.Equals(old, fresh, StringComparison.OrdinalIgnoreCase)) return mixed;
-        if (!(mixed || digits || acronym || (capital && !sentenceStart))) return false;
+        // Unusual capitals or digits can only be a term. A plain capital mid-sentence means a name in English,
+        // but not in a language such as German, where every noun has one.
+        bool term = mixed || digits || acronym;
+        bool name = english && capital && !sentenceStart;
+        if (!term && !name) return false;
 
-        // A respelling of what was heard, not a different word put in its place. Mishearings can be some way off
-        // in letters ("Katelyn" for "Caitlyn"), so this is loose; swapping one day or month for another is not one.
+        // A respelling of what was heard, not a different word put in its place: Katelyn to Caitlyn is,
+        // Sam to Tom or Boston to Austin is not. Terms get more room (kates to K8s). Days and months never count.
         var a = old.ToLowerInvariant();
         var b = fresh.ToLowerInvariant();
         if (Calendar.Contains(b)) return false;
-        return Distance(a, b) <= Math.Max(2, Math.Max(a.Length, b.Length) * 2 / 3);
+        int longest = Math.Max(a.Length, b.Length);
+        return Distance(a, b) <= (term ? Math.Max(2, longest * 2 / 3) : Math.Max(1, longest * 3 / 7));
     }
 
     /** How many single-letter edits turn a into b. */

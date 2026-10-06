@@ -33,8 +33,10 @@ class Dictation(context: Context) {
 
     companion object {
         private const val IDLE_UNLOAD_MS = 60_000L
-        /** From this length on, the audio is compressed before it's uploaded (see [run]). */
+        /** From this length on, the audio is compressed to AAC before it's uploaded (see [run]). */
         private const val COMPRESS_FROM_S = 30
+        /** On a slow connection ([Link.slow]) that starts here instead: the upload is the wait. */
+        private const val COMPRESS_FROM_S_SLOW = 1.5
         /** The error onDone gets after cancel(). */
         const val CANCELLED = "Cancelled"
         const val TIMED_OUT = "Timed out"
@@ -99,7 +101,7 @@ class Dictation(context: Context) {
         val c = prefs.stt
         val hint = hint(prefs)
         return LiveStt { piece, call ->
-            sendPcm(prefs, c, piece, hint, piece.size * 1000L / Recorder.SAMPLE_RATE, call)
+            sendPcm(prefs, c, piece, hint, piece.size * 1000L / Recorder.SAMPLE_RATE, call, small = Link.slow(app))
         }
     }
 
@@ -146,7 +148,8 @@ class Dictation(context: Context) {
             val error = if (stopped) halted else failure
             main.post { job.deliver(outcome, error) }
 
-            // After the text is delivered: keep the audio so it can be replayed.
+            // After the text is delivered: keep the audio so it can be replayed. (Storage may be full: never crash here.)
+            runCatching {
             val keepDays = Prefs(app).audioKeepDays
             val saved = AudioStore.exists(app, id)
             when {
@@ -175,6 +178,7 @@ class Dictation(context: Context) {
                 saved && retry == null -> AudioStore.delete(app, id)
             }
             AudioStore.prune(app, keepDays)
+            }
         }
     }
 
@@ -204,10 +208,12 @@ class Dictation(context: Context) {
         // Long recordings go up as the small AAC file (about a tenth of the WAV) so a slow
         // connection doesn't time out. Short ones stay WAV: encoding first would only add delay.
         var m4a = AudioStore.file(app, id).takeIf { it.exists() }
-        if (m4a == null && order.isNotEmpty() && seconds >= COMPRESS_FROM_S && AudioStore.save(app, id, samples)) {
+        val compressFrom = if (order.isNotEmpty() && Link.slow(app)) COMPRESS_FROM_S_SLOW else COMPRESS_FROM_S.toDouble()
+        if (m4a == null && order.isNotEmpty() && seconds >= compressFrom && AudioStore.save(app, id, samples)) {
             m4a = AudioStore.file(app, id)
         }
         var usedLocal = false
+        var offline = false // the speech service couldn't be reached at all
         for (c in order) {
             call.check()
             try {
@@ -218,6 +224,9 @@ class Dictation(context: Context) {
             } catch (e: Exception) {
                 call.check()
                 if (warnings.isEmpty()) warnings += "${c.label} failed: ${e.message?.take(80)}"
+                // No answer at all (rather than an error from the service): the connection is the problem, and the
+                // next provider would only wait out the same timeout. Use the phone's own model if it's there.
+                if (e !is HttpException && ModelManager.isReady(app)) { offline = true; break }
             }
         }
         if (raw == null) {
@@ -241,7 +250,8 @@ class Dictation(context: Context) {
         var cleaned = false
         var finalText: String? = null
         var cleanupErr: String? = null
-        for (c in cleanupOrder(prefs)) {
+        // With the connection down, waiting on the cleanup service too would only use up the time limit: basic cleanup.
+        for (c in if (offline) emptyList() else cleanupOrder(prefs)) {
             call.check()
             try {
                 val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces)
@@ -269,7 +279,8 @@ class Dictation(context: Context) {
             )
         }
         call.check() // cancelled at the last moment: don't save a transcript nobody will get
-        History.put(app, Entry(id, retry?.time ?: id, finalText, base, audioMs, cleaned, appPkg ?: ""))
+        // A history file that can't be written (storage full) must not stop the text from being typed.
+        runCatching { History.put(app, Entry(id, retry?.time ?: id, finalText, base, audioMs, cleaned, appPkg ?: "")) }
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
         Usage.recordEdits(app, AppContext.fillerCount(base), if (cleaned) AppContext.correctionCount(base) else 0)
         return Outcome(finalText, warnings.firstOrNull(), id, plain)
@@ -293,17 +304,31 @@ class Dictation(context: Context) {
         return sendPcm(prefs, c, samples, hint, audioMs, call)
     }
 
-    /** Sends the audio as FLAC (the same sound in about half the bytes); a provider that won't take it gets WAV. */
-    private fun sendPcm(prefs: Prefs, c: SttChoice, samples: FloatArray, hint: String, audioMs: Long, call: Call): String {
+    /**
+     * Sends the audio as FLAC (the same sound in about half the bytes); a provider that won't take it gets WAV.
+     * small: the connection is slow, so try AAC first (a fifth of the FLAC).
+     */
+    private fun sendPcm(
+        prefs: Prefs, c: SttChoice, samples: FloatArray, hint: String, audioMs: Long, call: Call, small: Boolean = false,
+    ): String {
         fun send(audio: Upload) = CloudStt.transcribe(
             c.baseUrl, prefs.key(c.service), prefs.sttModel(c), audio, hint,
             english = !prefs.autoLanguage, audioMs = audioMs, call = call
         )
+        if (small) {
+            AudioStore.aac(app, samples)?.let { bytes ->
+                try {
+                    return send(Upload.m4a(bytes))
+                } catch (e: HttpException) {
+                    if (e.code != 400 && e.code != 415) throw e
+                }
+            }
+        }
         if (flacRefused != c.baseUrl) {
             try {
                 return send(Upload.flac(samples))
             } catch (e: HttpException) {
-                if (e.code != 400 && e.code != 415) throw e
+                if (!formatRefused(e)) throw e
                 flacRefused = c.baseUrl
             }
         }
@@ -317,6 +342,14 @@ class Dictation(context: Context) {
     }
 
     @Volatile private var flacRefused: String? = null // the service that last turned FLAC down
+
+    /** A 400 can be about anything (a retired model, a blocked account); only one about the audio file means "send WAV". */
+    private fun formatRefused(e: HttpException): Boolean {
+        if (e.code == 415) return true
+        if (e.code != 400) return false
+        val m = e.message.orEmpty().lowercase()
+        return listOf("file", "format", "audio", "decod", "media").any { it in m }
+    }
 
     /** Chosen cloud STT first (if keyed), then the other keyed cloud options. Empty = on-device. */
     private fun sttOrder(p: Prefs): List<SttChoice> {
