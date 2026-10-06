@@ -33,6 +33,28 @@ public static class TextTools
 
     public static int WordCount(string s) => Spaces.Split(s).Count(w => w.Length > 0);
 
+    // Things only the AI cleanup can deal with: fillers, self-corrections, spoken punctuation and formatting.
+    private static readonly Regex NeedsAi = new(@"(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol)\b");
+    private static readonly Regex Stutter = new(@"(?i)\b(\w+)[ ,]+\1\b");
+    public const int QuickWords = 20;
+
+    /**
+     * True when a short dictation came out of speech recognition already fit to type, so the AI cleanup
+     * (the slower half of a short dictation) has nothing to do: no fillers, corrections, repeats or spoken
+     * formatting, no snippets, a style that is just normal capitals and punctuation, and no instructions
+     * of the user's own. Email is left out because its greeting and sign-off are laid out by the cleanup.
+     */
+    public static bool NothingToFix(string text, bool hasSnippets, string styleId, string categoryId, string custom)
+    {
+        if (hasSnippets || text.Length == 0 || WordCount(text) > QuickWords) return false;
+        if (styleId != "FORMAL" && styleId != "CASUAL") return false;
+        if (categoryId == "EMAIL") return false;
+        var own = custom.Trim();
+        if (own.Length > 0 && own != Catalog.DefaultInstructions) return false;
+        if (text.Contains('\n')) return false;
+        return !NeedsAi.IsMatch(text) && !Stutter.IsMatch(text);
+    }
+
     private static Regex TriggerRegex(string trigger)
     {
         var parts = Spaces.Split(trigger.Trim()).Where(p => p.Length > 0).Select(Regex.Escape);

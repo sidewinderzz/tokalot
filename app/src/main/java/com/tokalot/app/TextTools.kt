@@ -37,6 +37,27 @@ object TextTools {
 
     fun wordCount(s: String) = s.split(SPACES).count { it.isNotBlank() }
 
+    // Things only the AI cleanup can deal with: fillers, self-corrections, spoken punctuation and formatting.
+    private val NEEDS_AI = Regex("""(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol)\b""")
+    private val STUTTER = Regex("""(?i)\b(\w+)[ ,]+\1\b""")
+    const val QUICK_WORDS = 20
+
+    /**
+     * True when a short dictation came out of speech recognition already fit to type, so the AI cleanup
+     * (the slower half of a short dictation) has nothing to do: no fillers, corrections, repeats or spoken
+     * formatting, no snippets, a style that is just normal capitals and punctuation, and no instructions
+     * of the user's own. Email is left out because its greeting and sign-off are laid out by the cleanup.
+     */
+    fun nothingToFix(text: String, hasSnippets: Boolean, style: String, category: String, custom: String): Boolean {
+        if (hasSnippets || text.isEmpty() || wordCount(text) > QUICK_WORDS) return false
+        if (style != "FORMAL" && style != "CASUAL") return false
+        if (category == "EMAIL") return false
+        val own = custom.trim()
+        if (own.isNotEmpty() && own != DEFAULT_INSTRUCTIONS) return false
+        if ('\n' in text) return false
+        return !NEEDS_AI.containsMatchIn(text) && !STUTTER.containsMatchIn(text)
+    }
+
     // ---------- snippets ----------
 
     private fun triggerRegex(trigger: String): Regex {

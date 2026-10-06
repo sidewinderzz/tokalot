@@ -983,6 +983,20 @@ public sealed partial class MainWindow : Window
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
                 Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); }))));
 
+        // --- Speed
+        Section(col, "Speed");
+        var speedRows = new List<Control>
+        {
+            Ui.SettingRow("Quick mode (beta)", "Skips the AI cleanup when a short dictation (20 words or fewer) has nothing for it to fix: no ums, corrections, repeats or spoken punctuation. " +
+                "The text is tidied on this computer instead, which is instant. Email, snippets, the very casual style and your own instructions always go through the AI.",
+                Ui.Switch(S.QuickSkip, v => { S.QuickSkip = v; S.Save(); })),
+        };
+        var timings = Dictation.Recent;
+        speedRows.Add(Spaced(Ui.Stack(
+            Ui.Text("Last dictations", 15.5),
+            Ui.Text(timings.Length == 0 ? "Nothing yet since Tokalot started. Dictate something, then reopen Settings." : string.Join("\n", timings.Take(8)), 13, C.Sub)), 20, 13, 18, 13));
+        col.Children.Add(Ui.List(speedRows.ToArray()));
+
         // --- Speech to text
         Section(col, "Speech to text");
         col.Children.Add(Ui.List(Catalog.Stt.Select(o =>

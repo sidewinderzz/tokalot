@@ -422,6 +422,29 @@ class SettingsScreen(private val a: MainActivity) {
             }
         ), lp().margins(this, t = 8, l = 4))
 
+        // --- Speed
+        section(col, "Speed")
+        val sp = card()
+        sp.addView(switchRow("Quick mode (beta)", "Skips the AI cleanup when a short dictation (20 words or fewer) has nothing for it to fix: no ums, corrections, repeats or spoken punctuation. The text is tidied on the phone instead, which is instant. Email, snippets, the very casual style and your own instructions always go through the AI.", prefs.quickSkip) {
+            prefs.quickSkip = it
+        })
+        sp.addView(divider())
+        val timings = prefs.speedLog
+        sp.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(13), dp(18), dp(13))
+            addView(text("Last dictations", 16f))
+            addView(text(if (timings.isEmpty()) "Nothing yet. Dictate something, then come back." else timings.take(8).joinToString("\n"), 13f, C.SUB))
+        })
+        col.addView(sp)
+        if (timings.isNotEmpty()) {
+            col.addView(row(pill("Copy timings") {
+                val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Tokalot timings", timings.joinToString("\n")))
+                android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+            }), lp().margins(this, t = 8, l = 4))
+        }
+
         // --- Speech to text
         section(col, "Speech to text")
         val stt = card()

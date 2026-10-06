@@ -250,8 +250,11 @@ class Dictation(context: Context) {
         var cleaned = false
         var finalText: String? = null
         var cleanupErr: String? = null
+        // Quick mode: a short dictation with nothing for the AI to fix skips it and is tidied here, at once.
+        val quick = prefs.quickSkip && !polish && !inPieces && prefs.cleanup != CleanupChoice.OFF &&
+            TextTools.nothingToFix(base, map.isNotEmpty(), prefs.styleFor(category).name, category.name, prefs.customInstructions)
         // With the connection down, waiting on the cleanup service too would only use up the time limit: basic cleanup.
-        for (c in if (offline) emptyList() else cleanupOrder(prefs)) {
+        for (c in if (offline || quick) emptyList() else cleanupOrder(prefs)) {
             call.check()
             try {
                 val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces)
@@ -271,12 +274,20 @@ class Dictation(context: Context) {
         val plain = basic.takeIf { polish && cleaned && it != finalText }
 
         runCatching {
-            android.util.Log.i(
-                "Tokalot", "Dictation: %.1f s of audio: speech to text %d ms%s, cleanup %d ms".format(
-                    seconds, sttMs, if (inPieces) " (${live?.pieceCount} pieces, all but the last sent while talking)" else if (usedLocal) " (on device)" else "",
-                    (System.nanoTime() - began) / 1_000_000 - sttMs
-                )
-            )
+            val allMs = (System.nanoTime() - began) / 1_000_000
+            val us = java.util.Locale.US
+            val line = "%.1f s spoken · speech %.2f s".format(us, seconds, sttMs / 1000.0) +
+                (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device)" else "") +
+                when {
+                    quick -> " · cleanup skipped, nothing to fix"
+                    cleaned -> " · cleanup %.2f s".format(us, (allMs - sttMs) / 1000.0)
+                    prefs.cleanup == CleanupChoice.OFF -> " · cleanup off"
+                    offline -> " · no connection, basic cleanup"
+                    else -> " · cleanup failed after %.2f s".format(us, (allMs - sttMs) / 1000.0)
+                } + " · total %.2f s".format(us, allMs / 1000.0)
+            android.util.Log.i("Tokalot", "Dictation: $line")
+            val stamp = java.text.SimpleDateFormat("HH:mm:ss", us).format(java.util.Date())
+            prefs.speedLog = listOf("$stamp  $line") + prefs.speedLog
         }
         call.check() // cancelled at the last moment: don't save a transcript nobody will get
         // A history file that can't be written (storage full) must not stop the text from being typed.

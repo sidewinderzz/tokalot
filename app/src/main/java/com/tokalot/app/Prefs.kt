@@ -380,6 +380,19 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("haptics", true)
         set(v) = sp.edit().putBoolean("haptics", v).apply()
 
+    /** Beta: skip the AI cleanup when a short dictation has nothing for it to fix. */
+    var quickSkip: Boolean
+        get() = sp.safeBoolean("quick_skip", false)
+        set(v) = sp.edit().putBoolean("quick_skip", v).apply()
+
+    /** The last 20 dictations' timings, newest first, for the Speed section in Settings. */
+    var speedLog: List<String>
+        get() = runCatching {
+            val arr = JSONArray(sp.safeString("speed_log", "[]"))
+            List(arr.length()) { arr.getString(it) }
+        }.getOrDefault(emptyList())
+        set(v) = sp.edit().putString("speed_log", JSONArray(v.take(20)).toString()).apply()
+
     /** Send long dictations to the speech service in pieces while they are still being spoken. */
     var liveStt: Boolean
         get() = sp.safeBoolean("live_stt", true)

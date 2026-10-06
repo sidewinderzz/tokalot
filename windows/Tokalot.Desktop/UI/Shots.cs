@@ -187,6 +187,14 @@ internal static class Shots
         Check("already known is skipped", L("I talked to Caitlyn about the get hub repo on Tuesday.", new[] { "caitlyn" }) == null);
         Check("edit distance", Learn.Distance("same", "same") == 0 && Learn.Distance("kaitlin", "caitlyn") == 2 && Learn.Distance("kitten", "sitting") == 3);
 
+        // Quick mode: what may skip the AI cleanup.
+        bool Q(string t, bool snip = false, string style = "CASUAL", string cat = "OTHER", string custom = "") => TextTools.NothingToFix(t, snip, style, cat, custom);
+        Check("quick: a short clean sentence skips", Q("Can you send me the report by Friday?") && Q("Sounds good, see you then.", cat: "MESSAGING") && Q("Fix the login bug first thing tomorrow.", cat: "AI_CODE", custom: Catalog.DefaultInstructions) == false);
+        Check("quick: fillers, corrections and repeats don't", !Q("Um, can you send me the report?") && !Q("Send it Tuesday, no wait, Wednesday.") && !Q("I I think that works.") && !Q("I mean it could work."));
+        Check("quick: spoken formatting doesn't", !Q("Dear Sam comma thanks for the note") && !Q("Add milk new line add eggs") && !Q("That was funny lol"));
+        Check("quick: long text, snippets, email, very casual and own instructions don't", !Q(string.Join(" ", Enumerable.Repeat("word", 21))) && !Q("Here is my address.", snip: true)
+            && !Q("Thanks for the update.", cat: "EMAIL") && !Q("Thanks for the update.", style: "VERY_CASUAL") && !Q("Thanks for the update.", custom: "Always use British spelling."));
+        Check("quick: the default instruction alone is fine", Q("Thanks for the update.", custom: Catalog.DefaultInstructions));
         File.WriteAllLines(Path.Combine(dir, "learn-checks.txt"), lines);
     }
 

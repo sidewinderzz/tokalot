@@ -10,6 +10,29 @@ import org.junit.Test
 /** Pure logic added with cancel/retry, backup validation, themed colors and the pinned model. */
 class LogicTest {
 
+    // ---------- quick mode: what may skip the AI cleanup ----------
+
+    private fun q(t: String, snip: Boolean = false, style: String = "CASUAL", cat: String = "OTHER", custom: String = "") =
+        TextTools.nothingToFix(t, snip, style, cat, custom)
+
+    @Test fun quickModeSkipsOnlyShortCleanSentences() {
+        assertTrue(q("Can you send me the report by Friday?"))
+        assertTrue(q("Sounds good, see you then.", cat = "MESSAGING"))
+        assertTrue(q("Thanks for the update.", custom = DEFAULT_INSTRUCTIONS))
+        assertFalse(q("Um, can you send me the report?"))
+        assertFalse(q("Send it Tuesday, no wait, Wednesday."))
+        assertFalse(q("I I think that works."))
+        assertFalse(q("I mean it could work."))
+        assertFalse(q("Dear Sam comma thanks for the note"))
+        assertFalse(q("Add milk new line add eggs"))
+        assertFalse(q("That was funny lol"))
+        assertFalse(q(List(21) { "word" }.joinToString(" ")))
+        assertFalse(q("Here is my address.", snip = true))
+        assertFalse(q("Thanks for the update.", cat = "EMAIL"))
+        assertFalse(q("Thanks for the update.", style = "VERY_CASUAL"))
+        assertFalse(q("Thanks for the update.", custom = "Always use British spelling."))
+    }
+
     // ---------- spacing around inserted text ----------
 
     @Test fun padAddsSpaceAfterAWord() {

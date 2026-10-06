@@ -82,6 +82,8 @@ public sealed class Settings
     /** Windows-only features; kept here so a backup that passes through this app doesn't lose them. */
     public bool LearnWords { get; set; }
     public List<string> LearnedWords { get; set; } = new();
+    /** Beta: skip the AI cleanup when a short dictation has nothing for it to fix. */
+    public bool QuickSkip { get; set; }
     /** Send long dictations to the speech service in pieces while they are still being spoken. */
     public bool LiveStt { get; set; } = true;
     public bool AutoLanguage { get; set; }

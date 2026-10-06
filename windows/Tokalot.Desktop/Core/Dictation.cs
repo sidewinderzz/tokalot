@@ -57,6 +57,10 @@ public sealed class Dictation : IDisposable
     /** How the last dictation's wait was spent, for the log. */
     public static string LastTiming { get; private set; } = "";
 
+    private static readonly List<string> recent = new();
+    /** The last 20 dictations' timings, newest first, for the Speed section in Settings. */
+    public static string[] Recent { get { lock (recent) return recent.ToArray(); } }
+
     /** sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence. */
     /** ct: the user cancelled. entryId: re-transcribing a saved recording, so update that history entry instead of adding one. */
     /** live: the pieces already sent off while the user was talking, if any. */
@@ -116,7 +120,10 @@ public sealed class Dictation : IDisposable
         var cleaned = false;
         string? final = null;
         string? cleanupErr = null;
-        foreach (var c in CleanupOrder(s))
+        // Quick mode: a short dictation with nothing for the AI to fix skips it and is tidied here, at once.
+        var quick = s.QuickSkip && !s.Polish && !inPieces && s.Cleanup != "OFF"
+            && TextTools.NothingToFix(baseText, map.Count > 0, s.StyleFor(category).Id, category.Id, s.CustomInstructions);
+        foreach (var c in quick ? Array.Empty<CleanupOption>() : CleanupOrder(s))
         {
             try
             {
@@ -137,9 +144,19 @@ public sealed class Dictation : IDisposable
         if (!cleaned && cleanupErr != null) warnings.Add(cleanupErr);
         final ??= TextTools.Restore(TextTools.BasicClean(protectedText), map);
 
-        LastTiming = $"{seconds:0.0} s of audio: speech to text {sttMs} ms" +
-            (inPieces ? $" ({live!.Pieces} pieces, all but the last sent while talking)" : usedLocal ? " (on this PC)" : "") +
-            $", cleanup {clock.ElapsedMilliseconds - sttMs} ms";
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var allMs = clock.ElapsedMilliseconds;
+        LastTiming = string.Format(inv, "{0:0.0} s spoken · speech {1:0.00} s", seconds, sttMs / 1000.0) +
+            (inPieces ? $" ({live!.Pieces} pieces)" : usedLocal ? " (on device)" : "") +
+            (quick ? " · cleanup skipped, nothing to fix"
+                : cleaned ? string.Format(inv, " · cleanup {0:0.00} s", (allMs - sttMs) / 1000.0)
+                : s.Cleanup == "OFF" ? " · cleanup off" : string.Format(inv, " · cleanup failed after {0:0.00} s", (allMs - sttMs) / 1000.0)) +
+            string.Format(inv, " · total {0:0.00} s", allMs / 1000.0);
+        lock (recent)
+        {
+            recent.Insert(0, DateTime.Now.ToString("HH:mm:ss", inv) + "  " + LastTiming);
+            if (recent.Count > 20) recent.RemoveAt(20);
+        }
         userCt.ThrowIfCancellationRequested();
         var now = entryId ?? DateTimeOffset.Now.ToUnixTimeMilliseconds();
         // A history file that's briefly locked must not stop the text from being pasted.
