@@ -381,15 +381,17 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putBoolean("haptics", v).apply()
 
     /**
-     * How long things have been taking lately, for the progress ring's estimate: speech-to-text in
-     * milliseconds per second of audio, and cleanup in milliseconds per character. Running averages.
+     * How long things have been taking lately, for the progress ring's estimate. Running averages, kept
+     * separately for Wi-Fi and mobile data: "stt_wifi" / "stt_cell" (speech-to-text, milliseconds per second
+     * of audio), "clean_…" (cleanup, milliseconds per character) and "ping_…" (see [Net.rtt]).
      */
-    var sttRate: Float
-        get() = runCatching { sp.getFloat("rate_stt", 150f) }.getOrDefault(150f)
-        set(v) = sp.edit().putFloat("rate_stt", v).apply()
-    var cleanRate: Float
-        get() = runCatching { sp.getFloat("rate_clean", 6f) }.getOrDefault(6f)
-        set(v) = sp.edit().putFloat("rate_clean", v).apply()
+    fun rate(key: String, def: Float): Float = runCatching { sp.getFloat("rate_$key", def) }.getOrDefault(def)
+
+    /** Folds a new measurement into the running average kept under [key]. */
+    fun learnRate(key: String, measured: Float) {
+        val old = rate(key, measured)
+        sp.edit().putFloat("rate_$key", old * 0.6f + measured * 0.4f).apply()
+    }
 
     /** Beta: skip the AI cleanup when a short dictation has nothing for it to fix. */
     var quickSkip: Boolean

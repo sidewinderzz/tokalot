@@ -25,6 +25,10 @@ class Dictation(context: Context) {
     private val unload = Runnable { exec.execute { releaseLocal() } }
     private var current: Job? = null // main thread only
 
+    /** How quick the connection was when this dictation started ([Net.rtt], milliseconds), or -1 if not measured. */
+    @Volatile var pingMs = -1
+        private set
+
     /** For the progress ring: 0 while the speech is being recognised, 1 during cleanup, 2 when the text is ready. */
     @Volatile var stage = 0
         private set
@@ -81,10 +85,13 @@ class Dictation(context: Context) {
     /** Opens connections to the chosen providers in the background while the user talks. */
     fun warmUp() {
         val prefs = Prefs(app)
+        pingMs = -1
         Thread {
             if (prefs.cloudSttReady) {
                 val c = prefs.stt
-                Net.warm("${c.baseUrl}/models", mapOf("Authorization" to "Bearer ${prefs.key(c.service)}"))
+                val h = mapOf("Authorization" to "Bearer ${prefs.key(c.service)}")
+                Net.warm("${c.baseUrl}/models", h)
+                pingMs = Net.rtt("${c.baseUrl}/models", h) // on the connection just opened: the link as it is right now
             }
             if (prefs.cleanupReady) {
                 val c = prefs.cleanup
@@ -288,8 +295,12 @@ class Dictation(context: Context) {
         runCatching {
             val allMs = (System.nanoTime() - began) / 1_000_000
             // What this one took feeds the ring's estimate for the next (a slow connection shows up within a few dictations).
-            if (!usedLocal && !inPieces) prefs.sttRate = prefs.sttRate * 0.6f + 0.4f * (sttMs / seconds.coerceAtLeast(3.0)).toFloat()
-            if (cleaned) prefs.cleanRate = prefs.cleanRate * 0.6f + 0.4f * ((allMs - sttMs) / base.length.coerceAtLeast(40).toFloat())
+            val kind = Link.kind(app)
+            val ping = pingMs
+            if (!usedLocal && !inPieces) prefs.learnRate("stt_$kind", (sttMs / seconds.coerceAtLeast(3.0)).toFloat())
+            if (cleaned) prefs.learnRate("clean_$kind", (allMs - sttMs) / base.length.coerceAtLeast(40).toFloat())
+            if (ping > 0) prefs.learnRate("ping_$kind", ping.toFloat())
+            val link = (if (kind == "cell") " · mobile data" else " · Wi-Fi") + if (ping > 0) ", ping $ping ms" else ""
             val us = java.util.Locale.US
             val line = "%.1f s spoken · speech %.2f s".format(us, seconds, sttMs / 1000.0) +
                 (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device)" else "") +
@@ -299,7 +310,7 @@ class Dictation(context: Context) {
                     prefs.cleanup == CleanupChoice.OFF -> " · cleanup off"
                     offline -> " · no connection, basic cleanup"
                     else -> " · cleanup failed after %.2f s".format(us, (allMs - sttMs) / 1000.0)
-                } + " · total %.2f s".format(us, allMs / 1000.0)
+                } + " · total %.2f s".format(us, allMs / 1000.0) + link
             android.util.Log.i("Tokalot", "Dictation: $line")
             val stamp = java.text.SimpleDateFormat("HH:mm:ss", us).format(java.util.Date())
             prefs.speedLog = listOf("$stamp  $line") + prefs.speedLog

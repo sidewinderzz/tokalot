@@ -862,8 +862,12 @@ class OfflineFlowService : AccessibilityService() {
 
     // ---------- progress ring while transcribing ----------
     // An estimate, not a measurement: the services don't report how far along they are. The ring moves at the
-    // pace recent dictations took (speech-to-text, then cleanup), slows as it nears the end of each step so it
-    // never claims to be finished early, and jumps on when a step really completes.
+    // pace it expects (speech-to-text, then cleanup), slows as it nears the end of each step so it never claims
+    // to be finished early, and jumps on when a step really completes.
+    // People move between Wi-Fi, good signal and bad, so the pace comes from the connection as it is now:
+    //  - in a long dictation, from how long the pieces sent during this very recording took;
+    //  - otherwise from what this kind of connection (Wi-Fi or mobile data) has been taking, scaled by a
+    //    quick timing of the service made while the user was talking, against what that timing usually is.
 
     private var ringFrom = 0L          // when transcribing started
     private var ringStage1At = 0L      // when the speech step was seen to be done
@@ -893,11 +897,24 @@ class OfflineFlowService : AccessibilityService() {
         }
     }
 
-    /** audioSeconds: how much speech still has to be recognised (only the tail, when pieces were sent early). */
-    private fun startRing(audioSeconds: Float) {
+    /**
+     * audioSeconds: how much speech still has to be recognised (only the tail, when pieces were sent early).
+     * pieceRate: what those pieces took, in milliseconds per second of audio (0 if there were none).
+     */
+    private fun startRing(audioSeconds: Float, pieceRate: Float) {
         val prefs = Prefs(this)
-        ringRate = prefs.cleanRate
-        ringStt = (prefs.sttRate * audioSeconds.coerceAtLeast(3f)).coerceAtLeast(600f)
+        val kind = Link.kind(this)
+        val usual = prefs.rate("stt_$kind", if (kind == "cell") 300f else 150f)
+        val ping = dictation.pingMs
+        // How this moment compares with what this kind of connection usually is: 1 = the same.
+        val now = when {
+            pieceRate > 0f -> pieceRate / usual
+            ping > 0 -> ping / prefs.rate("ping_$kind", ping.toFloat())
+            else -> 1f
+        }.coerceIn(0.6f, 5f)
+        // Cleanup sends very little, so a slow link holds it up less than it holds up the audio.
+        ringRate = prefs.rate("clean_$kind", 6f) * (1f + (now - 1f) * 0.5f)
+        ringStt = ((if (pieceRate > 0f) pieceRate else usual * now) * audioSeconds.coerceAtLeast(3f)).coerceAtLeast(600f)
         ringClean = (ringRate * audioSeconds * 13f).coerceAtLeast(500f) // about 13 characters a second of speech
         ringFrom = SystemClock.elapsedRealtime()
         ringStage1At = 0L
@@ -981,7 +998,7 @@ class OfflineFlowService : AccessibilityService() {
         setState(State.WORKING)
         workingSince = SystemClock.elapsedRealtime()
         val seconds = samples.size / Recorder.SAMPLE_RATE.toFloat()
-        startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds)
+        startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds, early?.lastRate ?: 0f)
         dictation.process(samples, targetApp, sparse = !heard, live = early) { outcome, err ->
             setState(State.IDLE)
             when {

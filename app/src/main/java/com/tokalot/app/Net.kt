@@ -57,6 +57,13 @@ object Link {
      * the user waits for, so audio goes as AAC (about 3 KB a second) rather than FLAC (about 16 KB a second).
      * On good Wi-Fi the upload is instant either way and FLAC needs no encoding time. Unknown counts as fast.
      */
+    /** "cell" on mobile data, otherwise "wifi". Speeds are remembered separately for each. */
+    fun kind(ctx: android.content.Context): String = runCatching {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        if (caps != null && caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) "cell" else "wifi"
+    }.getOrDefault("wifi")
+
     fun slow(ctx: android.content.Context): Boolean = runCatching {
         val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
         val caps = cm.getNetworkCapabilities(cm.activeNetwork)
@@ -120,6 +127,25 @@ object Net {
      * Makes a tiny authenticated request so the TLS connection is already open (and pooled)
      * by the time the real upload happens. Saves a few hundred ms per dictation.
      */
+    /**
+     * How long one small request to the service takes right now, in milliseconds (-1 if it failed).
+     * Asked on a connection that is already open, so it measures the link as it is at this moment:
+     * a few dozen milliseconds on good Wi-Fi, a second or more in a bad service zone. HEAD, so no body comes back.
+     */
+    fun rtt(url: String, headers: Map<String, String>): Int = try {
+        val t = System.nanoTime()
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.requestMethod = "HEAD"
+        conn.connectTimeout = 4000
+        conn.readTimeout = 4000
+        headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
+        conn.responseCode
+        runCatching { conn.inputStream.close() }
+        ((System.nanoTime() - t) / 1_000_000).toInt()
+    } catch (_: Exception) {
+        -1
+    }
+
     fun warm(url: String, headers: Map<String, String>) {
         try {
             val conn = URL(url).openConnection() as HttpURLConnection

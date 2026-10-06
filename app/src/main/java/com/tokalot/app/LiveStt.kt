@@ -74,12 +74,20 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
     @Volatile private var failed = false
 
     /**
+     * How long the latest piece took, in milliseconds per second of its audio (0 until one is back).
+     * A measurement of this connection during this very recording, so the progress ring trusts it over anything older.
+     */
+    @Volatile var lastRate = 0f
+        private set
+
+    /**
      * tail: what was recorded after the last cut. That can be nothing but room noise and the tap on the
      * button, which the speech model turns into "Thank you.", so it needs half a second of sound to be sent
      * and a stock phrase from it is dropped. Earlier pieces were cut because speech was heard in them.
      */
     private fun one(piece: FloatArray, tail: Boolean = false): String {
         if (tail && voiced(piece) < 10) return ""
+        val began = System.nanoTime()
         val text = try {
             TextTools.stripNoise(
                 try {
@@ -94,6 +102,7 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
             failed = true
             throw e
         }
+        if (!tail) lastRate = (System.nanoTime() - began) / 1_000_000f / (piece.size / Recorder.SAMPLE_RATE.toFloat())
         return if (tail && TextTools.isPhantom(text)) "" else text
     }
 
