@@ -112,6 +112,24 @@ internal static class Shots
         Check("a failed piece falls back to the whole recording", System.Threading.Tasks.Task.Run(() => failing.Finish(audio, default)).GetAwaiter().GetResult() == null);
         Check("nothing sent early in a short recording", System.Threading.Tasks.Task.Run(() => new LiveStt(Settings.Current, Fake).Finish(audio[..(R * 5)], default)).GetAwaiter().GetResult() == null);
 
+        // A noisy place: the microphone never reads as quiet, so cuts are made at dips, or forced.
+        float[] Noisy(int seconds, double dipAt = -1)
+        {
+            var a = new float[R * seconds];
+            for (int i = 0; i < a.Length; i++)
+            {
+                bool quiet = dipAt >= 0 && i >= (int)(dipAt * R) && i < (int)((dipAt + 0.3) * R);
+                a[i] = (float)(Math.Sin(i * 0.2) * (quiet ? 0.01 : 0.1));
+            }
+            return a;
+        }
+        var (qAt, qDip) = LiveStt.Quietest(Noisy(6, 4.0));
+        Check("noise: the quietest moment is found", qDip && qAt >= (int)(4.0 * R) && qAt <= (int)(4.3 * R) && !LiveStt.Quietest(Noisy(6)).Dip);
+        var sound = Noisy(60, 16.0);
+        var inNoise = new LiveStt(Settings.Current, (p, ct) => System.Threading.Tasks.Task.FromResult("x"));
+        for (int count = R / 4; count <= sound.Length; count += R / 4) inNoise.Feed(count, count, (a, b) => sound[a..Math.Min(b, sound.Length)]);
+        Check("noise: a long dictation is still sent in pieces: " + inNoise.Pieces, inNoise.Pieces >= 2);
+
         // The upload itself: FLAC first, WAV when the service turns FLAC down.
         var seen = new List<string>();
         using var http = new System.Net.HttpListener();

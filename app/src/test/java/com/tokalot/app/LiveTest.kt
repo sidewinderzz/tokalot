@@ -84,6 +84,31 @@ class LiveTest {
         assertNull(live.finish(audio))
     }
 
+    // ---------- a noisy place: the microphone never reads as quiet ----------
+
+    private fun noisy(seconds: Int, dipAt: Double? = null) = FloatArray(r * seconds) {
+        val quiet = dipAt != null && it >= (dipAt * r).toInt() && it < ((dipAt + 0.3) * r).toInt()
+        (sin(it * 0.2) * if (quiet) 0.01 else 0.1).toFloat()
+    }
+
+    @Test fun theQuietestMomentIsFound() {
+        val (at, dip) = LiveStt.quietest(noisy(6, dipAt = 4.0))
+        assertTrue(dip)
+        assertTrue("centre of the dip, got $at", at in (4.0 * r).toInt()..(4.3 * r).toInt())
+        assertTrue(!LiveStt.quietest(noisy(6)).second) // steady noise has no dip
+    }
+
+    @Test fun aLongDictationInNoiseIsStillSentInPieces() {
+        val sound = noisy(60, dipAt = 16.0)
+        val live = LiveStt { _, _ -> "x" }
+        var count = r / 4
+        // lastVoice == count: the recorder thinks there is always speech
+        while (count <= sound.size) { live.feed(count, count, { a, b -> sound.copyOfRange(a, minOf(b, sound.size)) }); count += r / 4 }
+        // one cut at the dip (about 16 s), then forced cuts every 25 s of steady noise after it
+        assertTrue("pieces: ${live.pieceCount}", live.pieceCount >= 2)
+        assertEquals("x x x", live.finish(sound)!!.take(5))
+    }
+
     @Test fun aShortRecordingIsLeftAlone() {
         val live = LiveStt { _, _ -> "x" }
         live.feed(r * 5, r * 4, ::take)

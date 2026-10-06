@@ -27,6 +27,12 @@ class Call {
 
     fun check() { if (cancelled) throw CancelledException() }
 
+    /** Where the speech step's time went, in milliseconds, for the timings list: getting the audio ready,
+     *  connecting and sending it, and waiting for the answer. */
+    @Volatile var prepMs = 0L
+    @Volatile var sendMs = 0L
+    @Volatile var waitMs = 0L
+
     /** Runs [block] with [conn] registered; a failure caused by cancel() surfaces as CancelledException. */
     fun <T> track(conn: HttpURLConnection, block: () -> T): T {
         synchronized(open) {
@@ -226,12 +232,16 @@ object CloudStt {
         conn.setRequestProperty("Authorization", "Bearer $key")
         conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         val send = {
+            val t0 = System.nanoTime()
             conn.outputStream.use { out ->
                 out.write(head)
                 audio.write(out)
                 out.write(tail)
             }
-            Net.readResponse(conn).optString("text")
+            val t1 = System.nanoTime()
+            val text = Net.readResponse(conn).optString("text")
+            call?.let { it.sendMs += (t1 - t0) / 1_000_000; it.waitMs += (System.nanoTime() - t1) / 1_000_000 }
+            text
         }
         return if (call != null) call.track(conn, send) else send()
     }

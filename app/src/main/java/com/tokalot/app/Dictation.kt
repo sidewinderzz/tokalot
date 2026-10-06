@@ -224,15 +224,28 @@ class Dictation(context: Context) {
         // connection doesn't time out. Short ones stay WAV: encoding first would only add delay.
         var m4a = AudioStore.file(app, id).takeIf { it.exists() }
         val compressFrom = if (order.isNotEmpty() && Link.slow(app)) COMPRESS_FROM_S_SLOW else COMPRESS_FROM_S.toDouble()
+        val prepFrom = System.nanoTime()
         if (m4a == null && order.isNotEmpty() && seconds >= compressFrom && AudioStore.save(app, id, samples)) {
             m4a = AudioStore.file(app, id)
         }
+        call.prepMs += (System.nanoTime() - prepFrom) / 1_000_000
         var usedLocal = false
         var offline = false // the speech service couldn't be reached at all
         for (c in order) {
             call.check()
             try {
-                raw = transcribeCloud(prefs, c, samples, m4a, hint, audioMs, call)
+                raw = try {
+                    val from = System.nanoTime()
+                    try {
+                        transcribeCloud(prefs, c, samples, m4a, hint, audioMs, call)
+                    } catch (e: java.io.IOException) {
+                        // A failure within a couple of seconds is usually a connection the network had quietly
+                        // dropped while it sat idle, not a dead link: one fresh try is far quicker than giving up.
+                        val quick = (System.nanoTime() - from) / 1_000_000 < 2500
+                        if (e is HttpException || e is CancelledException || call.cancelled || !quick) throw e
+                        transcribeCloud(prefs, c, samples, m4a, hint, audioMs, call)
+                    }
+                } catch (e: Exception) { throw e }
                 Usage.recordStt(app, c, seconds)
                 if (c != prefs.stt) warnings += "${prefs.stt.label} unavailable, used ${c.label}"
                 break
@@ -272,7 +285,10 @@ class Dictation(context: Context) {
         val quick = prefs.quickSkip && !polish && !inPieces && prefs.cleanup != CleanupChoice.OFF &&
             TextTools.nothingToFix(base, map.isNotEmpty(), prefs.styleFor(category).name, category.name, prefs.customInstructions)
         // With the connection down, waiting on the cleanup service too would only use up the time limit: basic cleanup.
-        for (c in if (offline || quick) emptyList() else cleanupOrder(prefs)) {
+        // But if the service answered a moment ago (the ping taken while talking), one failed upload isn't
+        // "down": cleanup is small and still worth asking for.
+        val noCleanup = offline && pingMs !in 1..800
+        for (c in if (noCleanup || quick) emptyList() else cleanupOrder(prefs)) {
             call.check()
             try {
                 val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces)
@@ -302,13 +318,15 @@ class Dictation(context: Context) {
             if (ping > 0) prefs.learnRate("ping_$kind", ping.toFloat())
             val link = (if (kind == "cell") " · mobile data" else " · Wi-Fi") + if (ping > 0) ", ping $ping ms" else ""
             val us = java.util.Locale.US
+            val parts = if (usedLocal || inPieces) "" else
+                " (prepare %.2f, send %.2f, wait %.2f)".format(us, call.prepMs / 1000.0, call.sendMs / 1000.0, call.waitMs / 1000.0)
             val line = "%.1f s spoken · speech %.2f s".format(us, seconds, sttMs / 1000.0) +
-                (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device)" else "") +
+                (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device)" else parts) +
                 when {
                     quick -> " · cleanup skipped, nothing to fix"
                     cleaned -> " · cleanup %.2f s".format(us, (allMs - sttMs) / 1000.0)
                     prefs.cleanup == CleanupChoice.OFF -> " · cleanup off"
-                    offline -> " · no connection, basic cleanup"
+                    noCleanup -> " · no connection, basic cleanup"
                     else -> " · cleanup failed after %.2f s".format(us, (allMs - sttMs) / 1000.0)
                 } + " · total %.2f s".format(us, allMs / 1000.0) + link
             android.util.Log.i("Tokalot", "Dictation: $line")
@@ -363,7 +381,10 @@ class Dictation(context: Context) {
         }
         if (flacRefused != c.baseUrl) {
             try {
-                return send(Upload.flac(samples))
+                val from = System.nanoTime()
+                val flac = Upload.flac(samples)
+                call.prepMs += (System.nanoTime() - from) / 1_000_000
+                return send(flac)
             } catch (e: HttpException) {
                 if (!formatRefused(e)) throw e
                 flacRefused = c.baseUrl

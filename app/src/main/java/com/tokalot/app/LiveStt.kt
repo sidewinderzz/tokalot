@@ -31,6 +31,37 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
             return lastVoice + PAUSE / 2
         }
 
+        // In a noisy place (walking, a car, a cafe) the microphone never reads as "quiet", so the pause the
+        // cut above waits for never comes and a long dictation went up in one go at the end. After this much
+        // unsent audio, a dip between words is enough; after FORCE_HARD, the quietest moment is used whatever it is.
+        const val FORCE_AFTER = Recorder.SAMPLE_RATE * 15
+        const val FORCE_HARD = Recorder.SAMPLE_RATE * 25
+        /** How far back from "now" the quietest moment is looked for. */
+        const val SEARCH = Recorder.SAMPLE_RATE * 6
+
+        /**
+         * The quietest quarter-second in [a]: its centre (a sample index into [a]), and whether it is a real
+         * dip (under half the typical loudness of [a]), such as the gap between two words or a breath.
+         */
+        fun quietest(a: FloatArray): Pair<Int, Boolean> {
+            val win = Recorder.SAMPLE_RATE / 20 // 50 ms
+            val n = a.size / win
+            if (n < 6) return a.size / 2 to false
+            val rms = FloatArray(n) { w ->
+                var sum = 0.0
+                for (i in w * win until (w + 1) * win) sum += a[i] * a[i]
+                sqrt(sum / win).toFloat()
+            }
+            var best = 0
+            var bestLevel = Float.MAX_VALUE
+            for (w in 0..n - 5) {
+                val level = (rms[w] + rms[w + 1] + rms[w + 2] + rms[w + 3] + rms[w + 4]) / 5f
+                if (level < bestLevel) { bestLevel = level; best = w }
+            }
+            val typical = rms.sortedArray()[n / 2]
+            return (best * win + win * 5 / 2) to (bestLevel < typical * 0.5f)
+        }
+
         /** How many 50 ms stretches have sound in them. */
         fun voiced(a: FloatArray): Int {
             val win = Recorder.SAMPLE_RATE / 20
@@ -63,7 +94,8 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
     fun feed(count: Int, lastVoice: Int, snapshot: (Int, Int) -> FloatArray) {
         // A piece already failed: the whole recording will be transcribed at the end, so more pieces are wasted uploads.
         if (failed) return
-        val cut = nextCut(sent, count, lastVoice)
+        var cut = nextCut(sent, count, lastVoice)
+        if (cut < 0) cut = noisyCut(count, snapshot)
         if (cut < 0) return
         val piece = snapshot(sent, cut)
         if (piece.isEmpty()) return
@@ -85,6 +117,17 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
      * button, which the speech model turns into "Thank you.", so it needs half a second of sound to be sent
      * and a stock phrase from it is dropped. Earlier pieces were cut because speech was heard in them.
      */
+    private var lookedAt = 0 // where the recording had got to when a noisy cut was last considered
+
+    /** See FORCE_AFTER. Looked into once a second at most: it reads six seconds of audio. */
+    private fun noisyCut(count: Int, snapshot: (Int, Int) -> FloatArray): Int {
+        if (count - sent < FORCE_AFTER || count - lookedAt < Recorder.SAMPLE_RATE) return -1
+        lookedAt = count
+        val from = count - SEARCH
+        val (at, dip) = quietest(snapshot(from, count - Recorder.SAMPLE_RATE / 4))
+        return if (dip || count - sent >= FORCE_HARD) from + at else -1
+    }
+
     private fun one(piece: FloatArray, tail: Boolean = false): String {
         if (tail && voiced(piece) < 10) return ""
         val began = System.nanoTime()

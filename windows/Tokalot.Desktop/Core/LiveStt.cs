@@ -61,6 +61,54 @@ public sealed class LiveStt
         return lastVoice + Pause / 2;
     }
 
+    // In a noisy place the microphone never reads as "quiet", so the pause NextCut waits for never comes and
+    // a long dictation went up in one go at the end. After this much unsent audio, a dip between words is
+    // enough; after ForceHard, the quietest moment is used whatever it is.
+    public const int ForceAfter = Recorder.SampleRate * 15;
+    public const int ForceHard = Recorder.SampleRate * 25;
+    /** How far back from "now" the quietest moment is looked for. */
+    public const int Search = Recorder.SampleRate * 6;
+
+    /**
+     * The quietest quarter-second in a: its centre (an index into a), and whether it is a real dip
+     * (under half the typical loudness of a), such as the gap between two words or a breath.
+     */
+    public static (int At, bool Dip) Quietest(float[] a)
+    {
+        const int win = Recorder.SampleRate / 20; // 50 ms
+        int n = a.Length / win;
+        if (n < 6) return (a.Length / 2, false);
+        var rms = new float[n];
+        for (int w = 0; w < n; w++)
+        {
+            double sum = 0;
+            for (int i = w * win; i < (w + 1) * win; i++) sum += a[i] * a[i];
+            rms[w] = (float)Math.Sqrt(sum / win);
+        }
+        int best = 0;
+        float bestLevel = float.MaxValue;
+        for (int w = 0; w <= n - 5; w++)
+        {
+            float level = (rms[w] + rms[w + 1] + rms[w + 2] + rms[w + 3] + rms[w + 4]) / 5f;
+            if (level < bestLevel) { bestLevel = level; best = w; }
+        }
+        var sorted = (float[])rms.Clone();
+        Array.Sort(sorted);
+        return (best * win + win * 5 / 2, bestLevel < sorted[n / 2] * 0.5f);
+    }
+
+    private int lookedAt; // where the recording had got to when a noisy cut was last considered
+
+    /** See ForceAfter. Looked into once a second at most: it reads six seconds of audio. */
+    private int NoisyCut(int count, Func<int, int, float[]> snapshot)
+    {
+        if (count - sent < ForceAfter || count - lookedAt < Recorder.SampleRate) return -1;
+        lookedAt = count;
+        int from = count - Search;
+        var (at, dip) = Quietest(snapshot(from, count - Recorder.SampleRate / 4));
+        return dip || count - sent >= ForceHard ? from + at : -1;
+    }
+
     /** Call a few times a second while recording. */
     public void Feed(Recorder r) => Feed(r.Count, r.LastVoiceSample, r.Snapshot);
 
@@ -69,6 +117,7 @@ public sealed class LiveStt
         // A piece already failed: the whole recording will be transcribed at the end, so more pieces are wasted uploads.
         if (pieces.Exists(p => p.IsFaulted || p.IsCanceled)) return;
         int cut = NextCut(sent, count, lastVoice);
+        if (cut < 0) cut = NoisyCut(count, snapshot);
         if (cut < 0) return;
         var piece = snapshot(sent, cut);
         if (piece.Length == 0) return;
