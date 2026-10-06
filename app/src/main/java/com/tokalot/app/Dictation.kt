@@ -25,6 +25,13 @@ class Dictation(context: Context) {
     private val unload = Runnable { exec.execute { releaseLocal() } }
     private var current: Job? = null // main thread only
 
+    /** For the progress ring: 0 while the speech is being recognised, 1 during cleanup, 2 when the text is ready. */
+    @Volatile var stage = 0
+        private set
+    /** How long the recognised text is, once [stage] is 1 (the cleanup's wait grows with it). */
+    @Volatile var stageChars = 0
+        private set
+
     /**
      * plain: the user's own wording, cleaned up without AI. Only set when "Polish my wording" is on,
      * the AI cleanup ran, and it differs from [text]; it is what "My wording" puts back.
@@ -128,6 +135,7 @@ class Dictation(context: Context) {
         onDone: (Outcome?, String?) -> Unit,
     ) {
         main.removeCallbacks(unload)
+        stage = 0
         val job = Job(live, onDone)
         current = job
         val audioMs = samples.size * 1000L / Recorder.SAMPLE_RATE
@@ -243,6 +251,9 @@ class Dictation(context: Context) {
         val base = TextTools.stripNoise(raw)
         if (base.isBlank() || (sparse && TextTools.isPhantom(base))) return Outcome("", warnings.firstOrNull())
 
+        stageChars = base.length
+        stage = 1
+
         // 2-4. Snippets + cleanup
         val snippets = prefs.snippets
         val (protectedText, map) = TextTools.protect(base, snippets)
@@ -273,8 +284,12 @@ class Dictation(context: Context) {
         if (finalText == null) finalText = basic
         val plain = basic.takeIf { polish && cleaned && it != finalText }
 
+        stage = 2
         runCatching {
             val allMs = (System.nanoTime() - began) / 1_000_000
+            // What this one took feeds the ring's estimate for the next (a slow connection shows up within a few dictations).
+            if (!usedLocal && !inPieces) prefs.sttRate = prefs.sttRate * 0.6f + 0.4f * (sttMs / seconds.coerceAtLeast(3.0)).toFloat()
+            if (cleaned) prefs.cleanRate = prefs.cleanRate * 0.6f + 0.4f * ((allMs - sttMs) / base.length.coerceAtLeast(40).toFloat())
             val us = java.util.Locale.US
             val line = "%.1f s spoken · speech %.2f s".format(us, seconds, sttMs / 1000.0) +
                 (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device)" else "") +

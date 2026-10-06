@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // Bump both for every release you install on top of an older one.
-        versionCode = 25
-        versionName = "1.23-beta1"
+        versionCode = 26
+        versionName = "1.23-beta2"
 
         // arm64 only: every modern phone, and it keeps the APK small and the build fast.
         // Override with -Pabis=x86_64 for the emulator used by the screenshot workflow.

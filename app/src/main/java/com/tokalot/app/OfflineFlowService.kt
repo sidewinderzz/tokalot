@@ -622,6 +622,7 @@ class OfflineFlowService : AccessibilityService() {
         cancelIcon?.visibility = View.GONE
         bars?.alpha = 1f
         if (s == State.WORKING) handler.postDelayed(showCancel, CANCEL_SHOW_MS)
+        else { handler.removeCallbacks(ringTick); buttonBg?.progress = -1f }
         buttonBg?.active = s != State.IDLE
         button?.animate()?.cancel()
         button?.alpha = if (s == State.IDLE) IDLE_ALPHA else 1f
@@ -859,6 +860,53 @@ class OfflineFlowService : AccessibilityService() {
         handler.postDelayed({ begin() }, 1000) // safety net if the service never reports back
     }
 
+    // ---------- progress ring while transcribing ----------
+    // An estimate, not a measurement: the services don't report how far along they are. The ring moves at the
+    // pace recent dictations took (speech-to-text, then cleanup), slows as it nears the end of each step so it
+    // never claims to be finished early, and jumps on when a step really completes.
+
+    private var ringFrom = 0L          // when transcribing started
+    private var ringStage1At = 0L      // when the speech step was seen to be done
+    private var ringStt = 1f           // expected milliseconds for speech-to-text
+    private var ringClean = 1f         // and for cleanup
+    private var ringRate = 6f
+    private var ringShown = 0f
+    private val ringTick = object : Runnable {
+        override fun run() {
+            if (state != State.WORKING) return
+            val now = SystemClock.elapsedRealtime()
+            val stage = dictation.stage
+            if (stage >= 1 && ringStage1At == 0L) {
+                ringStage1At = now
+                ringClean = (ringRate * dictation.stageChars).coerceAtLeast(500f) // the real length is known now
+            }
+            fun ease(x: Float) = 1f - kotlin.math.exp(-1.8f * x)
+            val share = ringStt / (ringStt + ringClean)
+            val target = when (stage) {
+                0 -> share * ease((now - ringFrom) / ringStt)
+                1 -> share + (1f - share) * ease((now - ringStage1At) / ringClean)
+                else -> 1f
+            } * 0.97f
+            ringShown = maxOf(ringShown, ringShown + (target - ringShown) * 0.2f) // smooth, and never backwards
+            buttonBg?.progress = ringShown
+            handler.postDelayed(this, 33)
+        }
+    }
+
+    /** audioSeconds: how much speech still has to be recognised (only the tail, when pieces were sent early). */
+    private fun startRing(audioSeconds: Float) {
+        val prefs = Prefs(this)
+        ringRate = prefs.cleanRate
+        ringStt = (prefs.sttRate * audioSeconds.coerceAtLeast(3f)).coerceAtLeast(600f)
+        ringClean = (ringRate * audioSeconds * 13f).coerceAtLeast(500f) // about 13 characters a second of speech
+        ringFrom = SystemClock.elapsedRealtime()
+        ringStage1At = 0L
+        ringShown = 0f
+        buttonBg?.progress = 0f
+        handler.removeCallbacks(ringTick)
+        handler.post(ringTick)
+    }
+
     /** Long dictations: the part said so far is sent for transcription at each pause (see [LiveStt]). */
     private var live: LiveStt? = null
     private val liveFeed = object : Runnable {
@@ -932,6 +980,8 @@ class OfflineFlowService : AccessibilityService() {
         }
         setState(State.WORKING)
         workingSince = SystemClock.elapsedRealtime()
+        val seconds = samples.size / Recorder.SAMPLE_RATE.toFloat()
+        startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds)
         dictation.process(samples, targetApp, sparse = !heard, live = early) { outcome, err ->
             setState(State.IDLE)
             when {

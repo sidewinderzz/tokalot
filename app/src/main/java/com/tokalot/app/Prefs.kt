@@ -380,6 +380,17 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("haptics", true)
         set(v) = sp.edit().putBoolean("haptics", v).apply()
 
+    /**
+     * How long things have been taking lately, for the progress ring's estimate: speech-to-text in
+     * milliseconds per second of audio, and cleanup in milliseconds per character. Running averages.
+     */
+    var sttRate: Float
+        get() = runCatching { sp.getFloat("rate_stt", 150f) }.getOrDefault(150f)
+        set(v) = sp.edit().putFloat("rate_stt", v).apply()
+    var cleanRate: Float
+        get() = runCatching { sp.getFloat("rate_clean", 6f) }.getOrDefault(6f)
+        set(v) = sp.edit().putFloat("rate_clean", v).apply()
+
     /** Beta: skip the AI cleanup when a short dictation has nothing for it to fix. */
     var quickSkip: Boolean
         get() = sp.safeBoolean("quick_skip", false)
