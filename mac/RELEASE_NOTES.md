@@ -2,6 +2,12 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.2.2
+
+- If the Keychain didn't answer in time at start-up, Tokalot asks it again at the next dictation instead of showing no keys until a restart.
+- An API key you clear is no longer filled back in from the sync file.
+- The offline model is only removed when its file is actually damaged.
+
 ## New in 0.2.1
 
 - A short hold is no longer mistaken for a tap (hands-free) when the microphone is slow to open.

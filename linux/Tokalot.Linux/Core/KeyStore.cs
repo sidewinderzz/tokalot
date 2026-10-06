@@ -57,33 +57,44 @@ public static class KeyStore
     }
 
     /** Fetches every noted key in the background. Call once at start-up (and after a restore). */
+    private static volatile bool unanswered; // the last fetch gave up waiting on at least one key
+
     public static Task Preload(Settings s)
     {
         var places = s.KeyPlaces();
         return preload = Task.Run(() =>
         {
+            var missed = false;
             foreach (var (service, where) in places)
             {
                 lock (Gate) { if (Cache.ContainsKey(service)) continue; }
                 var value = Fetch(service, where);
+                // No answer in time is not "no key": leave it unknown, so it is asked for again later.
+                if (value == null) { missed = true; continue; }
                 lock (Gate) Cache.TryAdd(service, value);
             }
+            unanswered = missed;
             Changed?.Invoke();
         });
     }
 
     /** Blocking: asks the keyring (up to 20 s, in case an unlock prompt is showing), then the file. A failure is remembered as "no key". */
-    private static string Fetch(string service, string where)
+    private static string? Fetch(string service, string where)
     {
         string? value = null;
+        var timedOut = false;
         if (where == Keyring && SecretTool is { } tool)
         {
             var r = Sh.Run(tool, new[] { "lookup", "application", "tokalot", "service", service }, timeoutMs: 20000);
-            if (r.Exit == 0) value = r.Out.TrimEnd('\n', '\r');
-            else if (r.Exit == -1) Notice = "The login keyring didn't answer when Tokalot started, so keys kept there aren't loaded. Unlock it and restart Tokalot.";
+            if (r.Exit == 0) { value = r.Out.TrimEnd('\n', '\r'); Notice = null; }
+            else if (r.Exit == -1)
+            {
+                timedOut = true;
+                Notice = "The login keyring didn't answer, so keys kept there aren't loaded yet. Unlock it; Tokalot asks again at the next dictation.";
+            }
         }
         value ??= ReadFile().GetValueOrDefault(service);
-        return value ?? "";
+        return value ?? (timedOut ? null : "");
     }
 
     /** Never waits on the keyring: the copy in memory, or (for a key kept in the file) a quick read of the file. */
@@ -96,7 +107,8 @@ public static class KeyStore
         if (where == Keyring && SecretTool != null)
         {
             // Not fetched yet: make sure the background fetch is on its way.
-            var loading = preload ?? Preload(Settings.Current);
+            // A finished fetch that gave up waiting (an unlock prompt left open at start-up) is run again.
+            var loading = preload == null || (preload.IsCompleted && unanswered) ? Preload(Settings.Current) : preload;
             // The window's thread never waits (it shows "no key" for a moment). Background work does: a dictation
             // would otherwise fail for want of a key, and sync would take a key from the file over the one in the keyring.
             if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) return "";

@@ -15,7 +15,7 @@ public static class ModelManager
     public const string Name = "ggml-base.en-q5_1.bin";
     // Pinned to one revision and checked against its published SHA-256, so the file can't change underneath us.
     private const string Url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/" + Name;
-    private const string Sha256 = "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f";
+    internal const string Sha256 = "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f";
 
     public static string FilePath => Path.Combine(Paths.Dir("models"), Name);
     public static bool IsReady => File.Exists(FilePath) && new FileInfo(FilePath).Length > 10_000_000;
@@ -88,9 +88,19 @@ public sealed class LocalWhisper : IDisposable
         {
             unloadTimer?.Dispose();
             try { factory ??= WhisperFactory.FromPath(ModelManager.FilePath); }
-            catch
+            catch (Exception e)
             {
                 // A damaged model file would fail forever; remove it so Settings offers the download again.
+                // A good file that won't load (out of memory, the speech engine itself missing) is kept:
+                // downloading it again would fail the same way.
+                bool damaged;
+                try
+                {
+                    using var f = File.OpenRead(ModelManager.FilePath);
+                    damaged = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(f)).ToLowerInvariant() != ModelManager.Sha256;
+                }
+                catch { damaged = false; }
+                if (!damaged) throw new InvalidOperationException("The offline model couldn't be loaded: " + e.Message);
                 try { File.Delete(ModelManager.FilePath); } catch { }
                 throw new InvalidOperationException("The offline model was damaged and has been removed. Download it again in Settings.");
             }

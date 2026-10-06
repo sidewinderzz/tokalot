@@ -14,10 +14,14 @@ public static class TextInjector
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
     private static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
+    private static Task restoring = Task.CompletedTask; // the previous paste putting the old clipboard back
+
     public static async Task Paste(string text)
     {
         // Windows apps expect CRLF line breaks (lists and paragraphs from the cleanup step).
         text = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+        // Let the last paste finish with the clipboard first, or its text would be saved as "what was there before".
+        try { await restoring; } catch { }
         // Wait (briefly) until Ctrl/Win/Alt/Shift are up, so the paste isn't read as another shortcut.
         for (int i = 0; i < 30 && (Down(0x11) || Down(0x5B) || Down(0x5C) || Down(0x12) || Down(0x10)); i++)
             await Task.Delay(50);
@@ -32,8 +36,15 @@ public static class TextInjector
         };
         HotkeyHook.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<HotkeyHook.INPUT>());
 
-        // Give the target app time to read the clipboard before restoring it.
-        await Task.Delay(450);
+        // A slow app, a remote desktop or a virtual machine can take over a second to read the clipboard, and
+        // would paste the old contents if they were put back sooner. The wait happens in the background.
+        await Task.Delay(150);
+        restoring = Restore(previous, text);
+    }
+
+    private static async Task Restore(DataObject? previous, string text)
+    {
+        await Task.Delay(1300);
         // Only put the old clipboard back if nothing else replaced ours in the meantime.
         try { if (Clipboard.ContainsText() && Clipboard.GetText() != text) return; } catch { }
         for (int i = 0; i < 8; i++)

@@ -88,6 +88,8 @@ public sealed class App : Application
         Log($"Start {Updater.CurrentVersion} · render tier {System.Windows.Media.RenderCapability.Tier >> 16} · gpu={gpu} · {Environment.OSVersion}");
         C.Apply(s.Theme);
         Resources = Ui.MenuStyles();
+        // Signing out or shutting down mid-dictation: keep the recording, as Quit does.
+        SessionEnding += (_, _) => Controller?.SaveBeforeExit();
         DispatcherUnhandledException += (_, e) =>
         {
             Log("UI error: " + e.Exception);
@@ -219,6 +221,7 @@ public sealed class App : Application
 
     public void Quit()
     {
+        Controller?.SaveBeforeExit();
         Controller?.Dispose();
         if (tray != null) { tray.Visible = false; tray.Dispose(); }
         Shutdown();
@@ -266,6 +269,12 @@ public sealed class App : Application
     public async Task InstallUpdate()
     {
         if (UpdateVersion == null || UpdateProgress != null) return;
+        // Installing restarts Tokalot, which would throw away a dictation that is being recorded or transcribed.
+        if (Controller is { Busy: true })
+        {
+            Ui.Dialog(window, "A dictation is in progress. Update once it has finished.", cancel: null);
+            return;
+        }
         UpdateProgress = 0;
         Refresh();
         try
@@ -365,6 +374,7 @@ public sealed class Controller : IDisposable
         hook.Pressed += () => ui.BeginInvoke(OnPressed);
         hook.Released += () => ui.BeginInvoke(OnReleased);
         hook.KeyWhileHeld += vk => ui.BeginInvoke(() => OnOtherKey(vk));
+        hook.TypedAfterPaste += () => ui.BeginInvoke(() => { if (state == State.Idle) plainText = null; });
         hook.Escape += () => ui.BeginInvoke(() => { if (state == State.Processing) CancelWork(); else Cancel(true); });
         tick = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal, (_, _) => Tick(), ui);
         tick.Stop();
@@ -566,6 +576,30 @@ public sealed class Controller : IDisposable
 
     /** Gives up after a while even on a dead connection: a minute plus twice the recording's length. */
     private CancellationTokenSource? userWork; // cancelled only by the user; `work` also ends when time runs out
+    private float[]? held;                     // the recording being transcribed, until its text is delivered
+    private ActiveApp? heldApp;
+
+    public bool Busy => state != State.Idle;
+
+    /**
+     * Tokalot is about to close. A recording that is still being made or transcribed exists only in memory,
+     * so it is put in history first (with a Transcribe button), rather than lost.
+     */
+    public void SaveBeforeExit()
+    {
+        try
+        {
+            float[]? samples = null;
+            var target = heldApp;
+            if (state == State.Recording) { samples = recorder.Stop(); target = app; }
+            else if (state == State.Processing) samples = held;
+            held = null;
+            if (samples == null || samples.Length < Recorder.SampleRate) return;
+            dictation.KeepAudio(samples, null, "Cancelled", target, cancelled: true).Wait(8000);
+            App.Log("Closing mid-dictation: the recording was kept in history");
+        }
+        catch (Exception e) { App.Log("Couldn't keep the recording on exit: " + e.Message); }
+    }
 
     private CancellationToken StartWork(int sampleCount)
     {
@@ -690,11 +724,14 @@ public sealed class Controller : IDisposable
         if (early != null) early.LastVoice = lastVoice;
         var ct = StartWork(samples.Length);
         var userCt = userWork!.Token;
+        held = samples;
+        heldApp = target;
         try
         {
             var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early, user: userCt));
             if (Dictation.LastTiming.Length > 0) App.Log("Dictation: " + Dictation.LastTiming);
             hook.Listening = false;
+            held = null; // the text exists and is in history: nothing left to lose
             if (outcome.Text.Length > 0)
             {
                 await TextInjector.Paste(outcome.Text);
@@ -730,6 +767,7 @@ public sealed class Controller : IDisposable
         }
         finally
         {
+            held = null;
             EndWork();
             state = State.Idle;
             App.Current.RefreshAfterDictation();

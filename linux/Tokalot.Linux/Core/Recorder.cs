@@ -94,6 +94,9 @@ public sealed class Recorder : IDisposable
 
             var order = new List<(string Tool, string[] Args)>(Tools);
             order.Sort((a, b) => (b.Tool == proven).CompareTo(a.Tool == proven));
+            // First pass: a recorder has 450 ms to deliver. If none does, a second pass gives each up to 3 s,
+            // which a Bluetooth headset switching to its microphone mode can need.
+            foreach (var patience in new[] { 450, 3000 })
             foreach (var (tool, args) in order)
             {
                 if (Sh.Which(tool) is not { } path) continue;
@@ -108,7 +111,7 @@ public sealed class Recorder : IDisposable
                 // one with no device quits straight away, and one talking to a sound server that isn't
                 // running (pw-record on a PulseAudio system) stays alive but never sends a sample.
                 // This wait happens once per run, on the first recording.
-                if (tool != proven && !first.Wait(450))
+                if (tool != proven && !Delivered(first, p, patience))
                 {
                     session++;
                     try { if (!p.HasExited) p.Kill(); } catch { }
@@ -129,6 +132,17 @@ public sealed class Recorder : IDisposable
             Kill();
             return false;
         }
+    }
+
+    /** Waits for the first audio, giving up early if the recorder has quit. */
+    private static bool Delivered(ManualResetEventSlim first, Process p, int ms)
+    {
+        for (int waited = 0; waited < ms; waited += 50)
+        {
+            if (first.Wait(50)) return true;
+            try { if (p.HasExited) return first.Wait(50); } catch { return false; }
+        }
+        return false;
     }
 
     private static Process? Launch(string path, string[] args)

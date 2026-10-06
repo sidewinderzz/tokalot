@@ -61,33 +61,44 @@ public static unsafe class KeyStore
     }
 
     /** Fetches every noted key in the background. Call once at start-up (and after a restore). */
+    private static volatile bool unanswered; // the last fetch gave up waiting on at least one key
+
     public static Task Preload(Settings s)
     {
         var places = s.KeyPlaces();
         return preload = Task.Run(() =>
         {
+            var missed = false;
             foreach (var (service, where) in places)
             {
                 lock (Gate) { if (Cache.ContainsKey(service)) continue; }
                 var value = Fetch(service, where);
+                // No answer in time is not "no key": leave it unknown, so it is asked for again later.
+                if (value == null) { missed = true; continue; }
                 lock (Gate) Cache.TryAdd(service, value);
             }
+            unanswered = missed;
             Changed?.Invoke();
         });
     }
 
     /** Blocking: asks the Keychain (up to 20 s, in case it is asking for your password), then the file. */
-    private static string Fetch(string service, string where)
+    private static string? Fetch(string service, string where)
     {
         string? value = null;
+        var timedOut = false;
         if (where != FileStore && UseKeychain)
         {
             var t = Task.Run(() => Keychain.Find(ServiceName, service));
             if (t.Wait(20000)) value = t.Result.Value;
-            else Notice = "The Keychain didn't answer when Tokalot started, so keys kept there aren't loaded. Restart Tokalot and allow it if macOS asks.";
+            else
+            {
+                timedOut = true;
+                Notice = "The Keychain didn't answer, so keys kept there aren't loaded yet. Allow it if macOS asks; Tokalot asks again at the next dictation.";
+            }
         }
         value ??= ReadFile().GetValueOrDefault(service);
-        return value ?? "";
+        return value ?? (timedOut ? null : "");
     }
 
     /** Never waits on the Keychain from the window's thread: the copy in memory, or (for a key kept in the file) a quick read of the file. */
@@ -99,7 +110,8 @@ public static unsafe class KeyStore
         }
         if (where != FileStore && UseKeychain)
         {
-            var loading = preload ?? Preload(Settings.Current);
+            // A finished fetch that gave up waiting (an unlock prompt left open at start-up) is run again.
+            var loading = preload == null || (preload.IsCompleted && unanswered) ? Preload(Settings.Current) : preload;
             if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) return "";
             try { loading.Wait(25000); } catch { }
             lock (Gate) return Cache.GetValueOrDefault(service, "");

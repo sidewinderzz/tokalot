@@ -118,6 +118,14 @@ class SyncTest {
 
     // ---------- keys ----------
 
+    @Test fun aKeyClearedHereIsNotRefilledFromTheFile() {
+        val file = mapOf("groq" to "R1", "openai" to "R2")
+        val r = SyncMerge.merge(SyncState(), remote(keys = file), SyncState(), mapOf("groq" to ""), false, knownKeys = setOf("groq"))
+        assertEquals("", r.localKeys["groq"])     // had one before, cleared it: stays cleared
+        assertEquals("R2", r.localKeys["openai"]) // never had one: filled as before
+        assertEquals(file, r.fileKeys)            // and the file keeps its copy
+    }
+
     @Test fun keysOnlyReachTheFileWhenIncluded() { // 7
         val file = mapOf("groq" to "R1", "openai" to "R2")
         val off = merge(SyncState(), remote(keys = file), SyncState(), keys = mapOf("groq" to "L1"), includeKeys = false)

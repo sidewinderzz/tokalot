@@ -151,7 +151,10 @@ object Sync {
         val local = prefs.syncState()
         val localKeys = SyncFormat.SERVICES.associateWith { prefs.key(it) }
         val base = SyncFormat.parseBase(if (firstSync) null else prefs.syncBase, DEFAULT_INSTRUCTIONS)
-        val result = SyncMerge.merge(local, remote, base, localKeys, prefs.syncKeys)
+        val known = prefs.knownKeys
+        val result = SyncMerge.merge(local, remote, base, localKeys, prefs.syncKeys, known)
+        val nowKnown = known + result.localKeys.filterValues { it.isNotEmpty() }.keys
+        if (nowKnown != known) prefs.knownKeys = nowKnown
 
         if (result.state != local || result.localKeys != localKeys) {
             prefs.applySynced(result.state, result.localKeys)

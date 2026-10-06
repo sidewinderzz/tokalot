@@ -204,12 +204,15 @@ public static class Sync
             // Keys have no basis: take one this device lacks; hand ours over only if the user asked.
             var keys = (file?["keys"] as JsonObject)?.DeepClone().AsObject() ?? new JsonObject();
             var keysChanged = false;
+            var noted = false; // KnownKeys grew: worth saving, but nothing the window needs to redraw for
             foreach (var (id, _, _) in Catalog.Services)
             {
                 var mine = s.Key(id);
                 var theirs = keys[id]?.ToString() ?? "";
-                if (mine.Length == 0 && theirs.Length > 0) { s.SetKey(id, theirs); localChanged = true; }
+                // A key this device has had before and now lacks was cleared here on purpose: leave it cleared.
+                if (mine.Length == 0 && theirs.Length > 0 && !s.KnownKeys.Contains(id)) { s.SetKey(id, theirs); mine = theirs; localChanged = true; }
                 else if (s.SyncKeys && mine.Length > 0 && mine != theirs) { keys[id] = mine; keysChanged = true; }
+                if (mine.Length > 0 && !s.KnownKeys.Contains(id)) { s.KnownKeys.Add(id); noted = true; }
             }
 
             if (!Same(merged, local))
@@ -220,7 +223,7 @@ public static class Sync
                 s.CustomInstructions = merged.Instructions;
                 localChanged = true;
             }
-            if (localChanged) s.Save();
+            if (localChanged || noted) s.Save();
             if (remote == null || !Same(merged, remote) || keysChanged)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);

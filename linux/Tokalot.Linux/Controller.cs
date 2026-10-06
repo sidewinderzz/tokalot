@@ -161,6 +161,22 @@ public sealed class Controller : IDisposable
         if (state != State.Recording) { tick.Stop(); return; }
         var s = Settings.Current;
         live?.Feed(recorder); // long dictations: send what's been said so far at each pause
+        // Locked, or another user switched in, while a hands-free recording runs: stop, and keep what was said.
+        // (Asked off the window's thread, every couple of seconds. Always "usable" where there is no loginctl.)
+        if (handsFree && !sessionCheck && (DateTime.UtcNow - sessionAsked).TotalSeconds > 2)
+        {
+            sessionCheck = true;
+            sessionAsked = DateTime.UtcNow;
+            Task.Run(() => Session.Usable).ContinueWith(t =>
+            {
+                var usable = t.Status != TaskStatus.RanToCompletion || t.Result;
+                ui.Post(() =>
+                {
+                    sessionCheck = false;
+                    if (!usable && state == State.Recording && handsFree) Cancel(true);
+                });
+            });
+        }
         // In hold mode, ask the keyboards what is really held, in case a key-up never arrived.
         if (!handsFree) hook.Poll();
         if (recorder.Full)
@@ -176,6 +192,8 @@ public sealed class Controller : IDisposable
     }
 
     private LiveStt? live; // pieces of the current recording already sent for transcription
+    private bool sessionCheck;       // a "is the screen locked" question is out
+    private DateTime sessionAsked;
 
     /** Stops recording without transcribing. */
     public void Cancel(bool audible)

@@ -165,10 +165,10 @@ public sealed class Dictation : IDisposable
     }
 
     /** Keeps the audio for playback (after the text is delivered). Failed runs still get an entry. */
-    public void KeepAudio(float[] samples, long? entryId, string? error, ActiveApp? app, bool cancelled = false)
+    public Task KeepAudio(float[] samples, long? entryId, string? error, ActiveApp? app, bool cancelled = false)
     {
         var s = Settings.Current;
-        Task.Run(() =>
+        return Task.Run(() =>
         {
             var id = entryId;
             var pending = false;

@@ -137,7 +137,7 @@ object SyncMerge {
      */
     fun merge(
         local: SyncState, remote: SyncRemote?, base: SyncState,
-        localKeys: Map<String, String>, includeKeys: Boolean,
+        localKeys: Map<String, String>, includeKeys: Boolean, knownKeys: Set<String> = emptySet(),
     ): SyncResult {
         val state = SyncState(
             words(local.words, remote?.words, base.words),
@@ -147,12 +147,13 @@ object SyncMerge {
         )
 
         // Keys have no base: an empty slot here is filled from the file, and the file only
-        // gets this device's keys when it opted in. Deleting a key never spreads.
+        // gets this device's keys when it opted in. Deleting a key never spreads. A slot this device
+        // has filled before ([knownKeys]) and is empty now was cleared on purpose, so it stays empty.
         val theirs = remote?.keys ?: emptyMap()
         val mine = LinkedHashMap<String, String>()
         for (s in SyncFormat.SERVICES) {
             val have = localKeys[s]?.trim().orEmpty()
-            mine[s] = have.ifEmpty { theirs[s].orEmpty() }
+            mine[s] = have.ifEmpty { if (s in knownKeys) "" else theirs[s].orEmpty() }
         }
         val fileKeys: Map<String, String>? = if (!includeKeys) remote?.keys else {
             val out = LinkedHashMap<String, String>()

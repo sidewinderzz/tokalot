@@ -1,5 +1,13 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.4.2
+
+- A hands-free recording stops within a few seconds of the screen being locked; what you said is kept in history.
+- A microphone that is slow to start, such as a Bluetooth headset, gets a second, longer chance instead of "no microphone".
+- If the login keyring didn't answer in time at start-up, Tokalot asks it again at the next dictation instead of showing no keys until a restart.
+- An API key you clear is no longer filled back in from the sync file.
+- The offline model is only removed when its file is actually damaged.
+
 ## New in 0.4.1
 
 - Recording on PipeWire systems (most current distros): `pw-record` sends its audio in a different byte order from the other recorders, and Tokalot was reading it as noise. It now reads it correctly. This was found by reading the code, not on a real PipeWire machine, so please report whether recording works for you.

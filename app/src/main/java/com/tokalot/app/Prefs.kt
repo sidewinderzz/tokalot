@@ -265,6 +265,11 @@ class Prefs(ctx: Context) {
             Sync.changed(app)
         }
 
+    /** Services this device has held a key for. One of these with no key now was cleared by the user, so sync doesn't refill it. */
+    var knownKeys: Set<String>
+        get() = sp.getStringSet("known_keys", emptySet())?.toSet() ?: emptySet()
+        set(v) = sp.edit().putStringSet("known_keys", v).apply()
+
     /** Learn names and terms from the user's corrections after a dictation (see [Learn]). Off unless switched on. */
     var learnWords: Boolean
         get() = sp.safeBoolean("learn_words", false)

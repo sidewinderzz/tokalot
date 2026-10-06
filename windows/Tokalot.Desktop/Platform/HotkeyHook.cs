@@ -56,6 +56,9 @@ public sealed class HotkeyHook : IDisposable
      * The hook runs on its own thread with its own message loop. Windows silently removes a
      * low-level hook that answers too slowly, so it must never wait on the (sometimes busy) UI thread.
      */
+    /** A key was typed while the swap-the-wording offer was open (which closes it). */
+    public event Action? TypedAfterPaste;
+
     public HotkeyHook()
     {
         proc = Callback;
@@ -162,6 +165,13 @@ public sealed class HotkeyHook : IDisposable
         else if (isWin) { if (down) win = true; else if (up) win = false; }
         else if (down)
         {
+            // Something was typed after the paste. Ctrl+Z would now undo that typing, not the paste, so the
+            // offer to swap the wording is withdrawn. (Shift and Alt on their own type nothing.)
+            if (OwnKey != 0 && !active && vk is not (0x10 or 0x12 or >= 0xA0 and <= 0xA5))
+            {
+                OwnKey = 0;
+                TypedAfterPaste?.Invoke();
+            }
             if (vk == VK_ESCAPE && (active || Listening)) Escape?.Invoke();
             else if (active || Listening) KeyWhileHeld?.Invoke(vk);
         }
