@@ -248,8 +248,6 @@ public sealed class App : Application
         var v = await Updater.Check();
         if (v != null && v != UpdateVersion)
         {
-            // Tokalot usually sits in the tray with no window open, so say it there too (once per version).
-            tray?.ShowBalloonTip(8000, "Tokalot " + v + " is available", "Open Tokalot and choose Update.", System.Windows.Forms.ToolTipIcon.Info);
             UpdateVersion = v;
             if (updateItem != null) { updateItem.Text = $"Update to {v}"; updateItem.Visible = true; }
             Refresh();

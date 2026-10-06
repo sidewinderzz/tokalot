@@ -40,18 +40,6 @@ object Updater {
         return Release(v, s.getString("url", "")!!, s.getLong("size", 0), s.getString("notes", "")!!)
     }
 
-    /**
-     * The version to tell the user about, once: a newer release that hasn't been announced or dismissed yet.
-     * The floating button's service uses this, since most days the app itself is never opened.
-     */
-    fun announceOnce(ctx: Context): String? {
-        val r = available(ctx) ?: return null
-        val s = sp(ctx)
-        if (s.getString("announced", null) == r.version) return null
-        s.edit().putString("announced", r.version).apply()
-        return r.version
-    }
-
     fun dismiss(ctx: Context, version: String) = sp(ctx).edit().putString("dismissed", version).apply()
 
     /** Blocking. Asks GitHub for the latest release unless we checked recently. Returns true if something changed. */

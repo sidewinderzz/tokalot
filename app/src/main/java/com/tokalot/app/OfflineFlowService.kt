@@ -155,7 +155,7 @@ class OfflineFlowService : AccessibilityService() {
 
     /**
      * Looks for a new version now and then while the keyboard is in use (the check itself is limited to once
-     * every few hours) and says so once per version. Without this, an update only showed up after opening the app.
+     * every few hours), so the update is already waiting on the Home page when the app is opened. Nothing pops up.
      */
     private fun lookForUpdate() {
         val now = System.currentTimeMillis()
@@ -164,10 +164,7 @@ class OfflineFlowService : AccessibilityService() {
         val app = applicationContext
         Thread {
             runCatching {
-                Updater.check(app)
-                Updater.announceOnce(app)?.let { v ->
-                    handler.post { toast("Tokalot $v is available. Open Tokalot to update.") }
-                }
+                Updater.check(app) // quietly: the app shows the update on its Home page, nothing pops up
             }
         }.start()
     }
