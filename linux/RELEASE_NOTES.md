@@ -1,5 +1,10 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.5.0
+
+- Quick mode (beta), off until you turn it on in Settings › Speed: when a short dictation (20 words or fewer) has nothing for the AI cleanup to fix, the cleanup is skipped and the text is tidied on this computer, which is instant.
+- The log now records how long speech-to-text and cleanup took for each dictation, in seconds.
+
 ## New in 0.4.2
 
 - A hands-free recording stops within a few seconds of the screen being locked; what you said is kept in history.

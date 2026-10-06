@@ -10,7 +10,7 @@
     <RootNamespace>Tokalot.Desktop</RootNamespace>
     <Product>Tokalot</Product>
     <Company>sidewinderzz</Company>
-    <Version>0.2.2</Version>
+    <Version>0.3.0</Version>
     <!-- Apple silicon unless another one is asked for (-r osx-x64 for Intel Macs; -r linux-x64 runs the screenshot mode on Linux). -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">osx-arm64</RuntimeIdentifier>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>

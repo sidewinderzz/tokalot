@@ -2,6 +2,11 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.3.0
+
+- Quick mode (beta), off until you turn it on in Settings › Speed: when a short dictation (20 words or fewer) has nothing for the AI cleanup to fix, the cleanup is skipped and the text is tidied on this computer, which is instant.
+- The log now records how long speech-to-text and cleanup took for each dictation, in seconds.
+
 ## New in 0.2.2
 
 - If the Keychain didn't answer in time at start-up, Tokalot asks it again at the next dictation instead of showing no keys until a restart.
