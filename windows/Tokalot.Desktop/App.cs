@@ -576,6 +576,49 @@ public sealed class Controller : IDisposable
 
     /** Gives up after a while even on a dead connection: a minute plus twice the recording's length. */
     private CancellationTokenSource? userWork; // cancelled only by the user; `work` also ends when time runs out
+    // ---------- progress line while transcribing ----------
+    // An estimate, not a measurement: the services don't report how far along they are. The line moves at the
+    // pace recent dictations took (speech-to-text, then cleanup), slows as it nears the end of each step so it
+    // never claims to be finished early, and jumps on when a step really completes.
+    private DispatcherTimer? ringTimer;
+    private DateTime ringFrom, ringStage1At;
+    private double ringStt = 1, ringClean = 1, ringShown;
+
+    /** audioSeconds: how much speech still has to be recognised (only the tail, when pieces were sent early). */
+    private void StartRing(double audioSeconds)
+    {
+        ringStt = Math.Max(600, Dictation.SttRate * Math.Max(audioSeconds, 3));
+        ringClean = Math.Max(500, Dictation.CleanRate * audioSeconds * 13); // about 13 characters a second of speech
+        ringFrom = DateTime.UtcNow;
+        ringStage1At = default;
+        ringShown = 0;
+        indicator.SetProgress(0);
+        ringTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Background, (_, _) => RingTick(), ui);
+        ringTimer.Start();
+    }
+
+    private void RingTick()
+    {
+        if (state != State.Processing) { ringTimer?.Stop(); return; }
+        var now = DateTime.UtcNow;
+        int stage = Dictation.Stage;
+        if (stage >= 1 && ringStage1At == default)
+        {
+            ringStage1At = now;
+            ringClean = Math.Max(500, Dictation.CleanRate * Dictation.StageChars); // the real length is known now
+        }
+        static double Ease(double x) => 1 - Math.Exp(-1.8 * x);
+        double share = ringStt / (ringStt + ringClean);
+        double target = 0.97 * stage switch
+        {
+            0 => share * Ease((now - ringFrom).TotalMilliseconds / ringStt),
+            1 => share + (1 - share) * Ease((now - ringStage1At).TotalMilliseconds / ringClean),
+            _ => 1,
+        };
+        ringShown = Math.Max(ringShown, ringShown + (target - ringShown) * 0.2); // smooth, and never backwards
+        indicator.SetProgress(ringShown);
+    }
+
     private float[]? held;                     // the recording being transcribed, until its text is delivered
     private ActiveApp? heldApp;
 
@@ -726,6 +769,8 @@ public sealed class Controller : IDisposable
         var userCt = userWork!.Token;
         held = samples;
         heldApp = target;
+        var spoken = samples.Length / (double)Recorder.SampleRate;
+        StartRing(early is { Pieces: > 0 } ? Math.Min(spoken, 10) : spoken);
         try
         {
             var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early, user: userCt));

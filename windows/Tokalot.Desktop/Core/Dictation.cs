@@ -54,6 +54,16 @@ public sealed class Dictation : IDisposable
         return hint.ToString();
     }
 
+    /** For the progress line: 0 while the speech is being recognised, 1 during cleanup, 2 when the text is ready. */
+    public static volatile int Stage;
+    /** How long the recognised text is, once Stage is 1 (the cleanup's wait grows with it). */
+    public static volatile int StageChars;
+    /**
+     * How long things have been taking since Tokalot started, for the progress line's estimate: speech-to-text
+     * in milliseconds per second of audio, cleanup in milliseconds per character. Running averages.
+     */
+    public static volatile float SttRate = 150f, CleanRate = 6f;
+
     /** How the last dictation's wait was spent, for the log. */
     public static string LastTiming { get; private set; } = "";
 
@@ -76,6 +86,7 @@ public sealed class Dictation : IDisposable
         var hint = Hint(s);
         var clock = System.Diagnostics.Stopwatch.StartNew();
         LastTiming = "";
+        Stage = 0;
 
         // 1. Speech to text
         string? raw = null;
@@ -113,6 +124,8 @@ public sealed class Dictation : IDisposable
         }
         var sttMs = clock.ElapsedMilliseconds;
         var baseText = TextTools.StripNoise(raw);
+        StageChars = baseText.Length;
+        Stage = 1;
         if (baseText.Length == 0 || (sparse && TextTools.IsPhantom(baseText))) return new Outcome("", warnings.FirstOrDefault(), null);
 
         // 2-4. Snippets + cleanup
@@ -146,6 +159,9 @@ public sealed class Dictation : IDisposable
 
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         var allMs = clock.ElapsedMilliseconds;
+        Stage = 2;
+        if (!usedLocal && !inPieces) SttRate = SttRate * 0.6f + 0.4f * (float)(sttMs / Math.Max(seconds, 3));
+        if (cleaned) CleanRate = CleanRate * 0.6f + 0.4f * ((allMs - sttMs) / (float)Math.Max(baseText.Length, 40));
         LastTiming = string.Format(inv, "{0:0.0} s spoken · speech {1:0.00} s", seconds, sttMs / 1000.0) +
             (inPieces ? $" ({live!.Pieces} pieces)" : usedLocal ? " (on device)" : "") +
             (quick ? " · cleanup skipped, nothing to fix"

@@ -248,7 +248,7 @@ internal static class Shots
         var row = new System.Windows.Controls.WrapPanel { Width = 900, Background = C.Hex("#1F2023") };
         void Add(string look, string dock, IndicatorView.Mode mode)
         {
-            var v = new IndicatorView { Look = look, Dock = dock, Scale = 1.3, CurrentMode = mode, Level = () => 0.06f, Margin = new Thickness(12) };
+            var v = new IndicatorView { Look = look, Dock = dock, Scale = 1.3, CurrentMode = mode, Level = () => 0.06f, Margin = new Thickness(12), Progress = mode == IndicatorView.Mode.Working ? 0.6 : -1 };
             row.Children.Add(new System.Windows.Controls.Border { Child = v, BorderBrush = C.Hex("#141416"), BorderThickness = new Thickness(0, 0, 0, 0) });
         }
         foreach (var look in IndicatorView.Styles)

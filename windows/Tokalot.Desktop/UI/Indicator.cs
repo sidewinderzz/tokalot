@@ -55,6 +55,12 @@ public sealed class IndicatorView : FrameworkElement
         set { mode = value; Refresh(); }
     }
 
+    /**
+     * While transcribing: how far along it is, 0..1, drawn as a fine line that travels round the edge of the
+     * indicator. Negative hides it.
+     */
+    public double Progress { get; set; } = -1;
+
     /** Keeps animating even when idle (Settings previews). */
     public bool AlwaysAnimate { get; set; }
 
@@ -108,7 +114,47 @@ public sealed class IndicatorView : FrameworkElement
         dc.DrawGeometry(shape.Fill, rim, shape.Body);
         if (shape.Lines != null)
             dc.DrawGeometry(null, new Pen(shape.LineBrush, shape.LineWidth) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, shape.Lines);
+        if (mode == Mode.Working && Progress >= 0 && PartOfEdge(shape.Body, Math.Min(1, Progress)) is { } done)
+            dc.DrawGeometry(null, ProgressPen, done);
         dc.Pop();
+    }
+
+    private static readonly Pen ProgressPen = Freeze(new Pen(new SolidColorBrush(Color.FromArgb(0xE0, 255, 255, 255)), 1.2)
+    {
+        StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round,
+    });
+
+    /** The first `part` (0..1) of a shape's outline, by length, as a line. */
+    private static Geometry? PartOfEdge(Geometry body, double part)
+    {
+        var flat = body.GetFlattenedPathGeometry(0.15, ToleranceType.Absolute);
+        if (flat.Figures.Count == 0) return null;
+        var fig = flat.Figures[0];
+        var pts = new List<Point> { fig.StartPoint };
+        foreach (var seg in fig.Segments)
+        {
+            if (seg is PolyLineSegment poly) pts.AddRange(poly.Points);
+            else if (seg is LineSegment line) pts.Add(line.Point);
+        }
+        pts.Add(fig.StartPoint); // back round to where it began
+        double total = 0;
+        for (int i = 1; i < pts.Count; i++) total += (pts[i] - pts[i - 1]).Length;
+        if (total <= 0) return null;
+        double left = total * part;
+        var g = new StreamGeometry();
+        using (var c = g.Open())
+        {
+            c.BeginFigure(pts[0], false, false);
+            for (int i = 1; i < pts.Count && left > 0; i++)
+            {
+                double len = (pts[i] - pts[i - 1]).Length;
+                if (len <= left) c.LineTo(pts[i], true, true);
+                else if (len > 0) c.LineTo(pts[i - 1] + (pts[i] - pts[i - 1]) * (left / len), true, true);
+                left -= len;
+            }
+        }
+        g.Freeze();
+        return g;
     }
 
     private static readonly Brush HitBrush = Freeze(new SolidColorBrush(Color.FromArgb(1, 0, 0, 0)));
@@ -314,8 +360,12 @@ public sealed class IndicatorWindow : Window
     public void SetMode(IndicatorView.Mode mode)
     {
         view.CurrentMode = mode;
+        if (mode != IndicatorView.Mode.Working) view.Progress = -1;
         Sync(force: true);
     }
+
+    /** How far along the transcription is, 0..1 (see IndicatorView.Progress). The view redraws itself while working. */
+    public void SetProgress(double p) => view.Progress = p;
 
     /** Where the indicator is on screen (DIPs), for placing messages next to it. */
     public Rect Bounds => new(Left, Top, Width, Height);
