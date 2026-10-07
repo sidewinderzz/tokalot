@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.5.1
+
+- Long dictations in noisy places: Tokalot sends a long dictation for transcription in pieces while you talk, cutting at pauses. Where it is never quiet it never saw a pause, so the whole recording went up at the end. It now also cuts at a dip between words after 15 seconds, and at the quietest moment after 25. Settings › Recording › "Transcribe while I talk" turns pieces off.
+
 ## New in 0.5.0
 
 - Quick mode (beta), off until you turn it on in Settings › Speed: when a short dictation (20 words or fewer) has nothing for the AI cleanup to fix, the cleanup is skipped and the text is tidied on this computer, which is instant.

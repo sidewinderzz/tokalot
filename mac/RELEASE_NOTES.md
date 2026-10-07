@@ -2,6 +2,10 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.3.1
+
+- Long dictations in noisy places: Tokalot sends a long dictation for transcription in pieces while you talk, cutting at pauses. Where it is never quiet it never saw a pause, so the whole recording went up at the end. It now also cuts at a dip between words after 15 seconds, and at the quietest moment after 25. Settings › Recording › "Transcribe while I talk" turns pieces off.
+
 ## New in 0.3.0
 
 - Quick mode (beta), off until you turn it on in Settings › Speed: when a short dictation (20 words or fewer) has nothing for the AI cleanup to fix, the cleanup is skipped and the text is tidied on this computer, which is instant.
