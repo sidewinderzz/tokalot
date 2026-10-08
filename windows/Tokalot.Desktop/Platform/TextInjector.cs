@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Automation;
 using Microsoft.Win32;
 using NAudio.Wave;
 
@@ -12,11 +13,27 @@ namespace Tokalot.Desktop.Platform;
 public static class TextInjector
 {
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr pid);
+    [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GuiThreadInfo
+    {
+        public int cbSize, flags;
+        public IntPtr hwndActive, hwndFocus, hwndCapture, hwndMenuOwner, hwndMoveSize, hwndCaret;
+        public int left, top, right, bottom;
+    }
     private static bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
     private static Task restoring = Task.CompletedTask; // the previous paste putting the old clipboard back
 
-    public static async Task Paste(string text)
+    /**
+     * Pastes [text] where the cursor is. True when a text box had the focus. False when none seemed to: the
+     * paste is still sent (a terminal or a spreadsheet cell may take it), but the text is then left on the
+     * clipboard instead of the old contents being put back, so it isn't lost.
+     */
+    public static async Task<bool> Paste(string text)
     {
         // Windows apps expect CRLF line breaks (lists and paragraphs from the cleanup step).
         text = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
@@ -26,9 +43,11 @@ public static class TextInjector
         for (int i = 0; i < 30 && (Down(0x11) || Down(0x5B) || Down(0x5C) || Down(0x12) || Down(0x10)); i++)
             await Task.Delay(50);
 
-        var previous = Snapshot();
+        var box = await FocusIsTextBox();
+        var previous = box ? Snapshot() : null;
 
-        if (!await SetClipboard(text, transient: true)) return;
+        // No text box: the dictation stays on the clipboard as an ordinary copy (in Win+V history too).
+        if (!await SetClipboard(text, transient: box)) return true; // couldn't use the clipboard at all; nothing more to say
         var inputs = new[]
         {
             HotkeyHook.Key(0x11, false), HotkeyHook.Key(0x56, false), // Ctrl down, V down
@@ -36,10 +55,39 @@ public static class TextInjector
         };
         HotkeyHook.SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<HotkeyHook.INPUT>());
 
+        if (!box) return false;
         // A slow app, a remote desktop or a virtual machine can take over a second to read the clipboard, and
         // would paste the old contents if they were put back sooner. The wait happens in the background.
         await Task.Delay(150);
         restoring = Restore(previous, text);
+        return true;
+    }
+
+    /**
+     * Whether the keyboard focus is in a text box: a blinking caret in a classic app, or (through UI Automation,
+     * the way screen readers ask) a focused edit field or document, or anything that takes text. Nothing focused,
+     * the desktop, a button or a list is not. An app that doesn't answer within a moment counts as a text box,
+     * so a slow app gets the usual paste.
+     */
+    private static async Task<bool> FocusIsTextBox()
+    {
+        var look = Task.Run(() =>
+        {
+            try
+            {
+                var info = new GuiThreadInfo { cbSize = Marshal.SizeOf<GuiThreadInfo>() };
+                var thread = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+                if (thread != 0 && GetGUIThreadInfo(thread, ref info) && info.hwndCaret != IntPtr.Zero) return true;
+                var el = AutomationElement.FocusedElement;
+                if (el == null) return false;
+                var type = el.Current.ControlType;
+                if (type == ControlType.Edit || type == ControlType.Document) return true;
+                if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp) && !((ValuePattern)vp).Current.IsReadOnly) return true;
+                return el.TryGetCurrentPattern(TextPattern.Pattern, out _);
+            }
+            catch { return true; } // couldn't tell: paste as usual
+        });
+        return await Task.WhenAny(look, Task.Delay(800)) != look || look.Result;
     }
 
     private static async Task Restore(DataObject? previous, string text)

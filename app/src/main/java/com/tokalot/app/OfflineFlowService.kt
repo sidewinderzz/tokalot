@@ -537,7 +537,7 @@ class OfflineFlowService : AccessibilityService() {
             return
         }
         if (tx != p.x || ty != p.y) {
-            // The spot only changes when the screen turns or the position was reset in the app.
+            // The spot changes when the screen turns, the keyboard changes height, or the position was reset in the app.
             p.x = tx; p.y = ty
             try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
             if (state == State.RECORDING) showTrack() // keep the cancel guide with the button
@@ -551,8 +551,11 @@ class OfflineFlowService : AccessibilityService() {
         return if (r.height() > 0) r.top else null
     }
 
-    // The button is pinned: it sits at the screen position it was last dragged to and never follows the
-    // keyboard. Upright and sideways each keep their own spot ("px"/"py" and "lx"/"ly").
+    // The button stays where it was last dragged to; upright and sideways each keep their own spot ("px"/"py"
+    // and "lx"/"ly"). Dropped above the keyboard, the spot is on the screen, but a taller keyboard (numbers,
+    // emoji, a toolbar) never covers it: the button sits just above that keyboard until it shrinks again.
+    // Dropped onto the keyboard, the spot is on the keyboard ("pk"/"lk": how far below its top edge), so it
+    // stays at the same place on the keys however tall the keyboard is.
     private fun overlayPrefs() = getSharedPreferences("overlay", Context.MODE_PRIVATE)
     private fun sideways() = resources.displayMetrics.let { it.widthPixels > it.heightPixels }
 
@@ -560,10 +563,21 @@ class OfflineFlowService : AccessibilityService() {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
         val (kx, ky) = if (sideways()) "lx" to "ly" else "px" to "py"
+        val kk = if (sideways()) "lk" else "pk"
         val maxX = dm.widthPixels - winW
         val maxY = dm.heightPixels - winH
-        if (sp.contains(kx) && sp.contains(ky))
-            return sp.safeInt(kx, 0).coerceIn(0, maxX) to sp.safeInt(ky, 0).coerceIn(dp(24), maxY)
+        if (sp.contains(kx) && sp.contains(ky)) {
+            var y = sp.safeInt(ky, 0)
+            val top = keyboardTop()
+            if (top != null) {
+                y = when {
+                    sp.contains(kk) -> top + sp.safeInt(kk, 0)           // on the keyboard: same place on it
+                    top > dm.heightPixels / 3 -> minOf(y, top - winH)    // above it: never under a taller one
+                    else -> y                                            // a keyboard filling the screen: leave it
+                }
+            }
+            return sp.safeInt(kx, 0).coerceIn(0, maxX) to y.coerceIn(dp(24), maxY)
+        }
         // No spot yet: the right edge, just above the keyboard. Measured once, then kept. ("x" and "above"
         // are where earlier versions kept a position that moved with the keyboard.)
         val x = sp.safeInt("x", dm.widthPixels - winW - dp(12 - PAD_DP)).coerceIn(0, maxX)
@@ -595,7 +609,12 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun savePosition(p: WindowManager.LayoutParams) {
         val (kx, ky) = if (sideways()) "lx" to "ly" else "px" to "py"
-        overlayPrefs().edit().putInt(kx, p.x).putInt(ky, p.y).apply()
+        val kk = if (sideways()) "lk" else "pk"
+        val e = overlayPrefs().edit().putInt(kx, p.x).putInt(ky, p.y)
+        // Dropped with its middle over the keyboard: keep it at that place on the keyboard.
+        val top = keyboardTop()
+        if (top != null && p.y + winH / 2 > top) e.putInt(kk, p.y - top) else e.remove(kk)
+        e.apply()
     }
 
     private fun detach() {

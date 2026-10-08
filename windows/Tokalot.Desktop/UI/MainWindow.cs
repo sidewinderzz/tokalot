@@ -88,6 +88,7 @@ public sealed class MainWindow : Window
         root.ColumnDefinitions.Add(new ColumnDefinition());
         root.Children.Add(Sidebar());
         var contentGrid = new Grid { Margin = new Thickness(0, CaptionHeight, 0, 0) };
+        scroller.PreviewMouseWheel += PassWheelToPage;
         contentGrid.Children.Add(scroller);
         contentGrid.Children.Add(toast);
         Grid.SetColumn(contentGrid, 1);
@@ -227,6 +228,28 @@ public sealed class MainWindow : Window
 
     /** Full height of the current page (screenshot mode). */
     internal double ExtentHeight => scroller.ExtentHeight;
+
+    /**
+     * Every text and key box holds a small scroll area of its own, and WPF lets it take the mouse wheel even
+     * when it has nothing to scroll. So the page stopped while the pointer crossed one, which is most noticeable
+     * over the stack of boxes in Settings › API keys. The wheel now goes to the page unless something under the
+     * pointer can really scroll that way.
+     */
+    private void PassWheelToPage(object sender, MouseWheelEventArgs e)
+    {
+        ScrollViewer? inner = null;
+        for (var d = e.OriginalSource as DependencyObject; d != null && d != scroller;
+             d = d is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+        {
+            if (d is not ScrollViewer sv) continue;
+            var canScroll = e.Delta > 0 ? sv.VerticalOffset > 0 : sv.VerticalOffset < sv.ScrollableHeight;
+            if (sv.ScrollableHeight > 0 && canScroll) return; // a box with more text than shows: let it scroll
+            inner ??= sv;
+        }
+        if (inner == null) return; // nothing in the way: the page gets the wheel as usual
+        e.Handled = true;
+        scroller.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta) { RoutedEvent = UIElement.MouseWheelEvent, Source = scroller });
+    }
 
     internal void SetStyleTab(string id) => styleTab = id;
 

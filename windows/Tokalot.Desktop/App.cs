@@ -773,15 +773,16 @@ public sealed class Controller : IDisposable
         StartRing(early is { Pieces: > 0 } ? Math.Min(spoken, 10) : spoken);
         try
         {
+            var landed = true; // false: no text box had the focus, so the text was left on the clipboard
             var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early, user: userCt));
             if (Dictation.LastTiming.Length > 0) App.Log("Dictation: " + Dictation.LastTiming);
             hook.Listening = false;
             held = null; // the text exists and is in history: nothing left to lose
             if (outcome.Text.Length > 0)
             {
-                await TextInjector.Paste(outcome.Text);
+                landed = await TextInjector.Paste(outcome.Text);
                 Sounds.Play(Sounds.Kind.Done);
-                learner.Watch(outcome.Text);
+                if (landed) learner.Watch(outcome.Text);
             }
             indicator.SetMode(IndicatorView.Mode.Idle);
             plainText = outcome.Plain;
@@ -791,6 +792,7 @@ public sealed class Controller : IDisposable
             hook.OwnKey = outcome.Plain != null ? 0x5A : 0; // Z
             if (outcome.Warning != null) Say(outcome.Warning, 3500);
             else if (outcome.Text.Length == 0) Say("Didn't catch anything", 1800);
+            else if (!landed) Say("No text box selected · copied, paste it with Ctrl+V", 4000);
             else if (outcome.Plain != null) Say("Polished · Ctrl+Win+Z for your own wording", RevertSeconds * 1000);
             dictation.KeepAudio(samples, outcome.EntryId, null, target);
         }

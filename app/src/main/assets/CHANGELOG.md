@@ -10,6 +10,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Dictating into the middle of a sentence fits in: no capital at the start, and no period when the sentence carries on. Style › Fit into the sentence turns it off.
 - The update banner on Home has a small "What's new" arrow that shows what changed since your version.
 - Settings › About has a Changelog with the latest versions' changes.
+- The floating button keeps out from under a taller keyboard (numbers, emoji, a toolbar), and when you drop it onto the keyboard it stays at that spot on the keys.
 - The floating button no longer stays hidden when the keyboard opens a moment after the text box is selected, and tapping a text box that already had the cursor brings it back.
 
 ## 1.26 · 2026-10-07
