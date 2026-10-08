@@ -55,6 +55,7 @@ class MainActivity : Activity() {
     private val showOriginal = HashSet<Long>()
     private var query = ""
     private var bannerText: TextView? = null
+    private var bannerOpen = false // the update banner's "What's new" is showing
     private var logoBars: BarsView? = null
     private var historyBox: LinearLayout? = null
     private var searchField: EditText? = null
@@ -554,6 +555,47 @@ class MainActivity : Activity() {
 
     // ---------- shared helpers for screens ----------
 
+    /** The changes in a newer release [r], for the update banner. */
+    private fun whatsNew(r: Updater.Release): View {
+        val entries = Updater.whatsNew(this, r)
+        if (entries.isNotEmpty()) return changeList(entries, compact = true)
+        // A release from before the changelog, or it couldn't be fetched: the release's own text, or a link to it.
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val body = Updater.releaseText(r)
+        if (body.isNotEmpty()) box.addView(text(body.take(1200), 14f, C.SUB))
+        box.addView(link("See Tokalot ${r.version} on GitHub") {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Updater.releasePage(r.version))))
+        })
+        return box
+    }
+
+    /**
+     * Changelog entries as a list: each version, then its changes as bullets. [compact] is for the
+     * update banner: smaller, and the version line only when there's more than one.
+     */
+    fun changeList(entries: List<Changelog.Entry>, compact: Boolean = false): View {
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val showVersion = !compact || entries.size > 1
+        entries.forEachIndexed { i, e ->
+            if (showVersion) {
+                val title = "Tokalot ${e.version}" + (e.date?.let { "  ·  ${prettyDate(it)}" } ?: "")
+                box.addView(text(title, if (compact) 14f else 16f, bold = true), lp().margins(this, t = if (i == 0) 0 else 14, b = 4))
+            }
+            for (item in e.items) {
+                box.addView(row(
+                    text("•", 14f, C.SUB).apply { setPadding(0, 0, dp(8), 0) },
+                    text(item, 14f, C.SUB).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                ).apply { gravity = Gravity.TOP }, lp().margins(this, b = 4))
+            }
+        }
+        return box
+    }
+
+    /** "2026-10-08" as "8 Oct 2026"; anything else as it is. */
+    private fun prettyDate(iso: String): String = runCatching {
+        SimpleDateFormat("d MMM yyyy", Locale.getDefault()).format(SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(iso)!!)
+    }.getOrDefault(iso)
+
     fun scroll(child: View) = ScrollView(this).apply {
         isFillViewport = true
         addView(child, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -607,17 +649,42 @@ class MainActivity : Activity() {
         Updater.available(this)?.let { r ->
             val pct = Updater.progress
             val msg = if (pct != null) "Downloading Tokalot ${r.version}… $pct%" else "Tokalot ${r.version} is available"
-            val label = text(msg, 15f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }
+            val label = text(msg, 15f)
             bannerText = label
-            val banner = row(
-                label,
+            // A quiet "What's new" under the label opens the list of changes inside the banner.
+            val notes = whatsNew(r).apply {
+                visibility = if (bannerOpen) View.VISIBLE else View.GONE
+                setPadding(0, dp(4), dp(14), dp(10))
+            }
+            val chevron = icon(R.drawable.ic_expand, 18, C.SUB).apply { rotation = if (bannerOpen) 180f else 0f }
+            val toggle = row(text("What's new", 13f, C.SUB), chevron).apply {
+                minimumHeight = dp(32)
+                contentDescription = "What's new in Tokalot ${r.version}"
+                setOnClickListener {
+                    bannerOpen = !bannerOpen
+                    notes.visibility = if (bannerOpen) View.VISIBLE else View.GONE
+                    chevron.animate().rotation(if (bannerOpen) 180f else 0f).setDuration(160).start()
+                }
+            }
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label)
+                addView(toggle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val top = row(
+                texts,
                 if (pct == null) pill("Update", filled = true) { startUpdate(r) } else spacer(),
                 if (pct == null) iconButton(R.drawable.ic_close, "Dismiss", 20, C.SUB) {
                     Updater.dismiss(this@MainActivity, r.version); render()
                 } else spacer()
-            ).apply {
+            )
+            val banner = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
                 background = rounded(C.CARD, 18)
-                setPadding(dp(18), dp(6), dp(4), dp(6))
+                setPadding(dp(18), dp(6), dp(4), dp(2))
+                addView(top)
+                addView(notes)
             }
             col.addView(banner, lp().margins(this, b = 12))
         }

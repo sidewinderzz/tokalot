@@ -135,6 +135,10 @@ class OfflineFlowService : AccessibilityService() {
         dictation = Dictation(applicationContext)
         buildButton()
         Sync.request(this) // picks up dictionary and snippet changes made on another device
+        // The keyboard may already be up (the switch was just turned on, or the service restarted):
+        // look now rather than wait for the next event.
+        lookAgain = 6
+        handler.postDelayed(recheck, 150)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -478,27 +482,36 @@ class OfflineFlowService : AccessibilityService() {
         for (root in roots) {
             if (root == null || root.packageName == packageName) continue // not inside our own app
             val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: continue
-            return if (node.isEditable && !node.isPassword) node else null
+            // A popup or second window can hold input focus on something that isn't a text box
+            // while the text box sits in another window, so keep looking rather than stop here.
+            if (node.isPassword) return null
+            if (node.isEditable) return node
         }
         return null
     }
 
-    private var lookAgain = 0 // re-checks left when the keyboard is up but no field was found yet
+    private var lookAgain = 0 // re-checks left while only one of keyboard and text box has been found
 
     private fun updateButton() {
         // Idle: only show when the keyboard is actually up on an editable field.
         // Recording/transcribing: stay visible even if the field or keyboard closed.
-        if (state == State.IDLE && keyboardTop() == null) dismissed = false // keyboard closed: forget
-        if (state == State.IDLE && (dismissed || keyboardTop() == null || focusedEditable() == null)) {
-            // Keyboard up but no field found: some apps report the focused field a moment late and send
-            // no further event, which left the button hidden. Look again a few times before giving up.
-            if (!dismissed && keyboardTop() != null && lookAgain > 0) {
-                lookAgain--
-                handler.removeCallbacks(recheck)
-                handler.postDelayed(recheck, 300)
+        if (state == State.IDLE) {
+            val keyboard = keyboardTop() != null
+            if (!keyboard) dismissed = false // keyboard closed: forget
+            val field = !dismissed && focusedEditable() != null
+            if (dismissed || !keyboard || !field) {
+                // Half there: the keyboard is up but no text box was found, or a text box is selected but the
+                // keyboard isn't listed yet. Either one can be reported a moment after the event that announced
+                // it, with no further event, which left the button hidden until the keyboard was closed and
+                // opened again. Look again a few times before giving up.
+                if (!dismissed && (keyboard || field) && lookAgain > 0) {
+                    lookAgain--
+                    handler.removeCallbacks(recheck)
+                    handler.postDelayed(recheck, 300)
+                }
+                detach()
+                return
             }
-            detach()
-            return
         }
         if (touching) return
         val p = params ?: return

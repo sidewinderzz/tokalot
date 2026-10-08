@@ -73,13 +73,44 @@ object Updater {
             if (url.isEmpty()) return false
             val changed = s.getString("version", null) != version
             s.edit().putLong("checked", now).putString("version", version).putString("url", url)
-                .putLong("size", size).putString("notes", o.optString("body").take(500)).apply()
+                .putLong("size", size).putString("notes", o.optString("body").take(4000)).apply()
+            // The new version's changelog, for the banner's "What's new". Fetched once per version;
+            // without it the banner falls back to the release text above.
+            if (s.getString("changelog_for", null) != version && isNewer(version, currentVersion(ctx))) {
+                fetchChangelog(version)?.let { s.edit().putString("changelog", it).putString("changelog_for", version).apply() }
+            }
             changed
         } catch (_: Exception) {
             lastCheckFailed = true
             false
         }
     }
+
+    /** The app's CHANGELOG.md as it is in the release tagged v[version], or null if it can't be had. */
+    private fun fetchChangelog(version: String): String? = try {
+        val conn = URL("https://raw.githubusercontent.com/$REPO/v$version/app/src/main/assets/${Changelog.FILE}")
+            .openConnection() as HttpURLConnection
+        conn.connectTimeout = 5000
+        conn.readTimeout = 8000
+        if (conn.responseCode == 200) conn.inputStream.bufferedReader().use { it.readText() }.take(200_000) else null
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * What [r] brings over the installed version: every changelog entry in between, newest first.
+     * Empty when the changelog couldn't be fetched (or the release predates it); see [releaseText].
+     */
+    fun whatsNew(ctx: Context, r: Release): List<Changelog.Entry> {
+        val s = sp(ctx)
+        if (s.getString("changelog_for", null) != r.version) return emptyList()
+        return Changelog.since(Changelog.parse(s.getString("changelog", "")!!), currentVersion(ctx), r.version)
+    }
+
+    /** The release's own text on GitHub, tidied, for when [whatsNew] has nothing. May be empty. */
+    fun releaseText(r: Release) = Changelog.releaseText(r.notes)
+
+    fun releasePage(version: String) = "https://github.com/$REPO/releases/tag/v$version"
 
     /** "1.10" > "1.9"; compares dot-separated numbers. */
     fun isNewer(a: String, b: String): Boolean {

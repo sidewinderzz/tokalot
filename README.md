@@ -155,7 +155,7 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 gradle assembleRelease
 ```
 
-To release, bump `versionCode` and `versionName` in `app/build.gradle.kts` and push to `main`. The workflow publishes a signed Release for that version, and installed copies offer it as an update. Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
+To release, bump `versionCode` and `versionName` in `app/build.gradle.kts`, add a `## <version>` section at the top of [`app/src/main/assets/CHANGELOG.md`](app/src/main/assets/CHANGELOG.md) (a unit test checks it's there), and push to `main`. The workflow publishes a signed Release for that version with that section as its notes, and installed copies offer it as an update, with the changes under the banner's "What's new". Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
 
 **Windows** (`windows/Tokalot.Desktop`). Requirements: the .NET 10 SDK. Then:
 

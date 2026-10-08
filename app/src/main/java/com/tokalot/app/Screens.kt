@@ -638,6 +638,11 @@ class SettingsScreen(private val a: MainActivity) {
             }.start()
         }), lp())
         about.addView(status, lp().margins(this, t = 2))
+        about.addView(link("Changelog") {
+            val entries = Changelog.bundled(this)
+            if (entries.isEmpty()) info("Changelog", "The changelog couldn't be read.")
+            else sheet("Changelog", changeList(entries), positive = "Close", negative = null)
+        }, lp().margins(this, t = 4))
         about.addView(link("Open-source licenses") { info("Open-source licenses", Licenses.TEXT) }, lp().margins(this, t = 4))
         col.addView(about)
 

@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Deliberately narrow: only focus + window changes, so the service does almost nothing
-     (and uses almost no battery) until a text field is actually focused.
+<!-- Deliberately narrow: only focus, window changes and taps, so the service does almost nothing
+     (and uses almost no battery) until a text field is actually focused. Taps are there because
+     tapping a text box that already has the cursor brings the keyboard back without a focus event.
      flagInputMethodEditor (Android 13+) lets it type at the cursor the way a keyboard does,
      instead of rewriting the whole field. Older versions ignore the flag. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeViewFocused|typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityEventTypes="typeViewFocused|typeViewClicked|typeWindowStateChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagInputMethodEditor"
     android:canRetrieveWindowContent="true"
