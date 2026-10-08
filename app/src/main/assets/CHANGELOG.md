@@ -7,6 +7,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 -->
 
 ## 1.27 · 2026-10-08
+- A short What's new tour opens once after this update (and from Settings › About).
 - Spell a word out while dictating ("Kowalski, K-O-W-A-L-S-K-I") and it's written once, without the letters. Home then offers to add it to your dictionary.
 - A Dictate tile in Quick Settings: talk with no text box open, and the text goes into the text box if there is one, or onto the clipboard if not.
 - Dictated text is only typed when a keyboard is showing; otherwise it goes on the clipboard. Launchers like Niagara keep a hidden search box ready on the home screen, and text no longer lands in it.

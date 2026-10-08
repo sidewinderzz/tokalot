@@ -343,13 +343,14 @@ class SettingsScreen(private val a: MainActivity) {
         const val SETUP = "Setup"
         const val SPEECH = "Speech & cleanup"
         const val DATA = "Your data"
+        const val RECORDING = "Recording & look"
         private const val SECTION = "section:"
 
         /** Settings categories, in order, each with its sections in the order shown when it's open. */
         val CATEGORIES = listOf(
             SETUP to listOf("Setup"),
             SPEECH to listOf("Speech to text", "AI cleanup", "API keys", "Speed"),
-            "Recording & look" to listOf("Recording", "Without a text box", "Appearance"),
+            RECORDING to listOf("Recording", "Without a text box", "Appearance"),
             DATA to listOf("Recordings", "Sync", "Backup", "Usage"),
             "About" to listOf("About"),
         )
@@ -770,6 +771,7 @@ class SettingsScreen(private val a: MainActivity) {
             }.start()
         }), lp())
         about.addView(status, lp().margins(this, t = 2))
+        about.addView(link("What's new in ${Tour.VERSION}") { Tour.show(this) }, lp().margins(this, t = 4))
         about.addView(link("Changelog") {
             val entries = Changelog.bundled(this)
             if (entries.isEmpty()) info("Changelog", "The changelog couldn't be read.")

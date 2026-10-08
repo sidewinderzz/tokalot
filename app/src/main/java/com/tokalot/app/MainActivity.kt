@@ -82,6 +82,8 @@ class MainActivity : Activity() {
         // Not when reopened from Recents, which replays the old intent.
         val replayed = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
         if (savedInstanceState == null && !replayed) handleInstallStatus(intent)
+        // Once after updating: a few slides about what's new.
+        if (savedInstanceState == null && Tour.due(this)) content.post { if (!isFinishing) Tour.show(this) }
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
