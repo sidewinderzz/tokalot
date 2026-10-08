@@ -472,6 +472,11 @@ class Prefs(ctx: Context) {
         get() = sp.safeString("shortcut_action", "off") ?: "off"
         set(v) = sp.edit().putString("shortcut_action", v).apply()
 
+    /** The Settings categories left open (see SettingsScreen.CATEGORIES); all closed until one is opened. */
+    var openSettings: Set<String>
+        get() = sp.getStringSet("open_settings", emptySet())?.toSet() ?: emptySet()
+        set(v) = sp.edit().putStringSet("open_settings", v).apply()
+
     /** How long to keep recordings: 0 = don't save, Int.MAX_VALUE = forever. */
     var audioKeepDays: Int
         get() = sp.safeInt("audio_days", 30)

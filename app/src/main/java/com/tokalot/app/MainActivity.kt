@@ -510,7 +510,12 @@ class MainActivity : Activity() {
         }
     }
 
-    fun openSettings() { inSettings = true; render() }
+    /** Opens Settings, with [category] (one of SettingsScreen.CATEGORIES) opened if given. */
+    fun openSettings(category: String? = null) {
+        if (category != null) prefs.openSettings = prefs.openSettings + category
+        inSettings = true
+        render()
+    }
 
     /** Rebuilds the visible screen. Screens are cheap to build, so we just redraw. */
     fun render() {
@@ -748,7 +753,7 @@ class MainActivity : Activity() {
             c.addView(text("Tokalot needs the microphone, the accessibility switch, and a Groq key (or the offline model) before the mic button will appear.", 15f, C.SUB).apply {
                 setPadding(0, dp(6), 0, dp(14))
             })
-            c.addView(row(pill("Open setup", filled = true) { openSettings() }))
+            c.addView(row(pill("Open setup", filled = true) { openSettings(SettingsScreen.SETUP) }))
             col.addView(c, lp().margins(this, b = 16))
         }
 
@@ -779,7 +784,7 @@ class MainActivity : Activity() {
                 setPadding(0, dp(10), 0, 0)
             })
         }
-        stats.setOnClickListener { openSettings() }
+        stats.setOnClickListener { openSettings(SettingsScreen.DATA) }
         col.addView(stats, lp().margins(this, b = 16))
 
         val search = searchBox()

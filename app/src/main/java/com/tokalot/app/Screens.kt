@@ -202,7 +202,7 @@ class StyleScreen(private val a: MainActivity) {
         if (!prefs.cleanupReady) {
             col.addView(card(18).apply {
                 addView(text("AI cleanup isn't active, so styles won't apply yet. Pick a cleanup model and add its key in Settings.", 15f, C.WARN))
-                setOnClickListener { openSettings() }
+                setOnClickListener { openSettings(SettingsScreen.SPEECH) }
             }, lp().margins(this, b = 16))
         }
 
@@ -333,6 +333,20 @@ class NotesScreen(private val a: MainActivity) {
 class SettingsScreen(private val a: MainActivity) {
 
     companion object {
+        const val SETUP = "Setup"
+        const val SPEECH = "Speech & cleanup"
+        const val DATA = "Your data"
+        private const val SECTION = "section:"
+
+        /** Settings categories, in order, each with its sections in the order shown when it's open. */
+        val CATEGORIES = listOf(
+            SETUP to listOf("Setup"),
+            SPEECH to listOf("Speech to text", "AI cleanup", "API keys", "Speed"),
+            "Recording & look" to listOf("Recording", "Without a text box", "Appearance"),
+            DATA to listOf("Recordings", "Sync", "Backup", "Usage"),
+            "About" to listOf("About"),
+        )
+
         @Volatile var downloadPct: Int? = null
         @Volatile var downloadError: String? = null
         // Progress updates only change this label; redrawing the whole screen each tick made it flash.
@@ -741,13 +755,75 @@ class SettingsScreen(private val a: MainActivity) {
         about.addView(link("Open-source licenses") { info("Open-source licenses", Licenses.TEXT) }, lp().margins(this, t = 4))
         col.addView(about)
 
+        fold(col)
         scroll(col)
     }
 
+    /** A section's small heading. Its title is kept on the view, so [fold] can put the section in its category. */
     private fun section(col: LinearLayout, title: String) = with(a) {
         col.addView(text(title.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply {
             letterSpacing = 0.08f
+            tag = SECTION + title
         }, lp().margins(this, t = 28, b = 8, l = 4))
+    }
+
+    /**
+     * Regroups the finished page into [CATEGORIES]: each a header you tap to open or close, holding its
+     * sections. The sections are built as before; this only moves each one (its heading and everything up to
+     * the next heading) under its category. Which ones are open is remembered, and Setup stays open while
+     * setup isn't finished.
+     */
+    private fun fold(col: LinearLayout) = with(a) {
+        val views = (0 until col.childCount).map { col.getChildAt(it) }
+        val sections = LinkedHashMap<String, MutableList<View>>()
+        val top = mutableListOf<View>()
+        var current: MutableList<View>? = null
+        for (v in views) {
+            val t = v.tag as? String
+            if (t != null && t.startsWith(SECTION)) current = mutableListOf<View>().also { sections[t.removePrefix(SECTION)] = it }
+            (current ?: top).add(v)
+        }
+        col.removeAllViews()
+        top.forEach { col.addView(it) }
+        val open = prefs.openSettings + if (setupComplete()) emptySet() else setOf(SETUP)
+        for ((name, titles) in CATEGORIES) {
+            val parts = titles.filter { it in sections }
+            if (parts.isEmpty()) continue
+            val isOpen = name in open
+            val chevron = icon(R.drawable.ic_expand, 22, C.SUB).apply { rotation = if (isOpen) 180f else 0f }
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(name, 20f, bold = true))
+                if (parts.size > 1 || parts[0] != name) addView(text(parts.joinToString(" · "), 13f, C.SUB))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            col.addView(row(texts, chevron).apply {
+                background = pressable(rounded(C.CARD, 20))
+                setPadding(dp(20), dp(16), dp(16), dp(16))
+                minimumHeight = dp(TOUCH_DP)
+                contentDescription = "$name, ${if (isOpen) "open" else "closed"}"
+                setOnClickListener {
+                    prefs.openSettings = if (name in prefs.openSettings) prefs.openSettings - name else prefs.openSettings + name
+                    render()
+                }
+            }, lp().margins(this, t = 12))
+            if (!isOpen) continue
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(8)) }
+            for (title in parts) {
+                val part = sections.getValue(title)
+                // A category holding one section of its own name doesn't need the small heading as well.
+                val skipHeading = parts.size == 1 && title == name
+                part.forEachIndexed { i, v ->
+                    if (i == 0 && skipHeading) return@forEachIndexed
+                    val p = v.layoutParams as? LinearLayout.LayoutParams
+                    // The first heading sits closer to the category header than headings between sections.
+                    if (i == 0 && title == parts[0] && p != null) p.topMargin = dp(16)
+                    if (i == 1 && skipHeading && p != null) p.topMargin = dp(12)
+                    body.addView(v)
+                }
+            }
+            col.addView(body)
+        }
     }
 
     /** One card: an invitation while sync is off, its status and controls once a file is chosen. */
