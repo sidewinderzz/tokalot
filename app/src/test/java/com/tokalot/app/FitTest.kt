@@ -30,7 +30,7 @@ class FitTest {
 
     @Test fun midSentenceLosesTheCapitalAndThePeriod() {
         assertEquals("the blue one", fit("I want ", "The blue one.", " and the red one."))
-        assertEquals("also the gate latch.", fit("Fixed the hinge, ", "Also the gate latch.", "")) // end of the box: the period stays
+        assertEquals("also the signup page.", fit("Fixed the login bug, ", "Also the signup page.", "")) // end of the box: the period stays
         assertEquals("the blue one.", fit("I want ", "The blue one.", "")) // end of the box: keep the period
         assertEquals("The blue one", fit("Done. ", "The blue one.", " and more"))
     }
@@ -47,7 +47,7 @@ class FitTest {
         assertEquals("NASA said so", fit("and ", "NASA said so.", " too"))
         assertEquals("McDonald's", fit("at ", "McDonald's.", " today"))
         assertEquals("iPhone", fit("my ", "iPhone.", " is"))
-        assertEquals("Kubota tractor", fit("the ", "Kubota tractor.", " broke", keep = listOf("kubota")))
+        assertEquals("Kowalski report", fit("the ", "Kowalski report.", " is late", keep = listOf("kowalski")))
         assertEquals("John said so", fit("and ", "John said so.", " too", lowercase = false)) // the AI already chose
     }
 
@@ -55,7 +55,7 @@ class FitTest {
         assertEquals("the blue one", fit("I want ", "The blue one.", "."))
         assertEquals("is it ready?", fit("So ", "Is it ready?", " he asked"))
         assertEquals("wait...", fit("and ", "Wait...", " then"))
-        assertEquals("42 bales", fit("about ", "42 bales.", " left"))
+        assertEquals("42 files", fit("about ", "42 files.", " left"))
     }
 
     @Test fun cleanupIsToldOnlyWhereTheTextGoes() {

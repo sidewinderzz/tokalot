@@ -105,7 +105,7 @@ object Learn {
 
     /**
      * Words the user spelled out letter by letter in [raw] (the transcript before cleanup) to make clear how
-     * they're written: "it's a Kubota, K-U-B-O-T-A" or "Stewart, spelled S-T-E-W-A-R-T". Only letters that
+     * they're written: "ask Kowalski, K-O-W-A-L-S-K-I" or "Stewart, spelled S-T-E-W-A-R-T". Only letters that
      * follow "spelled", or that come right after a word that sounds like them, count, so a part number or
      * initials ("part A-B-C") aren't taken for a word. Words already in [known] are left out.
      */

@@ -74,8 +74,8 @@ class LearnTest {
     // ---------- words spelled out while dictating ----------
 
     @Test fun spelledWordsAreFound() {
-        assertEquals(listOf("Kubota"), Learn.spelled("It's a Kubota, K-U-B-O-T-A, with the loader.", emptyList()))
-        assertEquals(listOf("Kubota"), Learn.spelled("it's a Cuboda K U B O T A tractor", emptyList())) // misheard, then spelled
+        assertEquals(listOf("Kowalski"), Learn.spelled("Ask Kowalski, K-O-W-A-L-S-K-I, about the report.", emptyList()))
+        assertEquals(listOf("Kowalski"), Learn.spelled("ask Kovalski K O W A L S K I today", emptyList())) // misheard, then spelled
         assertEquals(listOf("Stewart"), Learn.spelled("Ask Stuart, spelled S-T-E-W-A-R-T.", emptyList()))
         assertEquals(listOf("NASA"), Learn.spelled("Like NASA, N. A. S. A.", emptyList()))
     }
@@ -83,7 +83,7 @@ class LearnTest {
     @Test fun lettersThatArentSpellingAreLeftAlone() {
         assertEquals(emptyList<String>(), Learn.spelled("Order part A-B-C and two filters.", emptyList()))
         assertEquals(emptyList<String>(), Learn.spelled("The call sign is K-D-9.", emptyList()))
-        assertEquals(emptyList<String>(), Learn.spelled("It's a Kubota, K-U-B-O-T-A.", listOf("kubota"))) // already known
+        assertEquals(emptyList<String>(), Learn.spelled("Ask Kowalski, K-O-W-A-L-S-K-I.", listOf("kowalski"))) // already known
         assertEquals(emptyList<String>(), Learn.spelled("Plain words with nothing spelled.", emptyList()))
     }
 }

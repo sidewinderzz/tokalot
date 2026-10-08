@@ -10,12 +10,12 @@ class NoteTriggerTest {
     private fun note(text: String) = TextTools.noteTrigger(text, phrases)
 
     @Test fun aPhraseAtTheStartMakesANote() {
-        assertEquals("Call Joe about the baler.", note("Make a note to call Joe about the baler."))
-        assertEquals("The gate latch is broken.", note("Note this, the gate latch is broken."))
-        assertEquals("Buy hydraulic oil.", note("Note this: buy hydraulic oil."))
-        assertEquals("The north field needs lime.", note("New note. The north field needs lime."))
+        assertEquals("Call Joe about the invoice.", note("Make a note to call Joe about the invoice."))
+        assertEquals("The printer is jammed again.", note("Note this, the printer is jammed again."))
+        assertEquals("Buy printer ink.", note("Note this: buy printer ink."))
+        assertEquals("The report is due Friday.", note("New note. The report is due Friday."))
         assertEquals("The meeting moved to Tuesday.", note("Take a note that the meeting moved to Tuesday."))
-        assertEquals("Fence posts.", note("make a note about fence posts."))
+        assertEquals("Parking.", note("make a note about parking."))
     }
 
     @Test fun theSameWordsLaterOnAreJustWords() {
@@ -30,7 +30,7 @@ class NoteTriggerTest {
     }
 
     @Test fun ownPhrasesWork() {
-        assertEquals("Grease the PTO.", TextTools.noteTrigger("Jot down grease the PTO.", listOf("jot down", " ")))
-        assertNull(TextTools.noteTrigger("Note this, grease the PTO.", listOf("jot down")))
+        assertEquals("Renew the domain.", TextTools.noteTrigger("Jot down renew the domain.", listOf("jot down", " ")))
+        assertNull(TextTools.noteTrigger("Note this, renew the domain.", listOf("jot down")))
     }
 }
