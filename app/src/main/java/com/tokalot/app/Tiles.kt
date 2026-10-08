@@ -11,8 +11,8 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 
 /**
- * Quick Settings tiles that start a dictation without a text box: Dictate (typed into the text box if one
- * has the cursor, copied if none does) and Voice note (beta, saved to Notes and copied). A second tap while
+ * Quick Settings tiles that start a dictation without a text box: Dictate (typed into the text box if the
+ * keyboard is up, copied if it isn't) and Voice note (beta, saved to Notes and copied). A second tap while
  * recording finishes. The recording itself runs in the accessibility service, like one from the button.
  */
 abstract class StartTile(private val mode: OfflineFlowService.Manual) : TileService() {

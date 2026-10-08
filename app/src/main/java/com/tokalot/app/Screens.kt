@@ -493,7 +493,7 @@ class SettingsScreen(private val a: MainActivity) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(14), dp(16), dp(10))
             addView(text("Dictate tile", 17f))
-            addView(text("Talk while you read or scroll, with no text box open. The text goes into the text box if one has the cursor, and onto the clipboard if none does. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
+            addView(text("Talk while you read or scroll, with no text box open. The text goes into the text box if the keyboard is up, and onto the clipboard if it isn't. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
             if (Build.VERSION.SDK_INT >= 33) addView(row(pill("Add the tile") {
                 StartTile.requestAdd(this@with, DictateTile::class.java, "Dictate", R.drawable.ic_mic)
             }), lp().margins(this@with, t = 6))

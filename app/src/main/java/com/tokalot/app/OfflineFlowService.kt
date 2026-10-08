@@ -42,8 +42,8 @@ import kotlin.math.abs
  * drag to move (the spot is remembered). Drag it into the red zone at the top of the screen
  * to dismiss it; it comes back the next time an input field is focused or the keyboard
  * reopens. If the field or keyboard closes while you talk,
- * recording continues; when you stop, the text goes into whatever field is focused, or to
- * the clipboard if none is.
+ * recording continues; when you stop, the text goes into the focused field if the keyboard is
+ * up, or to the clipboard if it isn't.
  * Does nothing (no mic, no model in memory, no network) until you tap.
  */
 class OfflineFlowService : AccessibilityService() {
@@ -699,7 +699,7 @@ class OfflineFlowService : AccessibilityService() {
 
     /**
      * Starts a dictation with no text box needed (a Quick Settings tile, or the accessibility shortcut).
-     * DICTATE types into the text box if one has the cursor, and copies the text if none does; NOTE saves it
+     * DICTATE types into the text box if the keyboard is up, and copies the text if it isn't; NOTE saves it
      * to Notes and copies it. The button shows wherever it was last put, and a tap on it finishes. Called again
      * while recording, it finishes too, so a second tap on the tile stops.
      */
@@ -1194,7 +1194,9 @@ class OfflineFlowService : AccessibilityService() {
 
     /** fitted: the AI cleanup already chose the first capital for where the text goes (see [fitHere]). */
     private fun deliver(text: String, plain: String? = null, entryId: Long? = null, fitted: Boolean = false) {
-        val node = focusedEditable()
+        // Only type when a keyboard shows the user is in a text box. Some apps keep an invisible box focused
+        // (Niagara Launcher's home screen holds its app search that way), and typing there opens it.
+        val node = if (typingVisible()) focusedEditable() else null
         fitCaps = !fitted
         lastFitted = null
         if (node == null || !insert(node, text)) {
@@ -1206,6 +1208,14 @@ class OfflineFlowService : AccessibilityService() {
             if (plain != null) showSwapBubble(plain, entryId, 7000)
             else showUndoChip(5000)
         }
+    }
+
+    /** A keyboard is on screen: the on-screen one, or a hardware keyboard that's plugged in and open. */
+    private fun typingVisible(): Boolean {
+        if (keyboardTop() != null) return true
+        val c = resources.configuration
+        return c.keyboard == android.content.res.Configuration.KEYBOARD_QWERTY &&
+            c.hardKeyboardHidden == android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO
     }
 
     /** What the last insert did, so Undo can reverse exactly that. */
@@ -1272,7 +1282,7 @@ class OfflineFlowService : AccessibilityService() {
      * nothing around the cursor, or the setting is off.
      */
     private fun cursorSpot(): TextTools.Spot? {
-        if (!Prefs(this).fitSentence) return null
+        if (!Prefs(this).fitSentence || !typingVisible()) return null // no keyboard: the text will be copied, not typed
         val spot = runCatching {
             val ic = if (Build.VERSION.SDK_INT >= 33) inputMethod?.currentInputConnection else null
             val around = if (Build.VERSION.SDK_INT >= 33) ic?.getSurroundingText(AROUND, AROUND, 0) else null
