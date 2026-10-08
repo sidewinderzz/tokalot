@@ -7,6 +7,10 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 -->
 
 ## 1.27 · 2026-10-08
+- Spell a word out while dictating ("Kubota, K-U-B-O-T-A") and it's written once, without the letters. Home then offers to add it to your dictionary.
+- A Dictate tile in Quick Settings: talk with no text box open, and the text goes into the text box if there is one, or onto the clipboard if not.
+- Voice notes (beta, Settings › Without a text box): a Voice note tile and a Notes page, one note per dictation, each also copied to the clipboard.
+- Holding both volume keys can start a dictation or a voice note (Settings › Without a text box).
 - Dictating into the middle of a sentence fits in: no capital at the start, and no period when the sentence carries on. Style › Fit into the sentence turns it off.
 - The update banner on Home has a small "What's new" arrow that shows what changed since your version.
 - Settings › About has a Changelog with the latest versions' changes.

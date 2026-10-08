@@ -2,4 +2,7 @@
 <resources>
     <string name="app_name">Tokalot</string>
     <string name="service_description">Shows a microphone button when a text field is focused, and types what you say into it. Nothing is recorded until you tap the mic.</string>
+    <!-- Quick Settings tiles -->
+    <string name="tile_dictate">Dictate</string>
+    <string name="tile_note">Voice note</string>
 </resources>

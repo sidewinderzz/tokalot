@@ -70,6 +70,7 @@ class DictionaryScreen(private val a: MainActivity) {
     fun build(): View = with(a) {
         val col = column()
         intro(col, "Dictionary", "Names, places and jargon Tokalot should always spell right. They're given to speech recognition and to the cleanup model as hints.")
+        suggestionsCard()?.let { col.addView(it, lp().margins(this, b = 16)) }
 
         val input = field("Add words, separated by commas\ne.g. Kubernetes, Nguyen, PostgreSQL", multiLine = true).apply { minLines = 2 }
         col.addView(input, lp())
@@ -282,6 +283,51 @@ class StyleScreen(private val a: MainActivity) {
     }
 }
 
+// ------------------------------------------------------------------ Notes (beta)
+
+class NotesScreen(private val a: MainActivity) {
+    fun build(): View = with(a) {
+        val col = column()
+        intro(col, "Notes", "One note per dictation, saved here and copied to the clipboard. Start one from the Voice note tile in Quick Settings, or the accessibility shortcut if you set it to notes.")
+        val notes = Notes.all(this)
+        if (notes.isEmpty()) {
+            col.addView(card(22).apply {
+                addView(text("No notes yet. Swipe down twice from the top of the screen, tap Tokalot Voice note and talk. Tap the button when you're done.", 16f, C.SUB))
+            })
+            return scroll(col)
+        }
+        // Grouped by day, newest first, each note with Copy, Share and Delete.
+        notes.groupBy { dayLabel(it.time) }.forEach { (label, group) ->
+            col.addView(text(label.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply { letterSpacing = 0.08f },
+                lp().margins(this, t = 12, b = 8, l = 4))
+            val c = card()
+            group.forEachIndexed { i, n ->
+                if (i > 0) c.addView(divider())
+                val box = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(20), dp(14), dp(12), dp(6))
+                }
+                box.addView(text(java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time)), 13f, C.SUB))
+                box.addView(text(n.text, 16f).apply { setTextIsSelectable(true) }, lp().margins(this, t = 2, r = 8))
+                box.addView(row(
+                    weightSpacer(),
+                    iconButton(R.drawable.ic_copy, "Copy note", 20, C.SUB) { copy(n.text) },
+                    pill("Share") {
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, n.text), "Share note"))
+                    },
+                    spacer(wDp = 4),
+                    iconButton(R.drawable.ic_close, "Delete note", 20, C.SUB) {
+                        confirm("Delete this note? It stays in history.", "Delete") { Notes.delete(this, n.id); render() }
+                    },
+                ))
+                c.addView(box)
+            }
+            col.addView(c)
+        }
+        scroll(col)
+    }
+}
+
 // ------------------------------------------------------------------ Settings
 
 class SettingsScreen(private val a: MainActivity) {
@@ -425,6 +471,51 @@ class SettingsScreen(private val a: MainActivity) {
                 android.widget.Toast.makeText(this, "Back at the right edge, just above the keyboard", android.widget.Toast.LENGTH_SHORT).show()
             }
         ), lp().margins(this, t = 8, l = 4))
+
+        // --- Without a text box: the Quick Settings tiles, voice notes (beta) and the accessibility shortcut
+        section(col, "Without a text box")
+        val hand = card()
+        hand.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(16), dp(10))
+            addView(text("Dictate tile", 17f))
+            addView(text("Talk while you read or scroll, with no text box open. The text goes into the text box if one has the cursor, and onto the clipboard if none does. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
+            if (Build.VERSION.SDK_INT >= 33) addView(row(pill("Add the tile") {
+                StartTile.requestAdd(this@with, DictateTile::class.java, "Dictate", R.drawable.ic_mic)
+            }), lp().margins(this@with, t = 6))
+        })
+        hand.addView(divider())
+        hand.addView(switchRow("Voice notes (beta)", "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Notes stay on this phone; they're in backups but not in sync.", prefs.notesBeta) { on ->
+            prefs.notesBeta = on
+            StartTile.setNoteTile(this, on)
+            if (!on && prefs.shortcutAction == "note") { prefs.shortcutAction = "off"; OfflineFlowService.instance?.applyShortcut() }
+            if (on) StartTile.requestAdd(this, NoteTile::class.java, "Voice note", R.drawable.ic_note)
+            render()
+        })
+        col.addView(hand)
+
+        col.addView(text("Hold both volume keys to", 15f, C.SUB), lp().margins(this, t = 16, b = 6, l = 4))
+        val actions = buildList {
+            add("off" to ("Do nothing" to "Android's usual accessibility shortcut behaviour."))
+            add("dictate" to ("Dictate" to "Same as the Dictate tile."))
+            if (prefs.notesBeta) add("note" to ("New voice note" to "Same as the Voice note tile."))
+        }
+        val sc = card()
+        actions.forEachIndexed { i, (id, label) ->
+            if (i > 0) sc.addView(divider())
+            sc.addView(choiceRow(label.first, label.second, prefs.shortcutAction == id) {
+                prefs.shortcutAction = id
+                OfflineFlowService.instance?.applyShortcut()
+                render()
+            })
+        }
+        col.addView(sc)
+        if (prefs.shortcutAction != "off") {
+            col.addView(text("Then turn the shortcut on in Android: Settings › Accessibility › Tokalot › Tokalot shortcut, and pick \"Hold volume keys\" (or the accessibility button).", 13f, C.SUB), lp().margins(this, t = 8, l = 4))
+            col.addView(link("Open accessibility settings") {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }, lp().margins(this, l = 4))
+        }
 
         // --- Speed
         section(col, "Speed")

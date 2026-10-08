@@ -31,6 +31,8 @@ class LogicTest {
         assertFalse(q("Thanks for the update.", cat = "EMAIL"))
         assertFalse(q("Thanks for the update.", style = "VERY_CASUAL"))
         assertFalse(q("Thanks for the update.", custom = "Always use British spelling."))
+        assertFalse(q("Ask Stewart, S-T-E-W-A-R-T, about it.")) // spelled out: the AI writes the word once
+        assertFalse(q("It's spelled the usual way."))
     }
 
     // ---------- spacing around inserted text ----------

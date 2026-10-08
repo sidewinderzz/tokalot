@@ -1,7 +1,9 @@
 package com.tokalot.app
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -139,6 +141,7 @@ class OfflineFlowService : AccessibilityService() {
         // look now rather than wait for the next event.
         lookAgain = 6
         handler.postDelayed(recheck, 150)
+        applyShortcut()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -177,6 +180,7 @@ class OfflineFlowService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
+        runCatching { accessibilityButtonController.unregisterAccessibilityButtonCallback(shortcut) }
         handler.removeCallbacksAndMessages(null)
         button?.animate()?.cancel()
         takeLive()?.cancel()
@@ -648,6 +652,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun setState(s: State) {
         state = s
+        if (s == State.IDLE) manual = null
         button?.contentDescription = describe(s)
         // A normal transcription takes a second or two; only offer to cancel when it drags on.
         handler.removeCallbacks(showCancel)
@@ -683,6 +688,81 @@ class OfflineFlowService : AccessibilityService() {
             State.IDLE, State.STARTING -> BarsView.Mode.IDLE
             State.RECORDING -> BarsView.Mode.LISTENING
             State.WORKING -> BarsView.Mode.WORKING
+        }
+    }
+
+    // ---------- starting by hand: Quick Settings tiles and the accessibility shortcut ----------
+
+    enum class Manual { DICTATE, NOTE }
+
+    /** How the recording in progress was started when it wasn't the button: by a tile or the shortcut. */
+    private var manual: Manual? = null
+
+    /**
+     * Starts a dictation with no text box needed (a Quick Settings tile, or the accessibility shortcut).
+     * DICTATE types into the text box if one has the cursor, and copies the text if none does; NOTE saves it
+     * to Notes and copies it. The button shows wherever it was last put, and a tap on it finishes. Called again
+     * while recording, it finishes too, so a second tap on the tile stops.
+     */
+    fun startByHand(mode: Manual) {
+        handler.post {
+            when (state) {
+                State.RECORDING -> { stopAndTranscribe(); return@post }
+                State.STARTING -> { pendingStop = true; return@post }
+                State.WORKING -> return@post
+                State.IDLE -> {}
+            }
+            // Close the notification shade first, so the button and the app underneath can be seen
+            // and the app's text box (if any) is the one in front when the recording starts.
+            if (Build.VERSION.SDK_INT >= 31) performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+            handler.postDelayed({
+                if (state != State.IDLE) return@postDelayed
+                manual = mode
+                startRecording()
+                if (state == State.IDLE) { manual = null; return@postDelayed } // setup isn't finished; the app was opened instead
+                if (mode == Manual.NOTE) targetApp = null    // a note is written in the plain style, not the app's
+                updateButton()
+            }, 300)
+        }
+    }
+
+    private val shortcut = object : AccessibilityButtonController.AccessibilityButtonCallback() {
+        override fun onClicked(controller: AccessibilityButtonController) {
+            when (Prefs(this@OfflineFlowService).shortcutAction) {
+                "dictate" -> startByHand(Manual.DICTATE)
+                "note" -> startByHand(Manual.NOTE)
+            }
+        }
+    }
+
+    /**
+     * Asks Android for the accessibility shortcut (holding both volume keys, or the accessibility button) only
+     * while Settings has it set to an action, so nobody gets a button they didn't ask for. Which gesture runs
+     * it is picked in Android's own Settings › Accessibility › Tokalot.
+     */
+    fun applyShortcut() {
+        val want = Prefs(this).shortcutAction != "off"
+        runCatching {
+            val info = serviceInfo ?: return
+            val flag = AccessibilityServiceInfo.FLAG_REQUEST_ACCESSIBILITY_BUTTON
+            if (want != (info.flags and flag != 0)) {
+                info.flags = if (want) info.flags or flag else info.flags and flag.inv()
+                serviceInfo = info
+            }
+            if (want) accessibilityButtonController.registerAccessibilityButtonCallback(shortcut)
+            else accessibilityButtonController.unregisterAccessibilityButtonCallback(shortcut)
+        }
+    }
+
+    /** A finished voice note: kept on the Notes page and on the clipboard. */
+    private fun saveNote(text: String) {
+        runCatching { Notes.add(this, text) }
+        copyToClipboard(text)
+        showBubble("Saved to Notes · copied") {
+            startActivity(
+                Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.Tab.NOTES.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
         }
     }
 
@@ -871,7 +951,8 @@ class OfflineFlowService : AccessibilityService() {
                     when {
                         pendingCancel -> cancel()
                         pendingStop -> stopAndTranscribe()
-                        prefs.autoStop && !prefs.holdToTalk -> handler.postDelayed(silenceCheck, 1000)
+                        // Started by hand there's nothing to hold, so it works like tap mode.
+                        prefs.autoStop && (!prefs.holdToTalk || manual != null) -> handler.postDelayed(silenceCheck, 1000)
                     }
                 } else {
                     RecordingService.stop(this)
@@ -988,6 +1069,7 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun stopAndTranscribe() {
+        val mode = manual // setState(IDLE) forgets it
         val early = takeLive()
         handler.removeCallbacks(silenceCheck)
         Haptics.play(this, Haptics.Kind.STOP)
@@ -1031,7 +1113,8 @@ class OfflineFlowService : AccessibilityService() {
         workingSince = SystemClock.elapsedRealtime()
         val seconds = samples.size / Recorder.SAMPLE_RATE.toFloat()
         startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds, early?.lastRate ?: 0f)
-        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = cursorSpot()) { outcome, err ->
+        val spot = if (mode == Manual.NOTE) null else cursorSpot()
+        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = spot) { outcome, err ->
             setState(State.IDLE)
             when {
                 // Nothing is typed; the recording is in the app's history with a Transcribe button.
@@ -1044,7 +1127,8 @@ class OfflineFlowService : AccessibilityService() {
                     Haptics.play(this, Haptics.Kind.ERROR); toast("Didn't catch anything")
                 }
                 else -> {
-                    deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
+                    if (mode == Manual.NOTE) saveNote(outcome.text)
+                    else deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
                     Haptics.play(this, Haptics.Kind.DONE)
                     outcome.warning?.let { toast(it) }
                 }

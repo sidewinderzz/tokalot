@@ -57,6 +57,31 @@
                 android:resource="@xml/accessibility_config" />
         </service>
 
+        <!-- Quick Settings tiles: dictate with no text box (types into one if there is, else copies),
+             and Voice note (beta), which stays switched off until the beta is turned on in Settings. -->
+        <service
+            android:name=".DictateTile"
+            android:exported="true"
+            android:icon="@drawable/ic_mic"
+            android:label="@string/tile_dictate"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".NoteTile"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_note"
+            android:label="@string/tile_note"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".RecordingService"
             android:exported="false"

@@ -80,7 +80,7 @@ object TextTools {
     }
 
     // Things only the AI cleanup can deal with: fillers, self-corrections, spoken punctuation and formatting.
-    private val NEEDS_AI = Regex("""(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol)\b""")
+    private val NEEDS_AI = Regex("""(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol|spelled|spelt)\b|(?<![\p{L}\d])\p{L}(?:[\s.,-]+\p{L}(?![\p{L}\d])){2,}(?![\p{L}\d])""")
     private val STUTTER = Regex("""(?i)\b(\w+)[ ,]+\1\b""")
     const val QUICK_WORDS = 20
 

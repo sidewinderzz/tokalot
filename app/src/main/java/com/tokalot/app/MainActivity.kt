@@ -42,6 +42,7 @@ class MainActivity : Activity() {
         DICTIONARY("Dictionary", R.drawable.ic_book),
         STYLE("Style", R.drawable.ic_style),
         SNIPPETS("Snippets", R.drawable.ic_snippet),
+        NOTES("Notes", R.drawable.ic_note), // only while Voice notes (beta) is on
     }
 
     lateinit var prefs: Prefs
@@ -75,6 +76,7 @@ class MainActivity : Activity() {
             backupAudio = s.getBoolean("backupAudio")
             backupKeys = s.getBoolean("backupKeys")
         }
+        if (savedInstanceState == null) openTab(intent)
         buildRoot()
         // A fresh launch can itself be the installer reporting back (the old task was gone).
         // Not when reopened from Recents, which replays the old intent.
@@ -170,6 +172,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         History.onChange = { if (!inSettings && tab == Tab.HOME) render() }
+        Notes.onChange = { if (!inSettings && tab == Tab.NOTES) render() }
         render()
         Sync.onDone = { changed -> if (!isDestroyed) syncFinished(changed) }
         Sync.request(this)
@@ -217,6 +220,15 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleInstallStatus(intent)
+        if (openTab(intent)) render()
+    }
+
+    /** Opened on a given page (tapping "Saved to Notes" opens Notes). True if the intent asked for one. */
+    private fun openTab(intent: Intent?): Boolean {
+        val t = intent?.getStringExtra(EXTRA_TAB)?.let { name -> Tab.values().firstOrNull { it.name == name } } ?: return false
+        tab = t
+        inSettings = false
+        return true
     }
 
     /** The installer's answer to Updater.install(): usually "ask the user", which means launching its prompt. */
@@ -502,6 +514,7 @@ class MainActivity : Activity() {
 
     /** Rebuilds the visible screen. Screens are cheap to build, so we just redraw. */
     fun render() {
+        if (tab == Tab.NOTES && !prefs.notesBeta) tab = Tab.HOME // the beta was switched off
         logoBars?.accentColor = C.visible(prefs.accent) // follows the button color picked in Settings
         headerLeft.removeAllViews()
         val leftIcon = if (inSettings) R.drawable.ic_back else R.drawable.ic_menu
@@ -522,6 +535,7 @@ class MainActivity : Activity() {
             Tab.DICTIONARY -> DictionaryScreen(this).build()
             Tab.STYLE -> StyleScreen(this).build()
             Tab.SNIPPETS -> SnippetsScreen(this).build()
+            Tab.NOTES -> NotesScreen(this).build()
         }
         content.addView(screen)
         if (prevScroll > 0 && screen is ScrollView) screen.post { screen.scrollTo(0, prevScroll) }
@@ -533,6 +547,7 @@ class MainActivity : Activity() {
         nav.removeAllViews()
         nav.visibility = if (inSettings) View.GONE else View.VISIBLE
         for (t in Tab.values()) {
+            if (t == Tab.NOTES && !prefs.notesBeta) continue
             val active = t == tab
             val iconBox = FrameLayout(this).apply {
                 background = if (active) rounded(C.NAV_ACTIVE, 100) else null
@@ -554,6 +569,36 @@ class MainActivity : Activity() {
     }
 
     // ---------- shared helpers for screens ----------
+
+    /**
+     * Words the user spelled out while dictating, each with Add (to the dictionary) and Not now. Null when
+     * there are none. Shown on Home and on the Dictionary page.
+     */
+    fun suggestionsCard(): View? {
+        val words = prefs.suggestedWords
+        if (words.isEmpty()) return null
+        val c = card(18)
+        c.addView(text(if (words.size == 1) "You spelled out a word" else "You spelled out ${words.size} words", 16f, bold = true))
+        c.addView(text("Add it to your dictionary so it's spelled right without spelling it next time.", 14f, C.SUB), lp().margins(this, t = 2, b = 6))
+        for (w in words) {
+            c.addView(row(
+                text(w, 16f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                pill("Not now") {
+                    prefs.suggestedWords = prefs.suggestedWords - w
+                    prefs.dismissedWords = prefs.dismissedWords + w
+                    render()
+                },
+                spacer(wDp = 8),
+                pill("Add", filled = true) {
+                    prefs.suggestedWords = prefs.suggestedWords - w
+                    if (prefs.words.none { it.equals(w, ignoreCase = true) }) prefs.words = prefs.words + w
+                    toast("Added “$w” to your dictionary")
+                    render()
+                },
+            ))
+        }
+        return c
+    }
 
     /** The changes in a newer release [r], for the update banner. */
     private fun whatsNew(r: Updater.Release): View {
@@ -694,6 +739,8 @@ class MainActivity : Activity() {
             }
             col.addView(banner, lp().margins(this, b = 12))
         }
+
+        suggestionsCard()?.let { col.addView(it, lp().margins(this, b = 12)) }
 
         if (!setupComplete()) {
             val c = card(20)
@@ -874,7 +921,7 @@ class MainActivity : Activity() {
         render()
     }
 
-    private fun dayLabel(t: Long): String {
+    fun dayLabel(t: Long): String {
         val c = Calendar.getInstance().apply { timeInMillis = t }
         val today = Calendar.getInstance()
         val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
@@ -890,6 +937,8 @@ class MainActivity : Activity() {
 
     companion object {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
+        /** Which page to open (a [Tab] name). */
+        const val EXTRA_TAB = "com.tokalot.app.TAB"
         private const val REQ_BACKUP = 41
         private const val REQ_RESTORE = 42
         private const val REQ_SYNC_CREATE = 43

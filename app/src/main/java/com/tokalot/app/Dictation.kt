@@ -278,6 +278,8 @@ class Dictation(context: Context) {
 
         stageChars = base.length
         stage = 1
+        // A word spelled out letter by letter is offered for the dictionary in the app (nothing is added unasked).
+        runCatching { prefs.suggestWords(Learn.spelled(base, prefs.words)) }
 
         // 2-4. Snippets + cleanup
         val snippets = prefs.snippets
