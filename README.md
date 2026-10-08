@@ -107,6 +107,8 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it under Settings › API keys.
 3. **Talk.** Click into any text box, hold **Ctrl+Win** while you talk, and let go. Tap Ctrl+Win once for hands-free and tap again to finish. Esc cancels.
 
+No text box? Turn on **Voice notes (beta)** in Settings, then hold **Ctrl+Shift+Win** (or pick *New voice note* in the tray menu): each dictation is saved as a note and copied to the clipboard.
+
 > [!NOTE]
 > Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Click **More info → Run anyway**. Every release is built by GitHub Actions from this code.
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Tokalot.Desktop.Core;
 
@@ -100,6 +101,41 @@ public static class Learn
         if (Calendar.Contains(b)) return false;
         int longest = Math.Max(a.Length, b.Length);
         return Distance(a, b) <= (term ? Math.Max(2, longest * 2 / 3) : Math.Max(1, longest * 3 / 7));
+    }
+
+    // ---------- words spelled out while dictating ----------
+
+    /** Three or more lone letters in a row, the way a recognizer writes spelling: "K-U-B-O-T-A", "K U B O T A", "S. T. E." */
+    private static readonly Regex SpelledOut = new(@"(?<![\p{L}\d])\p{L}(?![\p{L}\d])(?:[\s.,-]+\p{L}(?![\p{L}\d])){2,}");
+    private static readonly Regex SaidSpelled = new(@"(?i)\b(?:spelled|spelt|spelling|spells?)\W*$");
+
+    /**
+     * Words the user spelled out letter by letter in raw (the transcript before cleanup) to make clear how
+     * they're written: "it's a Kubota, K-U-B-O-T-A" or "Stewart, spelled S-T-E-W-A-R-T". Only letters that
+     * follow "spelled", or that come right after a word that sounds like them, count, so a part number or
+     * initials ("part A-B-C") aren't taken for a word. Words already in known are left out.
+     * The Android app has the same rules (Learn.spelled).
+     */
+    public static List<string> Spelled(string raw, ICollection<string> known)
+    {
+        var found = new List<string>();
+        foreach (Match m in SpelledOut.Matches(raw))
+        {
+            var letters = new string(m.Value.Where(char.IsLetter).ToArray());
+            if (letters.Length < 3 || letters.Length > 24) continue;
+            var lower = letters.ToLowerInvariant();
+            var before = raw[..m.Index];
+            var near = Tokens(before).TakeLast(4).Select(Bare).Where(w => w.Length >= 2).ToList();
+            var said = SaidSpelled.IsMatch(before);
+            if (!said && !near.Any(w => Distance(w.ToLowerInvariant(), lower) <= Math.Max(1, letters.Length / 3))) continue;
+            // Keep the casing of the word as said when it was heard right (NASA, iPhone); otherwise like a name.
+            var word = near.LastOrDefault(w => string.Equals(w, letters, StringComparison.OrdinalIgnoreCase) && w[1..].Any(char.IsUpper))
+                ?? char.ToUpperInvariant(lower[0]) + lower[1..];
+            if (known.Any(k => string.Equals(k, word, StringComparison.OrdinalIgnoreCase))
+                || found.Any(f => string.Equals(f, word, StringComparison.OrdinalIgnoreCase))) continue;
+            found.Add(word);
+        }
+        return found;
     }
 
     /** How many single-letter edits turn a into b. */

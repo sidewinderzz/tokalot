@@ -179,6 +179,7 @@ public sealed class App : Application
     /** After a restore: the theme, indicator and start-up setting all follow the restored settings. */
     public void AfterRestore(string message)
     {
+        Notes.Reload();
         ApplyTheme();
         Controller?.RefreshIndicator();
         if (Updater.CanUpdate) Platform.Startup.Apply(Settings.Current.LaunchAtStartup);
@@ -186,10 +187,13 @@ public sealed class App : Application
         window?.ShowToast(message);
     }
 
-    /** Home shows the new entry and stats. Other pages are left alone so a half-typed snippet or word list isn't wiped. */
+    /**
+     * Home shows the new entry and stats, and Notes a new note. Other pages are left alone so a half-typed
+     * snippet or word list isn't wiped.
+     */
     public void RefreshAfterDictation()
     {
-        if (window?.CurrentPage == UI.MainWindow.Page.Home) window.Render();
+        if (window != null && window.CurrentPage is UI.MainWindow.Page.Home or UI.MainWindow.Page.Notes) window.Render();
     }
 
 
@@ -211,6 +215,10 @@ public sealed class App : Application
             var last = History.All().FirstOrDefault(e => !e.Pending);
             if (last != null) _ = TextInjector.Copy(last.Text);
         });
+        // Voice notes (beta): only shown while that's switched on in Settings.
+        var noteItem = new System.Windows.Forms.ToolStripMenuItem("New voice note", null, (_, _) => Controller?.StartNote());
+        menu.Items.Add(noteItem);
+        menu.Opening += (_, _) => noteItem.Visible = Settings.Current.NotesBeta;
         updateItem = new System.Windows.Forms.ToolStripMenuItem("Update available", null, (_, _) => { ShowWindow(); window?.Go(UI.MainWindow.Page.Home); }) { Visible = false };
         menu.Items.Add(updateItem);
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
@@ -308,6 +316,8 @@ public sealed class App : Application
  *   Hold Ctrl+Win: records while held, finishes on release.
  *   Tap Ctrl+Win (under 350 ms): hands-free; tap again to finish. Esc cancels either way.
  *   Ctrl+Win+another key quickly (a Windows shortcut): quietly cancels, so shortcuts keep working.
+ *   Ctrl+Shift+Win, when voice notes are on: the same hold or tap, but the text is saved as a note and
+ *   copied instead of pasted. So is New voice note in the tray menu (hands-free).
  */
 public sealed class Controller : IDisposable
 {
@@ -330,6 +340,7 @@ public sealed class Controller : IDisposable
     private readonly DispatcherTimer tick;
     private State state = State.Idle;
     private bool handsFree;
+    private bool note;                      // this recording is a voice note: saved to Notes and copied, not pasted
     private bool ignoreNextRelease;
     private DateTime pressedAt;
     private ActiveApp? app;
@@ -371,11 +382,16 @@ public sealed class Controller : IDisposable
         indicator = new IndicatorWindow(() => recorder.Level);
         indicator.Clicked += OnClicked;
         hook = new HotkeyHook();
-        hook.Pressed += () => ui.BeginInvoke(OnPressed);
+        hook.Pressed += () =>
+        {
+            var shift = hook.ShiftAtPress; // read on the hook's thread, as the combo went down
+            ui.BeginInvoke(() => OnPressed(shift));
+        };
         hook.Released += () => ui.BeginInvoke(OnReleased);
         hook.KeyWhileHeld += vk => ui.BeginInvoke(() => OnOtherKey(vk));
         hook.TypedAfterPaste += () => ui.BeginInvoke(() => { if (state == State.Idle) plainText = null; });
         hook.Escape += () => ui.BeginInvoke(() => { if (state == State.Processing) CancelWork(); else Cancel(true); });
+        Dictation.Heard += heard => ui.BeginInvoke(() => SuggestSpelled(heard));
         tick = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal, (_, _) => Tick(), ui);
         tick.Stop();
         App.Log("Shortcut listener " + (hook.Installed ? "installed" : "FAILED to install"));
@@ -425,7 +441,8 @@ public sealed class Controller : IDisposable
         pill.HintNear(text, indicator.Bounds, indicator.Dock, ms, () => { s.HideHandsFreeHint = true; s.Save(); });
     }
 
-    private void OnPressed()
+    /** shift: Shift was held too (Ctrl+Shift+Win), which makes it a voice note when those are on. */
+    private void OnPressed(bool shift)
     {
         if (state == State.Recording && handsFree)
         {
@@ -434,7 +451,25 @@ public sealed class Controller : IDisposable
             return;
         }
         if (state != State.Idle) return;
-        Begin(handsFreeMode: false);
+        Begin(handsFreeMode: false, asNote: shift && Settings.Current.NotesBeta);
+    }
+
+    /** Tray › New voice note: a hands-free recording that is saved to Notes and copied, not pasted. */
+    public void StartNote()
+    {
+        if (state != State.Idle || !Settings.Current.NotesBeta) return;
+        if (Begin(handsFreeMode: true, asNote: true)) Hint("Voice note · Ctrl+Win to finish · Esc to cancel", 3500);
+    }
+
+    /** Words spelled out letter by letter in a dictation are offered for the dictionary on Home and Dictionary. */
+    private static void SuggestSpelled(string heard)
+    {
+        try
+        {
+            var s = Settings.Current;
+            if (s.SuggestWords(Learn.Spelled(heard, s.Words))) s.Save();
+        }
+        catch (Exception e) { App.Log("Looking for spelled-out words failed: " + e.Message); }
     }
 
     /** Clicking the indicator: start hands-free, or finish. Focus stays in your app. */
@@ -446,10 +481,11 @@ public sealed class Controller : IDisposable
         if (Begin(handsFreeMode: true)) Hint("Listening · click again or press Ctrl+Win to finish", 3500);
     }
 
-    private bool Begin(bool handsFreeMode)
+    /** asNote: a voice note, which goes to no app, so it's cleaned up in the general style. */
+    private bool Begin(bool handsFreeMode, bool asNote = false)
     {
         learner.Stop(learn: true); // a correction made before this dictation still counts
-        app = AppDetect.Detect();
+        app = asNote ? null : AppDetect.Detect();
         recorder.CueSamples = Settings.Current.Sounds ? Recorder.SampleRate * 6 / 10 : 0;
         if (!recorder.Start())
         {
@@ -459,6 +495,7 @@ public sealed class Controller : IDisposable
         }
         state = State.Recording;
         handsFree = handsFreeMode;
+        note = asNote;
         pressedAt = DateTime.UtcNow;
         hook.Listening = true;
         dictation.WarmUp();
@@ -476,7 +513,7 @@ public sealed class Controller : IDisposable
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < TapMs)
         {
             handsFree = true;
-            Hint("Hands-free · Ctrl+Win to finish · Esc to cancel", 3500);
+            Hint(note ? "Voice note · Ctrl+Win to finish · Esc to cancel" : "Hands-free · Ctrl+Win to finish · Esc to cancel", 3500);
             return;
         }
         Finish();
@@ -492,6 +529,13 @@ public sealed class Controller : IDisposable
             return;
         }
         if (state != State.Recording || handsFree) return;
+        // Shift just after Ctrl+Win (pressed in that order) also makes a voice note. Once it is one, Shift
+        // repeating while held changes nothing. With voice notes off, Shift counts like any other key.
+        if ((vk is 0x10 or 0xA0 or 0xA1) && Settings.Current.NotesBeta)
+        {
+            if (!note && (DateTime.UtcNow - pressedAt).TotalMilliseconds < ShortcutWindowMs) { note = true; app = null; }
+            if (note) return;
+        }
         // Ctrl+Win+D, Ctrl+Win+Arrow, etc.: the user meant a Windows shortcut.
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < ShortcutWindowMs) Cancel(false);
     }
@@ -708,6 +752,7 @@ public sealed class Controller : IDisposable
     {
         state = State.Idle;
         handsFree = false;
+        note = false;
         hook.Listening = false;
         tick.Stop();
     }
@@ -721,6 +766,8 @@ public sealed class Controller : IDisposable
         hook.Listening = false;
         tick.Stop();
         handsFree = false;
+        var asNote = note;
+        note = false;
 
         // Auto-stop: drop the long silent tail (keep half a second after the last speech).
         if (trimSilence && lastVoice > 0)
@@ -774,24 +821,34 @@ public sealed class Controller : IDisposable
         try
         {
             var landed = true; // false: no text box had the focus, so the text was left on the clipboard
+            var noteSaved = false;
             var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early, user: userCt));
             if (Dictation.LastTiming.Length > 0) App.Log("Dictation: " + Dictation.LastTiming);
             hook.Listening = false;
             held = null; // the text exists and is in history: nothing left to lose
-            if (outcome.Text.Length > 0)
+            if (outcome.Text.Length > 0 && asNote)
+            {
+                // A voice note goes to Notes and the clipboard. Nothing is pasted, so nothing to watch or put back.
+                try { Notes.Add(outcome.Text); noteSaved = true; }
+                catch (Exception e) { App.Log("Saving a note failed: " + e.Message); }
+                await TextInjector.Copy(outcome.Text);
+                Sounds.Play(Sounds.Kind.Done);
+            }
+            else if (outcome.Text.Length > 0)
             {
                 landed = await TextInjector.Paste(outcome.Text);
                 Sounds.Play(Sounds.Kind.Done);
                 if (landed) learner.Watch(outcome.Text);
             }
             indicator.SetMode(IndicatorView.Mode.Idle);
-            plainText = outcome.Plain;
+            plainText = asNote ? null : outcome.Plain;
             plainEntry = outcome.EntryId;
             revertUntil = DateTime.UtcNow.AddSeconds(RevertSeconds);
             hook.OwnKeyUntil = revertUntil;
-            hook.OwnKey = outcome.Plain != null ? 0x5A : 0; // Z
-            if (outcome.Warning != null) Say(outcome.Warning, 3500);
+            hook.OwnKey = plainText != null ? 0x5A : 0; // Z
+            if (outcome.Warning != null) Say(noteSaved ? outcome.Warning + " · saved to Notes" : outcome.Warning, 3500);
             else if (outcome.Text.Length == 0) Say("Didn't catch anything", 1800);
+            else if (asNote) Say(noteSaved ? "Saved to Notes · copied" : "Couldn't save the note · copied", 2600);
             else if (!landed) Say("No text box selected · copied, paste it with Ctrl+V", 4000);
             else if (outcome.Plain != null) Say("Polished · Ctrl+Win+Z for your own wording", RevertSeconds * 1000);
             dictation.KeepAudio(samples, outcome.EntryId, null, target);

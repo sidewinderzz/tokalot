@@ -21,7 +21,7 @@ namespace Tokalot.Desktop.UI;
 /** The settings and history window. Closing it leaves Tokalot running in the tray. */
 public sealed class MainWindow : Window
 {
-    public enum Page { Home, Dictionary, Style, Snippets, Settings }
+    public enum Page { Home, Dictionary, Style, Snippets, Notes, Settings }
 
     public Page CurrentPage { get; private set; } = Page.Home;
 
@@ -34,7 +34,7 @@ public sealed class MainWindow : Window
     private StackPanel? historyBox;
     private TextBlock? bannerText;
     private TextBlock? modelStatus;
-    private int historyLimit = 100;
+    private int historyLimit = 100, notesLimit = 100;
     private readonly HashSet<long> expanded = new(), showOriginal = new();
     private static string styleTab = "MESSAGING";
     private static int? downloadPct;
@@ -222,6 +222,7 @@ public sealed class MainWindow : Window
         Item(Page.Dictionary, "book", "Dictionary");
         Item(Page.Style, "style", "Style");
         Item(Page.Snippets, "snippet", "Snippets");
+        if (S.NotesBeta) Item(Page.Notes, "notes", "Notes");
         nav.Children.Add(new Border { Height = 14 });
         Item(Page.Settings, "settings", "Settings");
     }
@@ -266,6 +267,7 @@ public sealed class MainWindow : Window
     public void Render()
     {
         var offset = scroller.VerticalOffset;
+        if (CurrentPage == Page.Notes && !S.NotesBeta) CurrentPage = Page.Home; // voice notes were switched off (or restored away)
         RenderNav();
         var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 10, 36, 48) };
         switch (CurrentPage)
@@ -274,6 +276,7 @@ public sealed class MainWindow : Window
             case Page.Dictionary: BuildDictionary(col); break;
             case Page.Style: BuildStyle(col); break;
             case Page.Snippets: BuildSnippets(col); break;
+            case Page.Notes: BuildNotes(col); break;
             case Page.Settings: BuildSettings(col); break;
         }
         wideLayout = IsWide;
@@ -446,6 +449,8 @@ public sealed class MainWindow : Window
             var c = Ui.Card(Ui.Text("Tokalot couldn't listen for Ctrl+Win. Quit it from the tray icon and open it again.", 15, C.Warn), 18);
             col.Children.Add(Spaced(c, 0, 0, 0, 14));
         }
+
+        SpelledCard(col);
 
         if (!SetupComplete)
         {
@@ -623,6 +628,7 @@ public sealed class MainWindow : Window
     private void BuildDictionary(StackPanel col)
     {
         Intro(col, "Dictionary", "Names, places and jargon Tokalot should always spell right. They're given to speech recognition and to the cleanup model as hints.");
+        SpelledCard(col);
         var (box, input) = Ui.Field("", "Add words, separated by commas, e.g. Kubernetes, Nguyen, PostgreSQL", multiLine: true);
         col.Children.Add(box);
         var add = Ui.Button("Add", () =>
@@ -666,6 +672,104 @@ public sealed class MainWindow : Window
             return (UIElement)Spaced(Spread(name, remove), 20, 8, 12, 8);
         }).ToArray();
         col.Children.Add(Ui.List(rows));
+    }
+
+    /**
+     * Words the user spelled out letter by letter while dictating (see Learn.Spelled), offered for the dictionary.
+     * Shown on Home and Dictionary until each is added or turned down.
+     */
+    private void SpelledCard(StackPanel col)
+    {
+        var words = S.SuggestedWords.Where(w => !S.Words.Contains(w, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (words.Count == 0) return;
+        var rows = new List<UIElement>
+        {
+            Spaced(Ui.Stack(
+                Ui.Text(words.Count == 1 ? "You spelled out a word" : $"You spelled out {words.Count} words", 15.5, bold: true),
+                Ui.Text(words.Count == 1
+                    ? "Add it to your dictionary so it's spelled right without spelling it next time."
+                    : "Add them to your dictionary so they're spelled right without spelling them next time.", 13.5, C.Sub)), 20, 14, 18, 14),
+        };
+        foreach (var w in words)
+        {
+            var notNow = Ui.Button("Not now", () =>
+            {
+                S.SuggestedWords.Remove(w);
+                if (!S.DismissedWords.Contains(w, StringComparer.OrdinalIgnoreCase)) S.DismissedWords.Add(w);
+                S.Save();
+                Render();
+            });
+            var add = Ui.Button("Add", () =>
+            {
+                S.SuggestedWords.Remove(w);
+                if (!S.Words.Contains(w, StringComparer.OrdinalIgnoreCase)) S.Words.Add(w);
+                S.Save();
+                Render();
+                Toast($"Added “{w}” to your dictionary");
+            }, filled: true);
+            rows.Add(Spaced(Spread(Ui.Text(w, 16), notNow, add), 20, 10, 16, 10));
+        }
+        col.Children.Add(Spaced(Ui.List(rows.ToArray()), 0, 0, 0, 16));
+    }
+
+    // ---------- Notes (beta) ----------
+
+    private void BuildNotes(StackPanel col)
+    {
+        Intro(col, "Notes", "Dictate without a text box: hold Ctrl+Shift+Win, or pick New voice note in the tray menu. Each dictation is saved here as its own note and copied to the clipboard.");
+        var notes = Notes.All();
+        if (notes.Count == 0)
+        {
+            col.Children.Add(Ui.Card(Ui.Text("No notes yet. Press Ctrl+Shift+Win, or New voice note in the tray menu, and talk.", 16, C.Sub), 24));
+            return;
+        }
+        string lastDay = "";
+        StackPanel? group = null;
+        foreach (var n in notes.Take(notesLimit))
+        {
+            var day = DayLabel(n.Time);
+            if (day != lastDay)
+            {
+                // Each day is a section, so on a wide window the days fill both columns.
+                var heading = Spaced(Ui.Heading(day, 30), 0, group == null ? 0 : 24, 0, 12);
+                heading.Tag = "section";
+                col.Children.Add(heading);
+                group = new StackPanel();
+                col.Children.Add(Ui.Card(group));
+                lastDay = day;
+            }
+            else group!.Children.Add(Ui.Divider());
+            group!.Children.Add(NoteView(n));
+        }
+        if (notes.Count > notesLimit)
+        {
+            var more = Ui.Button("Show older", () => { notesLimit += 200; Render(); });
+            more.HorizontalAlignment = HorizontalAlignment.Center;
+            col.Children.Add(Spaced(more, 0, 20, 0, 0));
+        }
+    }
+
+    private UIElement NoteView(Note n)
+    {
+        var box = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
+        // Selectable, so part of a note can be copied too.
+        box.Children.Add(new TextBox
+        {
+            Text = n.Text, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+            Foreground = C.Text, FontSize = 16.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
+        });
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
+        box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
+        var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(n.Text); Toast("Copied"); }, icon: "copy");
+        var delete = Ui.Button("Delete", () =>
+        {
+            if (!Ui.Dialog(this, "Delete this note? It can't be brought back.", "Delete")) return;
+            Notes.Delete(n.Id);
+            Render();
+        });
+        copy.Margin = new Thickness(0, 0, 8, 0);
+        box.Children.Add(Ui.Row(copy, delete));
+        return box;
     }
 
     // ---------- Snippets ----------
@@ -918,7 +1022,9 @@ public sealed class MainWindow : Window
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
-                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); }))));
+                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); })),
+            Ui.SettingRow("Voice notes (beta)", "A Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. Each dictation is saved as its own note and copied to the clipboard.",
+                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); }))));
 
         // --- Speed
         Section(col, "Speed");
