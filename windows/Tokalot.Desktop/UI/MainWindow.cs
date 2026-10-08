@@ -457,7 +457,7 @@ public sealed class MainWindow : Window
             var c = Ui.Stack(
                 Ui.Heading("Finish setup", 30),
                 Spaced(Ui.Text("Add a Groq API key (free) or download the offline model, and Ctrl+Win will start working in any app.", 15, C.Sub), 0, 6, 0, 14),
-                Ui.Button("Open settings", () => Go(Page.Settings), filled: true));
+                Ui.Button("Open settings", () => OpenSettingsAt(SetupCategory), filled: true));
             col.Children.Add(Spaced(Ui.Card(c, 22), 0, 0, 0, 16));
         }
 
@@ -479,7 +479,7 @@ public sealed class MainWindow : Window
             statCard.Children.Add(Spaced(Ui.Text($"Cleaned up {Plural(m.Fillers, "filler word")} and {Plural(m.Corrections, "self-correction")}", 13, C.Sub), 0, 10, 0, 0));
         var sc = Ui.Card(statCard, 22);
         sc.Cursor = Cursors.Hand;
-        sc.MouseLeftButtonUp += (_, _) => Go(Page.Settings);
+        sc.MouseLeftButtonUp += (_, _) => OpenSettingsAt(DataCategory);
         col.Children.Add(Spaced(sc, 0, 0, 0, 16));
 
         (searchBox.Parent as Panel)?.Children.Remove(searchBox);
@@ -842,7 +842,7 @@ public sealed class MainWindow : Window
         {
             var warn = Ui.Card(Ui.Text("AI cleanup isn't active, so styles won't apply yet. Pick a cleanup model and add its key in Settings.", 15, C.Warn), 18);
             warn.Cursor = Cursors.Hand;
-            warn.MouseLeftButtonUp += (_, _) => Go(Page.Settings);
+            warn.MouseLeftButtonUp += (_, _) => OpenSettingsAt(SpeechCategory);
             col.Children.Add(Spaced(warn, 0, 0, 0, 16));
         }
 
@@ -923,16 +923,138 @@ public sealed class MainWindow : Window
 
     // ---------- Settings ----------
 
+    private const string SetupCategory = "Setup", SpeechCategory = "Speech & cleanup", DataCategory = "Your data";
+
+    /** Settings categories, in order, each with its sections in the order shown when it's open. Same as the Android app. */
+    private static readonly (string Name, string[] Sections)[] Categories =
+    {
+        (SetupCategory, new[] { "Setup" }),
+        (SpeechCategory, new[] { "Speech to text", "AI cleanup", "API keys", "Speed" }),
+        ("Recording & look", new[] { "Recording", "Recording indicator", "Appearance" }),
+        (DataCategory, new[] { "Recordings", "Sync", "Backup", "Usage" }),
+        ("About", new[] { "About" }),
+    };
+
+    /** On a wide window the categories from this one on go in the right column. A fixed split, so opening one never moves the others across. */
+    private const string RightColumnFrom = "Recording & look";
+
+    /** Screenshot mode shows every category open, so the pictures cover everything. */
+    private static readonly bool ShotMode = Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() == "--screenshots";
+
+    /**
+     * Setup opens by itself while setup isn't finished. It then stays open for the rest of this run, so adding a
+     * key doesn't fold it away under the pointer, unless it's closed by hand.
+     */
+    private static bool setupHeld, setupFolded;
+
+    /** Each category as last built (header first), for focus and scrolling after a rebuild. */
+    private readonly Dictionary<string, StackPanel> categoryViews = new();
+
+    /** Marks a section's small heading with its title, so Fold can tell where each section starts. */
+    private sealed record SectionStart(string Title);
+
     private static void Section(StackPanel col, string title)
     {
         var l = Ui.Label(title);
-        l.Tag = "section";
+        l.Tag = new SectionStart(title);
         col.Children.Add(l);
+    }
+
+    /** Opens Settings with one category open and in view, for links that send the user there to fix something. */
+    internal void OpenSettingsAt(string category)
+    {
+        if (category == SetupCategory) setupFolded = false;
+        if (!S.OpenSettings.Contains(category)) { S.OpenSettings.Add(category); S.Save(); }
+        Go(Page.Settings);
+        if (!categoryViews.TryGetValue(category, out var panel)) return;
+        // Its header near the top, and as much of what's inside as fits.
+        panel.BringIntoView(new Rect(0, 0, panel.ActualWidth, Math.Min(panel.ActualHeight, scroller.ViewportHeight * 0.8)));
+    }
+
+    /**
+     * Regroups the finished Settings page into Categories: each a header you click to open or close, holding its
+     * sections. The sections are built as before; this only moves each one (its heading and everything up to the
+     * next heading) under its category. Anything before the first section (the page title) stays on top.
+     */
+    private void Fold(StackPanel col)
+    {
+        var items = col.Children.Cast<UIElement>().ToList();
+        col.Children.Clear(); // an element can only have one parent, so let go of them all before moving them
+        var sections = new Dictionary<string, List<UIElement>>();
+        List<UIElement>? current = null;
+        foreach (var e in items)
+        {
+            if (e is FrameworkElement { Tag: SectionStart start }) sections[start.Title] = current = new List<UIElement>();
+            if (current != null) current.Add(e); else col.Children.Add(e);
+        }
+
+        if (!SetupComplete && !setupFolded) setupHeld = true;
+        var open = new HashSet<string>(S.OpenSettings);
+        if (setupHeld) open.Add(SetupCategory);
+        if (ShotMode) open.UnionWith(Categories.Select(c => c.Name));
+
+        categoryViews.Clear();
+        foreach (var (name, titles) in Categories)
+        {
+            var parts = titles.Where(sections.ContainsKey).ToList();
+            if (parts.Count == 0) continue;
+            if (name == RightColumnFrom) col.Children.Add(new ColBreak());
+            var isOpen = open.Contains(name);
+            var panel = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            panel.Children.Add(CategoryHeader(name, parts, isOpen));
+            if (isOpen)
+            {
+                var body = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+                foreach (var title in parts)
+                {
+                    var part = sections[title];
+                    // A category holding one section of its own name doesn't need the small heading as well.
+                    var skipHeading = parts.Count == 1 && title == name;
+                    for (int i = skipHeading ? 1 : 0; i < part.Count; i++)
+                    {
+                        // The first thing inside sits a little closer to the header than headings between sections.
+                        if (body.Children.Count == 0 && part[i] is FrameworkElement first)
+                            first.Margin = new Thickness(first.Margin.Left, skipHeading ? 12 : 18, first.Margin.Right, first.Margin.Bottom);
+                        body.Children.Add(part[i]);
+                    }
+                }
+                panel.Children.Add(body);
+            }
+            col.Children.Add(panel);
+            categoryViews[name] = panel;
+        }
+    }
+
+    /** A category's header: its name, the sections inside, and a chevron. Click it (or Enter) to open or close it. */
+    private FrameworkElement CategoryHeader(string name, List<string> parts, bool isOpen)
+    {
+        var texts = Ui.Stack(Ui.Text(name, 17.5, bold: true));
+        if (parts.Count > 1 || parts[0] != name) texts.Children.Add(Ui.Text(string.Join(" · ", parts), 13, C.Sub));
+        var chevron = Icons.Get("expand", 22, C.Sub);
+        chevron.RenderTransformOrigin = new Point(0.5, 0.5);
+        if (isOpen) chevron.RenderTransform = new RotateTransform(180); // points up while open
+        var inner = new Border { CornerRadius = new CornerRadius(20), Padding = new Thickness(20, 15, 16, 15), Background = Brushes.Transparent, Child = Spread(texts, chevron) };
+        var header = new Border { CornerRadius = new CornerRadius(20), Background = C.Card, Cursor = Cursors.Hand, Child = inner };
+        header.MouseEnter += (_, _) => inner.Background = C.Hover;
+        header.MouseLeave += (_, _) => inner.Background = Brushes.Transparent;
+        void Toggle()
+        {
+            var keyboard = header.IsKeyboardFocused;
+            if (isOpen) S.OpenSettings.Remove(name);
+            else if (!S.OpenSettings.Contains(name)) S.OpenSettings.Add(name);
+            if (name == SetupCategory) { setupFolded = isOpen; setupHeld = false; }
+            S.Save();
+            Render();
+            // The page was rebuilt: put the keyboard back on the same header.
+            if (keyboard && categoryViews.TryGetValue(name, out var panel)) panel.Children[0].Focus();
+        }
+        header.MouseLeftButtonUp += (_, _) => Toggle();
+        return Ui.Keys(header, Toggle, $"{name}, {(isOpen ? "open" : "closed")}");
     }
 
     private void BuildSettings(StackPanel col)
     {
-        col.Children.Add(Ui.Heading("Settings"));
+        col.Children.Add(Spaced(Ui.Heading("Settings"), 0, 0, 0, 8));
         col.Children.Add(new HeaderEnd());
 
         // --- Setup
@@ -947,7 +1069,8 @@ public sealed class MainWindow : Window
         var modelText = ModelManager.IsReady ? "Downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
         col.Children.Add(Ui.List(
             Status("Ctrl+Win shortcut", hookOk, "Working", "Not working. Restart Tokalot."),
-            Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key below (free)"),
+            Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key (free)",
+                S.CloudSttReady ? null : Ui.Button("Add key", () => OpenSettingsAt(SpeechCategory))),
             Status("Offline backup model (60 MB)", ModelManager.IsReady || downloadPct != null, modelText, modelText,
                 ModelManager.IsReady || downloadPct != null ? null : Ui.Button("Download", StartDownload)),
             Ui.SettingRow("Start with Windows", Updater.CanUpdate ? "Runs quietly in the tray so Ctrl+Win always works." : "Available in the installed version.",
@@ -1081,7 +1204,7 @@ public sealed class MainWindow : Window
             keys.Children.Add(Spaced(box, 0, 6, 0, 0));
         }
         col.Children.Add(Ui.Card(keys, 20));
-        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync below and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync (in Your data) and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
 
         // --- Recordings
         Section(col, "Recordings");
@@ -1169,6 +1292,8 @@ public sealed class MainWindow : Window
         about.Children.Add(licenses);
         about.Children.Add(Spaced(Link("Quit Tokalot", () => App.Current.Quit()), 0, 12, 0, 0));
         col.Children.Add(Ui.Card(about, 20));
+
+        Fold(col);
     }
 
     /** One choosable indicator style with a live preview on a little dark "screen". */

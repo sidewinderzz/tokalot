@@ -83,6 +83,8 @@ public sealed class Settings
     public List<string> DismissedWords { get; set; } = new();
     /** Beta: a Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. */
     public bool NotesBeta { get; set; }
+    /** The Settings categories left open, so the page opens the way it was left. This PC only: not synced. */
+    public List<string> OpenSettings { get; set; } = new();
     /** Optional sync: the shared file's path on this PC ("" = off), and whether this PC puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }
