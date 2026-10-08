@@ -746,10 +746,21 @@ class OfflineFlowService : AccessibilityService() {
         runCatching { accessibilityButtonController.registerAccessibilityButtonCallback(shortcut) }
     }
 
-    /** A finished voice note: kept on the Notes page and on the clipboard. */
-    private fun saveNote(text: String) {
-        runCatching { Notes.add(this, text) }
+    /**
+     * A finished voice note: kept on the Notes page and on the clipboard. [offerTyping]: it was a note because it
+     * started with a note phrase while a text box was open, so a tap types it there instead (and drops the note),
+     * in case the phrase was just how the sentence began.
+     */
+    private fun saveNote(text: String, offerTyping: Boolean = false) {
+        val id = runCatching { Notes.add(this, text) }.getOrNull()
         copyToClipboard(text)
+        if (offerTyping) {
+            showBubble("Saved to Notes · tap to type it here instead", 6000) {
+                id?.let { runCatching { Notes.delete(this, it) } }
+                deliver(text)
+            }
+            return
+        }
         showBubble("Saved to Notes · copied") {
             startActivity(
                 Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.Tab.NOTES.name)
@@ -1119,8 +1130,12 @@ class OfflineFlowService : AccessibilityService() {
                     Haptics.play(this, Haptics.Kind.ERROR); toast("Didn't catch anything")
                 }
                 else -> {
-                    if (mode == Manual.NOTE) saveNote(outcome.text)
-                    else deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
+                    when {
+                        mode == Manual.NOTE -> saveNote(outcome.text)
+                        // Said "Note this…": a note, with the choice to type it after all if a text box was open.
+                        outcome.note -> saveNote(outcome.text, offerTyping = typingVisible())
+                        else -> deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
+                    }
                     Haptics.play(this, Haptics.Kind.DONE)
                     outcome.warning?.let { toast(it) }
                 }

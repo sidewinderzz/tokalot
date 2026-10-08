@@ -464,6 +464,11 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("notes_beta", false)
         set(v) = sp.edit().putBoolean("notes_beta", v).apply()
 
+    /** Phrases that, said at the very start of a dictation, make it a voice note (comma-separated). */
+    var notePhrases: String
+        get() = sp.safeString("note_phrases", null) ?: TextTools.DEFAULT_NOTE_PHRASES
+        set(v) = sp.edit().putString("note_phrases", v).apply()
+
     /**
      * What Android's accessibility shortcut (holding both volume keys, or the accessibility button) does:
      * "off", "dictate" (type into the text box, or copy when there isn't one) or "note" (a voice note).

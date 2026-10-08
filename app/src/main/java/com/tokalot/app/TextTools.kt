@@ -37,6 +37,26 @@ object TextTools {
 
     fun wordCount(s: String) = s.split(SPACES).count { it.isNotBlank() }
 
+    // ---------- "Note this…": a dictation that starts with a note phrase becomes a voice note ----------
+
+    const val DEFAULT_NOTE_PHRASES = "note this, make a note, new note, take a note"
+    private val NOTE_GLUE = Regex("""(?i)^(?:that|of|to|about)\s+""")
+
+    /**
+     * What's left of [text] when it starts with one of [phrases] ("Make a note to call Joe" → "Call Joe"), or
+     * null when it doesn't. Only the very start counts, so "I need to make a note of that" in the middle of a
+     * message stays ordinary text. "" means only the phrase was said.
+     */
+    fun noteTrigger(text: String, phrases: List<String>): String? {
+        val t = text.trimStart()
+        for (p in phrases.map { it.trim() }.filter { it.isNotEmpty() }.sortedByDescending { it.length }) {
+            val words = p.split(SPACES).filter { it.isNotEmpty() }.map { Regex.escape(it) }
+            val m = Regex("""(?i)^[^\w]*""" + words.joinToString("""[\s,.!?;:\-]*""") + """(?!\w)[\s,.!?;:\-]*""").find(t) ?: continue
+            return t.substring(m.range.last + 1).replace(NOTE_GLUE, "").trim().replaceFirstChar { it.uppercaseChar() }
+        }
+        return null
+    }
+
     // ---------- fitting a dictation into the text around the cursor ----------
 
     /**

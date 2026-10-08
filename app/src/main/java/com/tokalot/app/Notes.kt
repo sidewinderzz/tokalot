@@ -43,10 +43,12 @@ object Notes {
         if (f.exists()) parse(f.readText()) else emptyList()
     }.getOrDefault(emptyList())
 
+    /** Saves a new note and returns its id. */
     @Synchronized
-    fun add(ctx: Context, text: String) {
+    fun add(ctx: Context, text: String): Long {
         val now = System.currentTimeMillis()
         save(ctx, listOf(Note(now, now, text)) + all(ctx))
+        return now
     }
 
     @Synchronized

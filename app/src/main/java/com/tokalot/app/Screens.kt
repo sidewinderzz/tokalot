@@ -506,6 +506,17 @@ class SettingsScreen(private val a: MainActivity) {
             if (on) StartTile.requestAdd(this, NoteTile::class.java, "Voice note", R.drawable.ic_note)
             render()
         })
+        if (prefs.notesBeta) {
+            // Start any dictation with one of these and it's saved as a note instead of typed.
+            hand.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), 0, dp(16), dp(16))
+                addView(text("Start any dictation with one of these and it's saved as a note instead of typed. Only the very start counts, and a text box gets a Type it instead button in case you meant it as words.", 14f, C.SUB))
+                addView(field(TextTools.DEFAULT_NOTE_PHRASES, prefs.notePhrases).apply {
+                    onChange { prefs.notePhrases = it.ifBlank { TextTools.DEFAULT_NOTE_PHRASES } }
+                }, lp().margins(this@with, t = 8))
+            })
+        }
         col.addView(hand)
 
         col.addView(text("Android's accessibility shortcut (hold both volume keys) does", 15f, C.SUB), lp().margins(this, t = 16, b = 6, l = 4))
