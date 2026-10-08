@@ -3,7 +3,6 @@ package com.tokalot.app
 import android.Manifest
 import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -731,27 +730,20 @@ class OfflineFlowService : AccessibilityService() {
             when (Prefs(this@OfflineFlowService).shortcutAction) {
                 "dictate" -> startByHand(Manual.DICTATE)
                 "note" -> startByHand(Manual.NOTE)
+                else -> toast("Pick what this shortcut does in Tokalot › Settings › Recording & look")
             }
         }
     }
 
     /**
-     * Asks Android for the accessibility shortcut (holding both volume keys, or the accessibility button) only
-     * while Settings has it set to an action, so nobody gets a button they didn't ask for. Which gesture runs
-     * it is picked in Android's own Settings › Accessibility › Tokalot.
+     * Listens for Android's accessibility shortcut (holding both volume keys, or the accessibility button or
+     * gesture), Android 11 and newer. The service asks for it in res/xml-v30/accessibility_config.xml: Android
+     * only reads that from there, and without it the shortcut switches Tokalot off and on instead of reaching
+     * here. Which gesture runs it is picked in Android's own Settings › Accessibility › Tokalot.
      */
-    fun applyShortcut() {
-        val want = Prefs(this).shortcutAction != "off"
-        runCatching {
-            val info = serviceInfo ?: return
-            val flag = AccessibilityServiceInfo.FLAG_REQUEST_ACCESSIBILITY_BUTTON
-            if (want != (info.flags and flag != 0)) {
-                info.flags = if (want) info.flags or flag else info.flags and flag.inv()
-                serviceInfo = info
-            }
-            if (want) accessibilityButtonController.registerAccessibilityButtonCallback(shortcut)
-            else accessibilityButtonController.unregisterAccessibilityButtonCallback(shortcut)
-        }
+    private fun applyShortcut() {
+        if (Build.VERSION.SDK_INT < 30) return
+        runCatching { accessibilityButtonController.registerAccessibilityButtonCallback(shortcut) }
     }
 
     /** A finished voice note: kept on the Notes page and on the clipboard. */

@@ -4,12 +4,17 @@
      tapping a text box that already has the cursor brings the keyboard back without a focus event.
      flagInputMethodEditor (Android 13+) lets it type at the cursor the way a keyboard does,
      instead of rewriting the whole field. Older versions ignore the flag.
-     Android 11 and newer use res/xml-v30/accessibility_config.xml instead (the same plus the
-     accessibility shortcut); keep the two in step. -->
+     Android 11 and newer (this file): flagRequestAccessibilityButton as well, so Android's accessibility
+     shortcut (holding both volume keys, or the accessibility button or gesture) runs the action picked
+     in Tokalot's Settings instead of switching Tokalot off and on. Android only reads this from here,
+     not from a change made while the app runs. Which gesture runs it is the user's pick in Android's
+     own settings. Older Android puts a button in the navigation bar for any app that asks, and its
+     volume-key shortcut only ever switches a service off and on, so res/xml/accessibility_config.xml
+     leaves the flag out. Keep the two files in step. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeViewFocused|typeViewClicked|typeWindowStateChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagInputMethodEditor"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagInputMethodEditor|flagRequestAccessibilityButton"
     android:canRetrieveWindowContent="true"
     android:description="@string/service_description"
     android:notificationTimeout="100" />

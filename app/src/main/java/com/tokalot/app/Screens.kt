@@ -502,15 +502,21 @@ class SettingsScreen(private val a: MainActivity) {
         hand.addView(switchRow("Voice notes (beta)", "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Notes stay on this phone; they're in backups but not in sync.", prefs.notesBeta) { on ->
             prefs.notesBeta = on
             StartTile.setNoteTile(this, on)
-            if (!on && prefs.shortcutAction == "note") { prefs.shortcutAction = "off"; OfflineFlowService.instance?.applyShortcut() }
+            if (!on && prefs.shortcutAction == "note") prefs.shortcutAction = "off"
             if (on) StartTile.requestAdd(this, NoteTile::class.java, "Voice note", R.drawable.ic_note)
             render()
         })
         col.addView(hand)
 
-        col.addView(text("Hold both volume keys to", 15f, C.SUB), lp().margins(this, t = 16, b = 6, l = 4))
-        val actions = buildList {
-            add("off" to ("Do nothing" to "Android's usual accessibility shortcut behaviour."))
+        col.addView(text("Android's accessibility shortcut (hold both volume keys) does", 15f, C.SUB), lp().margins(this, t = 16, b = 6, l = 4))
+        // The shortcut can only reach the app on Android 11 and newer; before that it switches Tokalot off and on.
+        if (Build.VERSION.SDK_INT < 30) {
+            col.addView(card(18).apply {
+                addView(text("Needs Android 11 or newer. On this phone the shortcut can only switch Tokalot off and on, so use the Dictate tile instead.", 14f, C.SUB))
+            })
+        }
+        val actions = if (Build.VERSION.SDK_INT < 30) emptyList() else buildList {
+            add("off" to ("Nothing" to "Holding the keys shows a reminder to pick an action here."))
             add("dictate" to ("Dictate" to "Same as the Dictate tile."))
             if (prefs.notesBeta) add("note" to ("New voice note" to "Same as the Voice note tile."))
         }
@@ -519,13 +525,12 @@ class SettingsScreen(private val a: MainActivity) {
             if (i > 0) sc.addView(divider())
             sc.addView(choiceRow(label.first, label.second, prefs.shortcutAction == id) {
                 prefs.shortcutAction = id
-                OfflineFlowService.instance?.applyShortcut()
                 render()
             })
         }
-        col.addView(sc)
-        if (prefs.shortcutAction != "off") {
-            col.addView(text("Then turn the shortcut on in Android: Settings › Accessibility › Tokalot › Tokalot shortcut, and pick \"Hold volume keys\" (or the accessibility button).", 13f, C.SUB), lp().margins(this, t = 8, l = 4))
+        if (actions.isNotEmpty()) col.addView(sc)
+        if (Build.VERSION.SDK_INT >= 30 && prefs.shortcutAction != "off") {
+            col.addView(text("Then turn the shortcut on in Android: Settings › Accessibility › Tokalot › Tokalot shortcut, and pick \"Hold volume keys\" (or the accessibility button or gesture). It starts the action above; it doesn't switch Tokalot off.", 13f, C.SUB), lp().margins(this, t = 8, l = 4))
             col.addView(link("Open accessibility settings") {
                 startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             }, lp().margins(this, l = 4))
