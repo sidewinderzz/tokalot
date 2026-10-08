@@ -37,6 +37,48 @@ object TextTools {
 
     fun wordCount(s: String) = s.split(SPACES).count { it.isNotBlank() }
 
+    // ---------- fitting a dictation into the text around the cursor ----------
+
+    /**
+     * Where the cursor sits in the text already there. [mid]: inside a sentence (after a word or a comma),
+     * so the dictation shouldn't start with a capital. [continues]: the sentence goes on after the cursor
+     * (a lowercase word or punctuation follows on the same line), so it shouldn't end with a period.
+     */
+    class Spot(val mid: Boolean, val continues: Boolean) {
+        val plain get() = !mid && !continues
+    }
+
+    private const val MID_AFTER = ",;:-–—"
+    private const val GOES_ON = ",.;:!?)"
+
+    /** [before] / [after]: a little of the text on either side of the cursor ("" at the ends of the box). */
+    fun spot(before: CharSequence, after: CharSequence): Spot {
+        val last = before.lastOrNull { !it.isWhitespace() || it == '\n' }
+        val mid = last != null && (last.isLetterOrDigit() || last in MID_AFTER)
+        val next = after.firstOrNull { !it.isWhitespace() || it == '\n' }
+        val continues = next != null && (next.isLowerCase() || next in GOES_ON)
+        return Spot(mid, continues)
+    }
+
+    /**
+     * Fits [text] to [spot]. A mid-sentence dictation loses its first capital unless the first word is "I",
+     * an acronym, a mixed-case word or one of [keep] (dictionary words); [lowercase] false leaves the first
+     * letter alone, for when the AI cleanup already decided it (it knows names, this can't). A dictation that
+     * runs into the rest of the sentence loses its closing period.
+     */
+    fun fit(text: String, spot: Spot, keep: Collection<String> = emptyList(), lowercase: Boolean = true): String {
+        var t = text
+        if (spot.mid && lowercase) {
+            val first = t.takeWhile { it.isLetter() || it == '\'' || it == '’' }
+            val bare = first.substringBefore('\'').substringBefore('’')
+            val leave = first.isEmpty() || !first[0].isUpperCase() || bare == "I" ||
+                first.drop(1).any { it.isUpperCase() } || keep.any { it.equals(first, ignoreCase = true) }
+            if (!leave) t = t[0].lowercaseChar() + t.substring(1)
+        }
+        if (spot.continues && t.endsWith(".") && !t.endsWith("..")) t = t.dropLast(1)
+        return t
+    }
+
     // Things only the AI cleanup can deal with: fillers, self-corrections, spoken punctuation and formatting.
     private val NEEDS_AI = Regex("""(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol)\b""")
     private val STUTTER = Regex("""(?i)\b(\w+)[ ,]+\1\b""")

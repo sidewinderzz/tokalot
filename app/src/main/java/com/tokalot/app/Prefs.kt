@@ -429,6 +429,14 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("polish", false)
         set(v) = sp.edit().putBoolean("polish", v).apply()
 
+    /**
+     * Fit a dictation into the sentence around the cursor: no capital in the middle of a sentence, no
+     * period when the sentence carries on. Only where the cursor sits is used, never the text itself.
+     */
+    var fitSentence: Boolean
+        get() = sp.safeBoolean("fit_sentence", true)
+        set(v) = sp.edit().putBoolean("fit_sentence", v).apply()
+
     /** How long to keep recordings: 0 = don't save, Int.MAX_VALUE = forever. */
     var audioKeepDays: Int
         get() = sp.safeInt("audio_days", 30)

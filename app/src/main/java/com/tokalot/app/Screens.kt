@@ -209,6 +209,10 @@ class StyleScreen(private val a: MainActivity) {
             addView(switchRow("Polish my wording", "Off: your own words are kept, with fillers removed and punctuation and formatting fixed. On: the AI may also tighten and clarify what you said, and for a few seconds after each dictation you can tap My wording to put your own words back.", prefs.polish) {
                 prefs.polish = it
             })
+            addView(divider())
+            addView(switchRow("Fit into the sentence", "Dictating into the middle of a sentence: no capital at the start, and no period when the sentence carries on. Tokalot only looks at the characters right next to the cursor; the AI is just told \"mid-sentence\", never your text.", prefs.fitSentence) {
+                prefs.fitSentence = it
+            })
         }, lp().margins(this, b = 16))
 
         // Category tabs

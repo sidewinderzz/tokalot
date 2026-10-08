@@ -39,8 +39,12 @@ class Dictation(context: Context) {
     /**
      * plain: the user's own wording, cleaned up without AI. Only set when "Polish my wording" is on,
      * the AI cleanup ran, and it differs from [text]; it is what "My wording" puts back.
+     * fitted: the AI cleanup was told the text goes mid-sentence, so its first capital is deliberate.
      */
-    class Outcome(val text: String, val warning: String?, val entryId: Long? = null, val plain: String? = null)
+    class Outcome(
+        val text: String, val warning: String?, val entryId: Long? = null, val plain: String? = null,
+        val fitted: Boolean = false,
+    )
 
     companion object {
         private const val IDLE_UNLOAD_MS = 60_000L
@@ -54,7 +58,7 @@ class Dictation(context: Context) {
     }
 
     /** One process() call: what cancel() and the deadline act on. */
-    private inner class Job(val live: LiveStt?, val onDone: (Outcome?, String?) -> Unit) {
+    private inner class Job(val live: LiveStt?, val spot: TextTools.Spot?, val onDone: (Outcome?, String?) -> Unit) {
         val call = Call()
         /** CANCELLED or TIMED_OUT once the job was stopped from outside. */
         @Volatile var halted: String? = null
@@ -136,14 +140,15 @@ class Dictation(context: Context) {
      * sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence.
      * retry: the failed or cancelled history entry these samples belong to; the result replaces it.
      * live: the pieces of this recording already sent off while the user was talking, if any.
+     * spot: where the cursor was in the text box when the user stopped talking, for the cleanup.
      */
     fun process(
         samples: FloatArray, appPkg: String?, sparse: Boolean = false, retry: Entry? = null, live: LiveStt? = null,
-        onDone: (Outcome?, String?) -> Unit,
+        spot: TextTools.Spot? = null, onDone: (Outcome?, String?) -> Unit,
     ) {
         main.removeCallbacks(unload)
         stage = 0
-        val job = Job(live, onDone)
+        val job = Job(live, spot, onDone)
         current = job
         val audioMs = samples.size * 1000L / Recorder.SAMPLE_RATE
         main.postDelayed(job.deadline, Timeouts.deadlineMs(audioMs))
@@ -291,7 +296,7 @@ class Dictation(context: Context) {
         for (c in if (noCleanup || quick) emptyList() else cleanupOrder(prefs)) {
             call.check()
             try {
-                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces)
+                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces, job.spot)
                 Usage.recordLlm(app, c, r.inTokens, r.outTokens)
                 cleaned = true
                 finalText = TextTools.restore(r.text, map)
@@ -338,7 +343,7 @@ class Dictation(context: Context) {
         runCatching { History.put(app, Entry(id, retry?.time ?: id, finalText, base, audioMs, cleaned, appPkg ?: "")) }
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
         Usage.recordEdits(app, AppContext.fillerCount(base), if (cleaned) AppContext.correctionCount(base) else 0)
-        return Outcome(finalText, warnings.firstOrNull(), id, plain)
+        return Outcome(finalText, warnings.firstOrNull(), id, plain, fitted = cleaned && job.spot?.mid == true)
     }
 
     /** Sends the compressed file when there is one; if the provider rejects the format, sends WAV instead. */

@@ -558,7 +558,7 @@ class MainActivity : Activity() {
     /** The changes in a newer release [r], for the update banner. */
     private fun whatsNew(r: Updater.Release): View {
         val entries = Updater.whatsNew(this, r)
-        if (entries.isNotEmpty()) return changeList(entries, compact = true)
+        if (entries.isNotEmpty()) return changeList(entries, compact = true, limit = 3)
         // A release from before the changelog, or it couldn't be fetched: the release's own text, or a link to it.
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val body = Updater.releaseText(r)
@@ -571,12 +571,13 @@ class MainActivity : Activity() {
 
     /**
      * Changelog entries as a list: each version, then its changes as bullets. [compact] is for the
-     * update banner: smaller, and the version line only when there's more than one.
+     * update banner: smaller, and the version line only when there's more than one. Only the newest
+     * [limit] versions are shown; the rest are a link away, on GitHub.
      */
-    fun changeList(entries: List<Changelog.Entry>, compact: Boolean = false): View {
+    fun changeList(entries: List<Changelog.Entry>, compact: Boolean = false, limit: Int = 4): View {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val showVersion = !compact || entries.size > 1
-        entries.forEachIndexed { i, e ->
+        entries.take(limit).forEachIndexed { i, e ->
             if (showVersion) {
                 val title = "Tokalot ${e.version}" + (e.date?.let { "  ·  ${prettyDate(it)}" } ?: "")
                 box.addView(text(title, if (compact) 14f else 16f, bold = true), lp().margins(this, t = if (i == 0) 0 else 14, b = 4))
@@ -587,6 +588,11 @@ class MainActivity : Activity() {
                     text(item, 14f, C.SUB).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
                 ).apply { gravity = Gravity.TOP }, lp().margins(this, b = 4))
             }
+        }
+        if (entries.size > limit || !compact) {
+            box.addView(link(if (entries.size > limit) "Older versions on GitHub" else "Full history on GitHub") {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(Updater.CHANGELOG_PAGE)))
+            })
         }
         return box
     }

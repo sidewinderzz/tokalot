@@ -1012,7 +1012,7 @@ class OfflineFlowService : AccessibilityService() {
         workingSince = SystemClock.elapsedRealtime()
         val seconds = samples.size / Recorder.SAMPLE_RATE.toFloat()
         startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds, early?.lastRate ?: 0f)
-        dictation.process(samples, targetApp, sparse = !heard, live = early) { outcome, err ->
+        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = cursorSpot()) { outcome, err ->
             setState(State.IDLE)
             when {
                 // Nothing is typed; the recording is in the app's history with a Transcribe button.
@@ -1025,7 +1025,7 @@ class OfflineFlowService : AccessibilityService() {
                     Haptics.play(this, Haptics.Kind.ERROR); toast("Didn't catch anything")
                 }
                 else -> {
-                    deliver(outcome.text, outcome.plain, outcome.entryId)
+                    deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
                     Haptics.play(this, Haptics.Kind.DONE)
                     outcome.warning?.let { toast(it) }
                 }
@@ -1097,13 +1097,16 @@ class OfflineFlowService : AccessibilityService() {
         }
     }
 
-    private fun deliver(text: String, plain: String? = null, entryId: Long? = null) {
+    /** fitted: the AI cleanup already chose the first capital for where the text goes (see [fitHere]). */
+    private fun deliver(text: String, plain: String? = null, entryId: Long? = null, fitted: Boolean = false) {
         val node = focusedEditable()
+        fitCaps = !fitted
+        lastFitted = null
         if (node == null || !insert(node, text)) {
             copyToClipboard(text)
             showBubble("Copied ✓  $text") { copyToClipboard(text); toast("Copied") }
         } else if (lastInsert != null) {
-            watchForCorrection(text)
+            watchForCorrection(lastFitted ?: text)
             // plain: the AI polished the wording, so offer the user's own words next to Undo.
             if (plain != null) showSwapBubble(plain, entryId, 7000)
             else showUndoChip(5000)
@@ -1145,6 +1148,7 @@ class OfflineFlowService : AccessibilityService() {
         lastInsert = null
         stopWatching(learn = false)
         entryId?.let { History.useOwnWording(this, it, plain) }
+        fitCaps = true
         val ok = when (li) {
             is LastInsert.Typed -> swapTyped(li, plain)
             is LastInsert.Rewritten -> swapRewritten(li, plain)
@@ -1152,6 +1156,64 @@ class OfflineFlowService : AccessibilityService() {
         }
         if (ok) showUndoChip(5000)
         else toast("Couldn't swap it here. Your wording is in history.")
+    }
+
+    // ---------- fitting into the sentence around the cursor (Settings: Style › Fit into the sentence) ----------
+
+    private var fitCaps = true          // the first letter may be lowercased here (false when the AI already chose it)
+    private var lastFitted: String? = null // the dictation as it was actually typed, after fitting
+
+    /** [text] fitted to the characters either side of the cursor, as the insert is about to type it. */
+    private fun fitHere(text: String, before: CharSequence, after: CharSequence): String {
+        val prefs = Prefs(this)
+        val out = if (prefs.fitSentence) TextTools.fit(text, TextTools.spot(before, after), prefs.words, fitCaps) else text
+        lastFitted = out
+        return out
+    }
+
+    /**
+     * Where the cursor sits in the focused text box, from the few characters either side of it, so the AI
+     * cleanup can be told "mid-sentence" (the characters themselves are never sent). Null: no text box,
+     * nothing around the cursor, or the setting is off.
+     */
+    private fun cursorSpot(): TextTools.Spot? {
+        if (!Prefs(this).fitSentence) return null
+        val spot = runCatching {
+            val ic = if (Build.VERSION.SDK_INT >= 33) inputMethod?.currentInputConnection else null
+            val around = if (Build.VERSION.SDK_INT >= 33) ic?.getSurroundingText(AROUND, AROUND, 0) else null
+            if (around != null) {
+                val chars = around.text
+                val start = minOf(around.selectionStart, around.selectionEnd).coerceIn(0, chars.length)
+                val end = maxOf(around.selectionStart, around.selectionEnd).coerceIn(start, chars.length)
+                TextTools.spot(chars.subSequence(0, start), chars.subSequence(end, chars.length))
+            } else {
+                val f = focusedEditable()?.let { fieldState(it) } ?: return null
+                TextTools.spot(f.text.substring(0, f.start), f.text.substring(f.end))
+            }
+        }.getOrNull()
+        return spot?.takeUnless { it.plain }
+    }
+
+    /** A text box's real text (empty while it only shows its placeholder) and its selection, in order and in range. */
+    private class FieldState(val text: String, val start: Int, val end: Int)
+
+    private fun fieldState(node: AccessibilityNodeInfo): FieldState {
+        // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
+        // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
+        val raw = node.text?.toString() ?: ""
+        val hintText = node.hintText?.toString()
+        val caretAtStart = node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
+        val looksLikePlaceholder = caretAtStart &&
+            raw.trim().trimEnd('…', '.').lowercase() in COMMON_PLACEHOLDERS
+        val hint = node.isShowingHintText || raw.isEmpty() || (hintText != null && raw == hintText) || looksLikePlaceholder
+        val current = if (hint) "" else raw
+        var start = if (hint) 0 else node.textSelectionStart
+        var end = if (hint) 0 else node.textSelectionEnd
+        if (start < 0 || end < 0) { start = current.length; end = current.length }
+        if (start > end) { val t = start; start = end; end = t }
+        start = start.coerceAtMost(current.length)
+        end = end.coerceAtMost(current.length)
+        return FieldState(current, start, end)
     }
 
     /**
@@ -1179,7 +1241,7 @@ class OfflineFlowService : AccessibilityService() {
             val end = maxOf(around.selectionStart, around.selectionEnd)
             if (start < 0 || end > chars.length) return false
             val piece = TextTools.pad(
-                text,
+                fitHere(text, chars.subSequence(0, start), chars.subSequence(end, chars.length)),
                 before = if (start > 0) chars[start - 1] else null,
                 after = if (end < chars.length) chars[end] else null,
             )
@@ -1224,7 +1286,7 @@ class OfflineFlowService : AccessibilityService() {
             if (caret != around.selectionEnd || caret < n || caret > chars.length) return false
             if (chars.subSequence(caret - n, caret).toString() != li.piece) return false
             val piece = TextTools.pad(
-                text,
+                fitHere(text, chars.subSequence(0, caret - n), chars.subSequence(caret, chars.length)),
                 before = if (caret > n) chars[caret - n - 1] else null,
                 after = if (caret < chars.length) chars[caret] else null,
             )
@@ -1238,24 +1300,13 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun rewriteField(node: AccessibilityNodeInfo, text: String): Boolean {
-        // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
-        // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
-        val raw = node.text?.toString() ?: ""
-        val hintText = node.hintText?.toString()
-        val caretAtStart = node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
-        val looksLikePlaceholder = caretAtStart &&
-            raw.trim().trimEnd('…', '.').lowercase() in COMMON_PLACEHOLDERS
-        val hint = node.isShowingHintText || raw.isEmpty() || (hintText != null && raw == hintText) || looksLikePlaceholder
-        val current = if (hint) "" else raw
-        var start = if (hint) 0 else node.textSelectionStart
-        var end = if (hint) 0 else node.textSelectionEnd
-        if (start < 0 || end < 0) { start = current.length; end = current.length }
-        if (start > end) { val t = start; start = end; end = t }
-        start = start.coerceAtMost(current.length)
-        end = end.coerceAtMost(current.length)
+        val f = fieldState(node)
+        val current = f.text
+        val start = f.start
+        val end = f.end
 
         val piece = TextTools.pad(
-            text,
+            fitHere(text, current.substring(0, start), current.substring(end)),
             before = if (start > 0) current[start - 1] else null,
             after = if (end < current.length) current[end] else null,
         )
@@ -1283,7 +1334,7 @@ class OfflineFlowService : AccessibilityService() {
         // Only when the field still holds exactly what the insert left there.
         if (!li.node.refresh() || (li.node.text?.toString() ?: "") != li.after) return false
         val piece = TextTools.pad(
-            text,
+            fitHere(text, li.before.substring(0, li.caret), li.before.substring(li.end)),
             before = if (li.caret > 0) li.before[li.caret - 1] else null,
             after = if (li.end < li.before.length) li.before[li.end] else null,
         )

@@ -112,6 +112,9 @@ object Updater {
 
     fun releasePage(version: String) = "https://github.com/$REPO/releases/tag/v$version"
 
+    /** Every version's changes, on GitHub. */
+    const val CHANGELOG_PAGE = "https://github.com/$REPO/blob/main/app/src/main/assets/${Changelog.FILE}"
+
     /** "1.10" > "1.9"; compares dot-separated numbers. */
     fun isNewer(a: String, b: String): Boolean {
         val x = a.split('.', '-').map { it.toIntOrNull() ?: 0 }
