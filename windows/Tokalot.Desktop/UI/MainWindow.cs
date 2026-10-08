@@ -717,6 +717,13 @@ public sealed class MainWindow : Window
     private void BuildNotes(StackPanel col)
     {
         Intro(col, "Notes", "Dictate without a text box: hold Ctrl+Shift+Win, or pick New voice note in the tray menu. Each dictation is saved here as its own note and copied to the clipboard.");
+        // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
+        var useful = Ui.Button("Useful", () => Open(NotesFeedbackUrl("useful")), filled: true);
+        useful.Margin = new Thickness(0, 0, 8, 0);
+        col.Children.Add(Spaced(Ui.Card(Ui.Stack(
+            Ui.Text("Voice notes are a beta. Worth keeping?", 15.5, bold: true),
+            Spaced(Ui.Text("Opens a short form on GitHub (a free account is needed). It's public, so your notes aren't in it.", 13.5, C.Sub), 0, 2, 0, 10),
+            Ui.Row(useful, Ui.Button("Not for me", () => Open(NotesFeedbackUrl("not for me"))))), 20), 0, 0, 0, 16));
         var notes = Notes.All();
         if (notes.Count == 0)
         {
@@ -748,6 +755,14 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(more, 0, 20, 0, 0));
         }
     }
+
+    /**
+     * The beta's feedback form on GitHub (.github/ISSUE_TEMPLATE/voice-notes-feedback.yml), with the vote in the
+     * title and the app and Windows version filled in. Nothing else about the PC or the notes is sent.
+     */
+    private static string NotesFeedbackUrl(string vote) =>
+        Updater.RepoUrl + "/issues/new?template=voice-notes-feedback.yml&title=" + Uri.EscapeDataString("[Voice notes] " + vote) +
+        "&app=" + Uri.EscapeDataString($"Tokalot {Updater.CurrentVersion} on Windows {Environment.OSVersion.Version}");
 
     private UIElement NoteView(Note n)
     {

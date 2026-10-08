@@ -54,6 +54,17 @@ object Notes {
     @Synchronized
     fun delete(ctx: Context, id: Long) = save(ctx, all(ctx).filter { it.id != id })
 
+    /**
+     * The beta's feedback form on GitHub (.github/ISSUE_TEMPLATE/voice-notes-feedback.yml), with [vote] in
+     * the title and the app and Android version filled in. Nothing else about the phone or the notes is sent.
+     */
+    fun feedbackUrl(ctx: Context, vote: String): String {
+        fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
+        val app = "Tokalot ${Updater.currentVersion(ctx)} on Android ${android.os.Build.VERSION.RELEASE}"
+        return "https://github.com/${Updater.REPO}/issues/new?template=voice-notes-feedback.yml" +
+            "&title=${enc("[Voice notes] $vote")}&app=${enc(app)}"
+    }
+
     /** Written to a side file first and then swapped in, so a crash mid-write can't lose the notes. */
     private fun save(ctx: Context, list: List<Note>) {
         val f = file(ctx)
