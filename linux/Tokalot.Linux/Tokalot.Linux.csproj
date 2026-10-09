@@ -10,7 +10,7 @@
     <RootNamespace>Tokalot.Desktop</RootNamespace>
     <Product>Tokalot</Product>
     <Company>sidewinderzz</Company>
-    <Version>0.5.1</Version>
+    <Version>0.5.2</Version>
     <!-- linux-x64 unless another one is asked for (-r linux-arm64; -r win-x64 runs the screenshot mode on Windows). -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">linux-x64</RuntimeIdentifier>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
@@ -44,6 +44,7 @@
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\LiveStt.cs" Link="Core\LiveStt.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\LocalWhisper.cs" Link="Core\LocalWhisper.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Net.cs" Link="Core\Net.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Notes.cs" Link="Core\Notes.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Sync.cs" Link="Core\Sync.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\TextTools.cs" Link="Core\TextTools.cs" />
   </ItemGroup>

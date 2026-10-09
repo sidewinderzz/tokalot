@@ -6,6 +6,11 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.28 · 2026-10-09
+- Settings › About can install a new version right there: "Check for updates" now brings up an Update button, even if you closed the banner on Home.
+- Voice notes are part of sync: with a sync file set up, notes made on one device show up on the others, and deleting one deletes it everywhere. Update Tokalot on every device to share them.
+- A quick tap with nothing said no longer types "Thank you." Groq Whisper now says when the audio was most likely silence, and that stock phrase is dropped then. A "thank you" you actually say still comes through.
+
 ## 1.27 · 2026-10-08
 - A short What's new tour opens once after this update (and from Settings › About).
 - Spell a word out while dictating ("Kowalski, K-O-W-A-L-S-K-I") and it's written once, without the letters. Home then offers to add it to your dictionary.

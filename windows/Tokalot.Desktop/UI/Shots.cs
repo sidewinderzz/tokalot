@@ -71,6 +71,18 @@ internal static class Shots
             W(Sync.Merge(D(new[] { "Gamma", "Alpha", "BETA" }), settled, D())) == W(settled) && W(Sync.Merge(settled, settled, settled)) == W(settled));
         var round = Sync.Parse(System.Text.Json.Nodes.JsonNode.Parse(Sync.ToJson(D(new[] { "A" }, new[] { ("t", "v") }, new[] { ("EMAIL", "FORMAL") }, "i"), null).ToJsonString())!.AsObject(), "d");
         Check("8 json round trip", Sync.Same(round, D(new[] { "A" }, new[] { ("t", "v") }, new[] { ("EMAIL", "FORMAL") }, "i")));
+        static Sync.Data N(params (long Id, string Text)[] notes) => D() with { Notes = notes.Select(n => new Sync.SyncNote(n.Id, n.Id, n.Text)).ToList() };
+        string Ns(Sync.Data d) => string.Join(",", (d.Notes ?? new()).Select(n => n.Id));
+        Check("9a notes from both, newest first", Ns(Sync.Merge(N((1, "a"), (3, "c")), N((2, "b")), D())) == "3,2,1");
+        Check("9b note deleted here", Ns(Sync.Merge(N((2, "b")), N((1, "a"), (2, "b")), N((1, "a"), (2, "b")))) == "2");
+        Check("9c note deleted elsewhere", Ns(Sync.Merge(N((1, "a"), (2, "b")), N((2, "b")), N((1, "a"), (2, "b")))) == "2");
+        Check("9d file without notes keeps them", Ns(Sync.Merge(N((1, "a")), D(), N((1, "a")))) == "1");
+        Check("9e changed note wins", Sync.Merge(N((1, "a")), N((1, "a2")), N((1, "a"))).Notes![0].Text == "a2");
+        var roundNotes = Sync.Parse(System.Text.Json.Nodes.JsonNode.Parse(Sync.ToJson(N((5, "x")), null).ToJsonString())!.AsObject(), "d");
+        Check("9f notes json round trip", Ns(roundNotes) == "5" && roundNotes.Notes![0].Text == "x");
+        Check("10a stray thank you dropped", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.8}]}") == "");
+        Check("10b said thank you kept", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.05}]}") == " Thank you.");
+        Check("10c other words kept", CloudStt.Text("{\"text\":\"Call me\",\"segments\":[{\"no_speech_prob\":0.9}]}") == "Call me");
         File.WriteAllLines(Path.Combine(dir, "sync-checks.txt"), lines);
     }
 

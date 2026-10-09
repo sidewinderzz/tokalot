@@ -14,7 +14,7 @@ namespace Tokalot.Desktop.Core;
  * folder they already sync (OneDrive, Google Drive, Dropbox, Syncthing…). Every Tokalot pointed at
  * the file reads it and adds its own changes. The Android app uses the same file and the same rules.
  *
- * Synced: dictionary, snippets, per-category styles, custom instructions, and API keys only if asked.
+ * Synced: dictionary, snippets, per-category styles, custom instructions, voice notes, and API keys only if asked.
  * Never synced: history, recordings, usage, per-app overrides, appearance.
  */
 public static class Sync
@@ -23,7 +23,14 @@ public static class Sync
     private const int Format = 1;
 
     /** The synced part of the settings. Styles holds only the categories the user set themselves. */
-    public sealed record Data(List<string> Words, List<Snippet> Snippets, Dictionary<string, string> Styles, string Instructions);
+    public sealed record Data(List<string> Words, List<Snippet> Snippets, Dictionary<string, string> Styles, string Instructions)
+    {
+        /** Voice notes, newest first. Null in a file last written by a version from before notes synced: the notes here are then kept. */
+        public List<SyncNote>? Notes { get; init; }
+    }
+
+    /** One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one. */
+    public sealed record SyncNote(long Id, long Time, string Text);
 
     /** When this device last synced, and what went wrong the last time (null = fine). */
     public static DateTime? LastSynced { get; private set; }
@@ -47,6 +54,7 @@ public static class Sync
     public static Data Merge(Data local, Data? remote, Data basis)
     {
         if (remote == null) return local;
+        var notes = MergeNotes(local.Notes ?? new(), remote.Notes, basis.Notes ?? new());
 
         // The file's order and spelling come first and this device's additions go after, so every device
         // settles on the same list and nobody rewrites the file just to reorder it.
@@ -86,7 +94,27 @@ public static class Sync
         }
 
         var instructions = local.Instructions == basis.Instructions ? remote.Instructions : local.Instructions;
-        return new Data(words, snippets, styles, instructions);
+        return new Data(words, snippets, styles, instructions) { Notes = notes };
+    }
+
+    /**
+     * Notes match by id. One that a side had at the last sync and no longer has was deleted there; a text
+     * changed since the last sync wins over the unchanged one. Newest first.
+     */
+    private static List<SyncNote> MergeNotes(List<SyncNote> local, List<SyncNote>? remote, List<SyncNote> basis)
+    {
+        if (remote == null) return local;
+        var mine = new Dictionary<long, SyncNote>(); foreach (var n in local) mine.TryAdd(n.Id, n);
+        var theirs = new Dictionary<long, SyncNote>(); foreach (var n in remote) theirs.TryAdd(n.Id, n);
+        var was = new Dictionary<long, SyncNote>(); foreach (var n in basis) was.TryAdd(n.Id, n);
+        var output = new List<SyncNote>();
+        foreach (var id in theirs.Keys.Concat(mine.Keys).Distinct())
+        {
+            mine.TryGetValue(id, out var here); theirs.TryGetValue(id, out var there); was.TryGetValue(id, out var b);
+            if (here != null && there != null) output.Add(b != null && here.Text == b.Text ? there : here);
+            else if (b == null) output.Add((here ?? there)!); // else: deleted on one side
+        }
+        return output.OrderByDescending(n => n.Time).ThenByDescending(n => n.Id).ToList();
     }
 
     private static Dictionary<string, Snippet> ByTrigger(IEnumerable<Snippet> list)
@@ -98,7 +126,8 @@ public static class Sync
 
     public static bool Same(Data a, Data b) =>
         a.Words.SequenceEqual(b.Words) && a.Snippets.SequenceEqual(b.Snippets) && a.Instructions == b.Instructions &&
-        a.Styles.Count == b.Styles.Count && a.Styles.All(kv => b.Styles.TryGetValue(kv.Key, out var v) && v == kv.Value);
+        a.Styles.Count == b.Styles.Count && a.Styles.All(kv => b.Styles.TryGetValue(kv.Key, out var v) && v == kv.Value) &&
+        (a.Notes ?? new()).SequenceEqual(b.Notes ?? new());
 
     // ---------- the file ----------
 
@@ -112,8 +141,14 @@ public static class Sync
             .Select(o => new Snippet(o["trigger"]?.ToString() ?? "", o["text"]?.ToString() ?? ""))
             .Where(s => s.Trigger.Trim().Length > 0).ToList() ?? new();
         var styles = (file["styles"] as JsonObject)?.Where(kv => kv.Value != null).ToDictionary(kv => kv.Key, kv => kv.Value!.ToString()) ?? new();
-        return new Data(words, snippets, styles, file["instructions"]?.ToString() ?? defaultInstructions);
+        var notes = (file["notes"] as JsonArray)?.OfType<JsonObject>()
+            .Where(o => Num(o["id"]) != null && o["text"] is JsonValue)
+            .Select(o => { var id = Num(o["id"])!.Value; return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString()); })
+            .ToList();
+        return new Data(words, snippets, styles, file["instructions"]?.ToString() ?? defaultInstructions) { Notes = notes };
     }
+
+    private static long? Num(JsonNode? n) => n is JsonValue v && v.TryGetValue<long>(out var x) ? x : null;
 
     public static JsonObject ToJson(Data d, JsonObject? keys)
     {
@@ -127,6 +162,7 @@ public static class Sync
             ["snippets"] = new JsonArray(d.Snippets.Select(s => (JsonNode?)new JsonObject { ["trigger"] = s.Trigger, ["text"] = s.Text }).ToArray()),
             ["styles"] = new JsonObject(d.Styles.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, kv.Value))),
             ["instructions"] = d.Instructions,
+            ["notes"] = new JsonArray((d.Notes ?? new()).Select(n => (JsonNode?)new JsonObject { ["id"] = n.Id, ["time"] = n.Time, ["text"] = n.Text }).ToArray()),
         };
         if (keys is { Count: > 0 }) o["keys"] = keys;
         return o;
@@ -134,8 +170,9 @@ public static class Sync
 
     // ---------- running a sync ----------
 
-    private static Data Local(Settings s) => new(
-        new List<string>(s.Words), new List<Snippet>(s.Snippets), new Dictionary<string, string>(s.CategoryStyles), s.CustomInstructions);
+    private static Data Local(Settings s, List<SyncNote> notes) => new(
+        new List<string>(s.Words), new List<Snippet>(s.Snippets), new Dictionary<string, string>(s.CategoryStyles), s.CustomInstructions)
+    { Notes = notes };
 
     private static Data LoadBasis()
     {
@@ -198,7 +235,8 @@ public static class Sync
                     file = JsonNode.Parse(text) as JsonObject ?? throw new InvalidDataException("That isn't a Tokalot sync file");
             }
             var remote = file == null ? null : Parse(file, Catalog.DefaultInstructions);
-            var local = Local(s);
+            var localNotes = Notes.ForSync() ?? throw new InvalidDataException("Couldn't read your voice notes. Will try again.");
+            var local = Local(s, localNotes);
             var merged = Merge(local, remote, LoadBasis());
 
             // Keys have no basis: take one this device lacks; hand ours over only if the user asked.
@@ -215,7 +253,10 @@ public static class Sync
                 if (mine.Length > 0 && !s.KnownKeys.Contains(id)) { s.KnownKeys.Add(id); noted = true; }
             }
 
-            if (!Same(merged, local))
+            var notesChanged = !(merged.Notes ?? new()).SequenceEqual(localNotes);
+            // A note made or deleted mid-sync: leave it all for the sync that change queued.
+            if (notesChanged && !Notes.ApplySynced(localNotes, merged.Notes ?? new())) return;
+            if (!Same(merged with { Notes = localNotes }, local))
             {
                 s.Words = merged.Words;
                 s.Snippets = merged.Snippets;
@@ -224,6 +265,7 @@ public static class Sync
                 localChanged = true;
             }
             if (localChanged || noted) s.Save();
+            if (notesChanged) localChanged = true;
             if (remote == null || !Same(merged, remote) || keysChanged)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);

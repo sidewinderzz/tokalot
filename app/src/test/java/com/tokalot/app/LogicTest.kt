@@ -102,6 +102,17 @@ class LogicTest {
         assertFalse(head.contains("prompt"))
     }
 
+    /** Whisper's stock phrase for noise is dropped only when Whisper itself rated the audio as silence. */
+    @Test fun strayThankYouIsDroppedButASaidOneIsKept() {
+        fun reply(text: String, noSpeech: Double) =
+            org.json.JSONObject().put("text", text).put("segments", org.json.JSONArray().put(org.json.JSONObject().put("no_speech_prob", noSpeech)))
+        assertEquals("", CloudStt.text(reply(" Thank you.", 0.8)))
+        assertEquals(" Thank you.", CloudStt.text(reply(" Thank you.", 0.05)))
+        assertEquals("Call me", CloudStt.text(reply("Call me", 0.9)))
+        assertEquals(" Thank you.", CloudStt.text(org.json.JSONObject().put("text", " Thank you."))) // plain json: no way to tell
+        assertTrue(CloudStt.head("B", "whisper-large-v3-turbo", "", true, Upload("a.wav", "audio/wav", 0) {}, "verbose_json").contains("verbose_json"))
+    }
+
     @Test fun wavUploadLengthMatchesItsBytes() {
         val up = Upload.wav(FloatArray(160))
         val out = java.io.ByteArrayOutputStream()

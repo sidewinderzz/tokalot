@@ -216,4 +216,48 @@ class SyncTest {
         rejected("not json at all", "That isn't a Tokalot sync file")
         rejected("""{"app":"tokalot-sync","format":2,"words":[]}""", "Update Tokalot to sync with this file")
     }
+
+    // ---------- voice notes ----------
+
+    private val a = SyncNote(1, 1, "Call about the invoice")
+    private val b = SyncNote(2, 2, "Buy printer paper")
+    private val c = SyncNote(3, 3, "Book the dentist")
+
+    private fun notes(l: List<SyncNote>, r: List<SyncNote>?, base: List<SyncNote>) =
+        merge(SyncState(notes = l), SyncRemote(emptyList(), emptyList(), emptyMap(), "", null, notes = r), SyncState(notes = base)).state.notes
+
+    @Test fun notesFromBothDevicesAreKeptNewestFirst() {
+        assertEquals(listOf(c, b, a), notes(listOf(a, c), listOf(b), emptyList()))
+        assertEquals(listOf(c, b, a), notes(listOf(c, b, a), listOf(c, b, a), listOf(a)))
+    }
+
+    @Test fun aDeletedNoteStaysDeleted() {
+        assertEquals(listOf(b), notes(listOf(b), listOf(a, b), listOf(a, b)))   // deleted here
+        assertEquals(listOf(b), notes(listOf(a, b), listOf(b), listOf(a, b)))   // deleted elsewhere
+        assertEquals(listOf(c, b), notes(listOf(c, b), listOf(b), listOf(a, b))) // deleted elsewhere, a new one here
+    }
+
+    @Test fun aChangedNoteWins() {
+        val edited = a.copy(text = "Call about the March invoice")
+        assertEquals(listOf(edited), notes(listOf(a), listOf(edited), listOf(a)))
+        assertEquals(listOf(edited), notes(listOf(edited), listOf(a), listOf(a)))
+    }
+
+    /** A file last written by a version from before notes synced has no "notes": nothing is deleted because of it. */
+    @Test fun aFileWithoutNotesLeavesThemAlone() {
+        assertEquals(listOf(b, a), notes(listOf(b, a), null, listOf(b, a)))
+        val r = SyncFormat.parse("""{"app":"tokalot-sync","format":1,"words":[],"snippets":[],"styles":{},"instructions":""}""")!!
+        assertNull(r.notes)
+        val res = SyncMerge.merge(SyncState(notes = listOf(a)), r, SyncState(), emptyMap(), false)
+        assertEquals(listOf(a), res.state.notes)
+        assertTrue(res.write) // and the notes go into the file
+        assertFalse(SyncMerge.merge(SyncState(), r, SyncState(), emptyMap(), false).write)
+    }
+
+    @Test fun notesSurviveTheFileAndTheBase() {
+        val state = SyncState(words = listOf("Kowalski"), notes = listOf(b, a))
+        val r = SyncFormat.parse(SyncFormat.encode(state, null, 1, "Android"))!!
+        assertEquals(listOf(b, a), r.notes)
+        assertEquals(state.copy(instructions = ""), SyncFormat.parseBase(SyncFormat.encodeBase(state), "default"))
+    }
 }

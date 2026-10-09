@@ -14,7 +14,7 @@ public sealed class Note
     public string Text { get; set; } = "";
 }
 
-/** Voice notes (beta), one per dictation, stored as one JSON file next to history. Newest first. */
+/** Voice notes (beta), one per dictation, stored as one JSON file next to history. Newest first. Shared through the sync file. */
 public static class Notes
 {
     private static List<Note>? cache;
@@ -69,6 +69,7 @@ public static class Notes
             var note = new Note { Id = id, Time = now, Text = text };
             l.Insert(0, note);
             Save();
+            Sync.Queue();
             return note;
         }
     }
@@ -76,6 +77,29 @@ public static class Notes
     public static void Delete(long id)
     {
         lock (Gate) { Load().RemoveAll(x => x.Id == id); Save(); }
+        Sync.Queue();
+    }
+
+    /** The notes as the sync file holds them; null if the file is there but can't be read, so a sync never takes that for "no notes". */
+    public static List<Sync.SyncNote>? ForSync()
+    {
+        lock (Gate)
+        {
+            var l = Load();
+            return unread ? null : l.Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text)).ToList();
+        }
+    }
+
+    /** Stores a sync's result, unless a note was added or deleted here since [before] was read. */
+    public static bool ApplySynced(List<Sync.SyncNote> before, List<Sync.SyncNote> after)
+    {
+        lock (Gate)
+        {
+            if (unread || !Load().Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text)).SequenceEqual(before)) return false;
+            cache = after.Select(n => new Note { Id = n.Id, Time = n.Time, Text = n.Text }).ToList();
+            Save();
+            return true;
+        }
     }
 
     /** Drops the in-memory copy so the next read comes from disk (after a restore). */
