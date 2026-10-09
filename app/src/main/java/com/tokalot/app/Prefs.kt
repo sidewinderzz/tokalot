@@ -464,6 +464,14 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("notes_beta", false)
         set(v) = sp.edit().putBoolean("notes_beta", v).apply()
 
+    /**
+     * Apps where, with no keyboard showing, dictated text goes on the clipboard instead of into the selected text
+     * box. Starts out as the phone's launchers: a home screen can keep an invisible search box selected (Niagara does).
+     */
+    var clipboardApps: Set<String>
+        get() = sp.getStringSet("clipboard_apps", null)?.toSet() ?: AppContext.launchers(app).also { clipboardApps = it }
+        set(v) = sp.edit().putStringSet("clipboard_apps", v).apply()
+
     /** Phrases that, said at the very start of a dictation, make it a voice note (comma-separated). */
     var notePhrases: String
         get() = sp.safeString("note_phrases", null) ?: TextTools.DEFAULT_NOTE_PHRASES

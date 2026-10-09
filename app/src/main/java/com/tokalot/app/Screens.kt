@@ -501,9 +501,36 @@ class SettingsScreen(private val a: MainActivity) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(14), dp(16), dp(10))
             addView(text("Dictate tile", 17f))
-            addView(text("Talk while you read or scroll, with no text box open. The text goes into the text box if the keyboard is up, and onto the clipboard if it isn't. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
+            addView(text("Talk while you read or scroll, with no text box open. The text goes into the selected text box if there is one, and onto the clipboard if not. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
             if (Build.VERSION.SDK_INT >= 33) addView(row(pill("Add the tile") {
                 StartTile.requestAdd(this@with, DictateTile::class.java, "Dictate", R.drawable.ic_mic)
+            }), lp().margins(this@with, t = 6))
+        })
+        hand.addView(divider())
+        // With no keyboard showing, these apps get the clipboard rather than having the text typed in.
+        hand.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(16), dp(10))
+            addView(text("Clipboard only", 17f))
+            addView(text("With no keyboard showing, Tokalot still types into the selected text box, except in these apps, where the text is copied instead. Launchers start out here: some keep a hidden search box selected on the home screen.", 14f, C.SUB))
+            val listed = prefs.clipboardApps
+            listed.map { it to AppContext.label(this@with, it) }.sortedBy { it.second.lowercase() }.forEach { (pkg, name) ->
+                addView(row(
+                    text(name, 15f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                    iconButton(R.drawable.ic_close, "Remove $name", 20, C.SUB) { prefs.clipboardApps = prefs.clipboardApps - pkg; render() },
+                ).apply { minimumHeight = dp(44) }, lp().margins(this@with, t = 4))
+            }
+            addView(row(pill("Add an app") {
+                val apps = AppContext.launchable(this@with).filter { it.first !in prefs.clipboardApps }
+                lateinit var d: android.app.Dialog
+                val list = LinearLayout(this@with).apply { orientation = LinearLayout.VERTICAL }
+                apps.forEach { (pkg, name) ->
+                    list.addView(text(name, 16f).apply {
+                        setPadding(dp(4), dp(12), dp(4), dp(12))
+                        setOnClickListener { prefs.clipboardApps = prefs.clipboardApps + pkg; d.dismiss(); render() }
+                    })
+                }
+                d = sheet("Clipboard only", list)
             }), lp().margins(this@with, t = 6))
         })
         hand.addView(divider())

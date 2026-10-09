@@ -58,7 +58,7 @@ object Tour {
         ),
         Slide(
             "No text box needed",
-            "Add the Dictate tile to Quick Settings, or hold both volume keys (Android 11+), and talk while you read or scroll. With no keyboard up, the text goes on the clipboard.",
+            "Add the Dictate tile to Quick Settings, or hold both volume keys (Android 11+), and talk while you read or scroll. With no text box selected, the text goes on the clipboard.",
             { tilePicture() },
         ),
         Slide(

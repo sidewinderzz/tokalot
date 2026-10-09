@@ -9,6 +9,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 ## 1.28 · 2026-10-09
 - Settings › About can install a new version right there: "Check for updates" now brings up an Update button, even if you closed the banner on Home.
 - Voice notes are part of sync: with a sync file set up, notes made on one device show up on the others, and deleting one deletes it everywhere. Update Tokalot on every device to share them.
+- Dictating with no keyboard showing types into the selected text box again (from the Dictate tile, for example), except in apps on the new Clipboard only list (Settings › Recording & look › Without a text box), which get the clipboard. Launchers are on it to start with, so Niagara's hidden search box stays out of it.
 - A quick tap with nothing said no longer types "Thank you." Groq Whisper now says when the audio was most likely silence, and that stock phrase is dropped then. A "thank you" you actually say still comes through.
 
 ## 1.27 · 2026-10-08
