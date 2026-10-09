@@ -754,10 +754,10 @@ class SettingsScreen(private val a: MainActivity) {
         }, lp())
         // A new version can be installed from here too, not only from the banner on Home.
         val ready = Updater.available(this, evenDismissed = true)
-        val pct = Updater.progress
+        val downloaded = Updater.progress
         val status = text(when {
             ready == null -> ""
-            pct != null -> "Downloading Tokalot ${ready.version}… $pct%"
+            downloaded != null -> "Downloading Tokalot ${ready.version}… $downloaded%"
             else -> "Version ${ready.version} is available."
         }, 14f, C.SUB)
         settingsUpdateText = status
@@ -778,7 +778,7 @@ class SettingsScreen(private val a: MainActivity) {
             }.start()
         }
         about.addView(
-            if (ready != null && pct == null) row(pill("Update", filled = true) { startUpdate(ready) }, spacer(wDp = 8), check) else row(check),
+            if (ready != null && downloaded == null) row(pill("Update", filled = true) { startUpdate(ready) }, spacer(wDp = 8), check) else row(check),
             lp(),
         )
         about.addView(status, lp().margins(this, t = 2))
