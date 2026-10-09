@@ -9,7 +9,7 @@ object Cleanup {
     fun systemPrompt(
         style: Style, category: AppCategory, appLabel: String?,
         words: List<String>, custom: String, hasSnippets: Boolean, autoLanguage: Boolean = false,
-        polish: Boolean = false,
+        polish: Boolean = false, spot: TextTools.Spot? = null,
     ): String = buildString {
         appendLine("You clean up voice dictation. The user spoke; a speech recognizer produced the transcript. Rewrite it into the text the user meant to type.")
         appendLine()
@@ -32,6 +32,13 @@ object Cleanup {
         if (category.rule.isNotEmpty()) appendLine("- ${category.rule}")
         // The app name and category rule tempt the model to "upgrade" words into the topic's jargon.
         if (!polish) appendLine("- Use only the terms the user actually said. Do not introduce technical terms, names or details they didn't say, even when the app or topic suggests them.")
+        // Where the cursor is in the text already there (only these two facts are sent, never the text itself).
+        if (spot?.mid == true) {
+            appendLine("- This text goes into the middle of a sentence the user already typed, right after a word or a comma. Start it with a lowercase letter unless the first word is a name, a proper noun, an acronym or \"I\".")
+        }
+        if (spot?.continues == true) {
+            appendLine("- The user's sentence carries on after this text, so do not end it with a period. Keep a question mark or exclamation mark only if the user clearly asked or exclaimed.")
+        }
         if (hasSnippets) {
             appendLine("- Tokens like {{SNIP1}} are placeholders. Copy them exactly, unchanged, in the position they belong.")
         }
@@ -53,6 +60,7 @@ object Cleanup {
         "  - Not a list: numbers that are quantities (\"I have one cat and two dogs\") or a short series inside a sentence (\"grab eggs, milk and bread\").",
         "  - Parentheses: when the user adds a side note mid-sentence (a clarification, an example, what an abbreviation stands for, an \"or whatever it's called\" remark), put it in parentheses. Example: \"the big conference room the one on the second floor is booked\" becomes \"The big conference room (the one on the second floor) is booked.\" Use an em dash instead for a sharp interruption or emphasis. Keep plain commas when the sentence just flows.",
         "  - Spoken punctuation becomes the symbol when said as a command: period, comma, question mark, exclamation point, colon, semicolon, dash, em dash, dot dot dot, open/close quote, open/close parenthesis, hashtag, at sign, ampersand, slash, percent. Keep the word when it is part of the meaning (\"a short period of time\").",
+        "  - Spelled-out words: when the user spells a word letter by letter to make clear how it is written (\"ask Kowalski, K-O-W-A-L-S-K-I\", \"Stewart, spelled S-T-E-W-A-R-T\"), write the word once, with that spelling, and leave out the letters and words like \"spelled\". Letters that don't spell out a word just said (a part number, a code, initials) stay as said.",
         "  - \"new line\", \"next line\" or \"line break\" starts a new line; \"new paragraph\" or \"skip a line\" leaves a blank line.",
         "  - Numbers: write times, dates, money, percentages, measurements and numbers 10 and up as digits (\"seven thirty pm\" becomes \"7:30 PM\", \"twenty five percent\" becomes \"25%\"). Keep one to nine as words in ordinary sentences, and keep phrases like \"no one\" or \"one of those days\".",
         "  - A long dictation that changes topic can be split into short paragraphs. Never add headings, bold or other markdown beyond list markers.",
@@ -64,11 +72,11 @@ object Cleanup {
     fun run(
         prefs: Prefs, choice: CleanupChoice, text: String, hasSnippets: Boolean,
         category: AppCategory = AppCategory.OTHER, appLabel: String? = null, call: Call? = null,
-        polish: Boolean = prefs.polish, pieces: Boolean = false,
+        polish: Boolean = prefs.polish, pieces: Boolean = false, spot: TextTools.Spot? = null,
     ): Result {
         val key = prefs.key(choice.service)
         val model = prefs.cleanupModel(choice)
-        val system = systemPrompt(prefs.styleFor(category), category, appLabel, prefs.words, prefs.customInstructions, hasSnippets, prefs.autoLanguage, polish)
+        val system = systemPrompt(prefs.styleFor(category), category, appLabel, prefs.words, prefs.customInstructions, hasSnippets, prefs.autoLanguage, polish, spot)
             .let { if (pieces) it.trimEnd() + "\n\n" + LiveStt.CLEANUP_NOTE else it }
         val user = "<transcript>\n$text\n</transcript>"
         // A long dictation takes the model longer to write out again: 15 s plus 1 s per 200 characters, up to a minute.

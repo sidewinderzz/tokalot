@@ -1,6 +1,7 @@
 package com.tokalot.app
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.content.ClipData
@@ -41,8 +42,8 @@ import kotlin.math.abs
  * drag to move (the spot is remembered). Drag it into the red zone at the top of the screen
  * to dismiss it; it comes back the next time an input field is focused or the keyboard
  * reopens. If the field or keyboard closes while you talk,
- * recording continues; when you stop, the text goes into whatever field is focused, or to
- * the clipboard if none is.
+ * recording continues; when you stop, the text goes into the focused field if the keyboard is
+ * up, or to the clipboard if it isn't.
  * Does nothing (no mic, no model in memory, no network) until you tap.
  */
 class OfflineFlowService : AccessibilityService() {
@@ -135,6 +136,11 @@ class OfflineFlowService : AccessibilityService() {
         dictation = Dictation(applicationContext)
         buildButton()
         Sync.request(this) // picks up dictionary and snippet changes made on another device
+        // The keyboard may already be up (the switch was just turned on, or the service restarted):
+        // look now rather than wait for the next event.
+        lookAgain = 6
+        handler.postDelayed(recheck, 150)
+        applyShortcut()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -173,6 +179,7 @@ class OfflineFlowService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
+        runCatching { accessibilityButtonController.unregisterAccessibilityButtonCallback(shortcut) }
         handler.removeCallbacksAndMessages(null)
         button?.animate()?.cancel()
         takeLive()?.cancel()
@@ -478,27 +485,36 @@ class OfflineFlowService : AccessibilityService() {
         for (root in roots) {
             if (root == null || root.packageName == packageName) continue // not inside our own app
             val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: continue
-            return if (node.isEditable && !node.isPassword) node else null
+            // A popup or second window can hold input focus on something that isn't a text box
+            // while the text box sits in another window, so keep looking rather than stop here.
+            if (node.isPassword) return null
+            if (node.isEditable) return node
         }
         return null
     }
 
-    private var lookAgain = 0 // re-checks left when the keyboard is up but no field was found yet
+    private var lookAgain = 0 // re-checks left while only one of keyboard and text box has been found
 
     private fun updateButton() {
         // Idle: only show when the keyboard is actually up on an editable field.
         // Recording/transcribing: stay visible even if the field or keyboard closed.
-        if (state == State.IDLE && keyboardTop() == null) dismissed = false // keyboard closed: forget
-        if (state == State.IDLE && (dismissed || keyboardTop() == null || focusedEditable() == null)) {
-            // Keyboard up but no field found: some apps report the focused field a moment late and send
-            // no further event, which left the button hidden. Look again a few times before giving up.
-            if (!dismissed && keyboardTop() != null && lookAgain > 0) {
-                lookAgain--
-                handler.removeCallbacks(recheck)
-                handler.postDelayed(recheck, 300)
+        if (state == State.IDLE) {
+            val keyboard = keyboardTop() != null
+            if (!keyboard) dismissed = false // keyboard closed: forget
+            val field = !dismissed && focusedEditable() != null
+            if (dismissed || !keyboard || !field) {
+                // Half there: the keyboard is up but no text box was found, or a text box is selected but the
+                // keyboard isn't listed yet. Either one can be reported a moment after the event that announced
+                // it, with no further event, which left the button hidden until the keyboard was closed and
+                // opened again. Look again a few times before giving up.
+                if (!dismissed && (keyboard || field) && lookAgain > 0) {
+                    lookAgain--
+                    handler.removeCallbacks(recheck)
+                    handler.postDelayed(recheck, 300)
+                }
+                detach()
+                return
             }
-            detach()
-            return
         }
         if (touching) return
         val p = params ?: return
@@ -524,7 +540,7 @@ class OfflineFlowService : AccessibilityService() {
             return
         }
         if (tx != p.x || ty != p.y) {
-            // The spot only changes when the screen turns or the position was reset in the app.
+            // The spot changes when the screen turns, the keyboard changes height, or the position was reset in the app.
             p.x = tx; p.y = ty
             try { wm.updateViewLayout(button, p) } catch (_: Exception) {}
             if (state == State.RECORDING) showTrack() // keep the cancel guide with the button
@@ -538,8 +554,11 @@ class OfflineFlowService : AccessibilityService() {
         return if (r.height() > 0) r.top else null
     }
 
-    // The button is pinned: it sits at the screen position it was last dragged to and never follows the
-    // keyboard. Upright and sideways each keep their own spot ("px"/"py" and "lx"/"ly").
+    // The button stays where it was last dragged to; upright and sideways each keep their own spot ("px"/"py"
+    // and "lx"/"ly"). Dropped above the keyboard, the spot is on the screen, but a taller keyboard (numbers,
+    // emoji, a toolbar) never covers it: the button sits just above that keyboard until it shrinks again.
+    // Dropped onto the keyboard, the spot is on the keyboard ("pk"/"lk": how far below its top edge), so it
+    // stays at the same place on the keys however tall the keyboard is.
     private fun overlayPrefs() = getSharedPreferences("overlay", Context.MODE_PRIVATE)
     private fun sideways() = resources.displayMetrics.let { it.widthPixels > it.heightPixels }
 
@@ -547,10 +566,21 @@ class OfflineFlowService : AccessibilityService() {
         val dm = resources.displayMetrics
         val sp = overlayPrefs()
         val (kx, ky) = if (sideways()) "lx" to "ly" else "px" to "py"
+        val kk = if (sideways()) "lk" else "pk"
         val maxX = dm.widthPixels - winW
         val maxY = dm.heightPixels - winH
-        if (sp.contains(kx) && sp.contains(ky))
-            return sp.safeInt(kx, 0).coerceIn(0, maxX) to sp.safeInt(ky, 0).coerceIn(dp(24), maxY)
+        if (sp.contains(kx) && sp.contains(ky)) {
+            var y = sp.safeInt(ky, 0)
+            val top = keyboardTop()
+            if (top != null) {
+                y = when {
+                    sp.contains(kk) -> top + sp.safeInt(kk, 0)           // on the keyboard: same place on it
+                    top > dm.heightPixels / 3 -> minOf(y, top - winH)    // above it: never under a taller one
+                    else -> y                                            // a keyboard filling the screen: leave it
+                }
+            }
+            return sp.safeInt(kx, 0).coerceIn(0, maxX) to y.coerceIn(dp(24), maxY)
+        }
         // No spot yet: the right edge, just above the keyboard. Measured once, then kept. ("x" and "above"
         // are where earlier versions kept a position that moved with the keyboard.)
         val x = sp.safeInt("x", dm.widthPixels - winW - dp(12 - PAD_DP)).coerceIn(0, maxX)
@@ -582,7 +612,12 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun savePosition(p: WindowManager.LayoutParams) {
         val (kx, ky) = if (sideways()) "lx" to "ly" else "px" to "py"
-        overlayPrefs().edit().putInt(kx, p.x).putInt(ky, p.y).apply()
+        val kk = if (sideways()) "lk" else "pk"
+        val e = overlayPrefs().edit().putInt(kx, p.x).putInt(ky, p.y)
+        // Dropped with its middle over the keyboard: keep it at that place on the keyboard.
+        val top = keyboardTop()
+        if (top != null && p.y + winH / 2 > top) e.putInt(kk, p.y - top) else e.remove(kk)
+        e.apply()
     }
 
     private fun detach() {
@@ -616,6 +651,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun setState(s: State) {
         state = s
+        if (s == State.IDLE) manual = null
         button?.contentDescription = describe(s)
         // A normal transcription takes a second or two; only offer to cancel when it drags on.
         handler.removeCallbacks(showCancel)
@@ -651,6 +687,85 @@ class OfflineFlowService : AccessibilityService() {
             State.IDLE, State.STARTING -> BarsView.Mode.IDLE
             State.RECORDING -> BarsView.Mode.LISTENING
             State.WORKING -> BarsView.Mode.WORKING
+        }
+    }
+
+    // ---------- starting by hand: Quick Settings tiles and the accessibility shortcut ----------
+
+    enum class Manual { DICTATE, NOTE }
+
+    /** How the recording in progress was started when it wasn't the button: by a tile or the shortcut. */
+    private var manual: Manual? = null
+
+    /**
+     * Starts a dictation with no text box needed (a Quick Settings tile, or the accessibility shortcut).
+     * DICTATE types into the text box if the keyboard is up, and copies the text if it isn't; NOTE saves it
+     * to Notes and copies it. The button shows wherever it was last put, and a tap on it finishes. Called again
+     * while recording, it finishes too, so a second tap on the tile stops.
+     */
+    fun startByHand(mode: Manual) {
+        handler.post {
+            when (state) {
+                State.RECORDING -> { stopAndTranscribe(); return@post }
+                State.STARTING -> { pendingStop = true; return@post }
+                State.WORKING -> return@post
+                State.IDLE -> {}
+            }
+            // Close the notification shade first, so the button and the app underneath can be seen
+            // and the app's text box (if any) is the one in front when the recording starts.
+            if (Build.VERSION.SDK_INT >= 31) performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+            handler.postDelayed({
+                if (state != State.IDLE) return@postDelayed
+                manual = mode
+                startRecording()
+                if (state == State.IDLE) { manual = null; return@postDelayed } // setup isn't finished; the app was opened instead
+                if (mode == Manual.NOTE) targetApp = null    // a note is written in the plain style, not the app's
+                updateButton()
+            }, 300)
+        }
+    }
+
+    private val shortcut = object : AccessibilityButtonController.AccessibilityButtonCallback() {
+        override fun onClicked(controller: AccessibilityButtonController) {
+            when (Prefs(this@OfflineFlowService).shortcutAction) {
+                "dictate" -> startByHand(Manual.DICTATE)
+                "note" -> startByHand(Manual.NOTE)
+                else -> toast("Pick what this shortcut does in Tokalot › Settings › Recording & look")
+            }
+        }
+    }
+
+    /**
+     * Listens for Android's accessibility shortcut (holding both volume keys, or the accessibility button or
+     * gesture), Android 11 and newer. The service asks for it in res/xml-v30/accessibility_config.xml: Android
+     * only reads that from there, and without it the shortcut switches Tokalot off and on instead of reaching
+     * here. Which gesture runs it is picked in Android's own Settings › Accessibility › Tokalot.
+     */
+    private fun applyShortcut() {
+        if (Build.VERSION.SDK_INT < 30) return
+        runCatching { accessibilityButtonController.registerAccessibilityButtonCallback(shortcut) }
+    }
+
+    /**
+     * A finished voice note: kept on the Notes page and on the clipboard. [offerTyping]: it was a note because it
+     * started with a note phrase while a text box was open, so a tap types it there instead (and drops the note),
+     * in case the phrase was just how the sentence began.
+     */
+    private fun saveNote(text: String, offerTyping: Boolean = false) {
+        val id = runCatching { Notes.add(this, text) }.getOrNull()
+        copyToClipboard(text)
+        if (offerTyping) {
+            showBubble("Saved to Notes · tap to type it here instead", 6000) {
+                id?.let { runCatching { Notes.delete(this, it) } }
+                deliver(text)
+            }
+            return
+        }
+        showBubble("Saved to Notes · copied") {
+            startActivity(
+                Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.Tab.NOTES.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            )
         }
     }
 
@@ -839,7 +954,8 @@ class OfflineFlowService : AccessibilityService() {
                     when {
                         pendingCancel -> cancel()
                         pendingStop -> stopAndTranscribe()
-                        prefs.autoStop && !prefs.holdToTalk -> handler.postDelayed(silenceCheck, 1000)
+                        // Started by hand there's nothing to hold, so it works like tap mode.
+                        prefs.autoStop && (!prefs.holdToTalk || manual != null) -> handler.postDelayed(silenceCheck, 1000)
                     }
                 } else {
                     RecordingService.stop(this)
@@ -956,6 +1072,7 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun stopAndTranscribe() {
+        val mode = manual // setState(IDLE) forgets it
         val early = takeLive()
         handler.removeCallbacks(silenceCheck)
         Haptics.play(this, Haptics.Kind.STOP)
@@ -999,7 +1116,8 @@ class OfflineFlowService : AccessibilityService() {
         workingSince = SystemClock.elapsedRealtime()
         val seconds = samples.size / Recorder.SAMPLE_RATE.toFloat()
         startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds, early?.lastRate ?: 0f)
-        dictation.process(samples, targetApp, sparse = !heard, live = early) { outcome, err ->
+        val spot = if (mode == Manual.NOTE) null else cursorSpot()
+        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = spot) { outcome, err ->
             setState(State.IDLE)
             when {
                 // Nothing is typed; the recording is in the app's history with a Transcribe button.
@@ -1012,7 +1130,12 @@ class OfflineFlowService : AccessibilityService() {
                     Haptics.play(this, Haptics.Kind.ERROR); toast("Didn't catch anything")
                 }
                 else -> {
-                    deliver(outcome.text, outcome.plain, outcome.entryId)
+                    when {
+                        mode == Manual.NOTE -> saveNote(outcome.text)
+                        // Said "Note this…": a note, with the choice to type it after all if a text box was open.
+                        outcome.note -> saveNote(outcome.text, offerTyping = typingVisible())
+                        else -> deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
+                    }
                     Haptics.play(this, Haptics.Kind.DONE)
                     outcome.warning?.let { toast(it) }
                 }
@@ -1084,17 +1207,30 @@ class OfflineFlowService : AccessibilityService() {
         }
     }
 
-    private fun deliver(text: String, plain: String? = null, entryId: Long? = null) {
-        val node = focusedEditable()
+    /** fitted: the AI cleanup already chose the first capital for where the text goes (see [fitHere]). */
+    private fun deliver(text: String, plain: String? = null, entryId: Long? = null, fitted: Boolean = false) {
+        // Only type when a keyboard shows the user is in a text box. Some apps keep an invisible box focused
+        // (Niagara Launcher's home screen holds its app search that way), and typing there opens it.
+        val node = if (typingVisible()) focusedEditable() else null
+        fitCaps = !fitted
+        lastFitted = null
         if (node == null || !insert(node, text)) {
             copyToClipboard(text)
             showBubble("Copied ✓  $text") { copyToClipboard(text); toast("Copied") }
         } else if (lastInsert != null) {
-            watchForCorrection(text)
+            watchForCorrection(lastFitted ?: text)
             // plain: the AI polished the wording, so offer the user's own words next to Undo.
             if (plain != null) showSwapBubble(plain, entryId, 7000)
             else showUndoChip(5000)
         }
+    }
+
+    /** A keyboard is on screen: the on-screen one, or a hardware keyboard that's plugged in and open. */
+    private fun typingVisible(): Boolean {
+        if (keyboardTop() != null) return true
+        val c = resources.configuration
+        return c.keyboard == android.content.res.Configuration.KEYBOARD_QWERTY &&
+            c.hardKeyboardHidden == android.content.res.Configuration.HARDKEYBOARDHIDDEN_NO
     }
 
     /** What the last insert did, so Undo can reverse exactly that. */
@@ -1132,6 +1268,7 @@ class OfflineFlowService : AccessibilityService() {
         lastInsert = null
         stopWatching(learn = false)
         entryId?.let { History.useOwnWording(this, it, plain) }
+        fitCaps = true
         val ok = when (li) {
             is LastInsert.Typed -> swapTyped(li, plain)
             is LastInsert.Rewritten -> swapRewritten(li, plain)
@@ -1139,6 +1276,64 @@ class OfflineFlowService : AccessibilityService() {
         }
         if (ok) showUndoChip(5000)
         else toast("Couldn't swap it here. Your wording is in history.")
+    }
+
+    // ---------- fitting into the sentence around the cursor (Settings: Style › Fit into the sentence) ----------
+
+    private var fitCaps = true          // the first letter may be lowercased here (false when the AI already chose it)
+    private var lastFitted: String? = null // the dictation as it was actually typed, after fitting
+
+    /** [text] fitted to the characters either side of the cursor, as the insert is about to type it. */
+    private fun fitHere(text: String, before: CharSequence, after: CharSequence): String {
+        val prefs = Prefs(this)
+        val out = if (prefs.fitSentence) TextTools.fit(text, TextTools.spot(before, after), prefs.words, fitCaps) else text
+        lastFitted = out
+        return out
+    }
+
+    /**
+     * Where the cursor sits in the focused text box, from the few characters either side of it, so the AI
+     * cleanup can be told "mid-sentence" (the characters themselves are never sent). Null: no text box,
+     * nothing around the cursor, or the setting is off.
+     */
+    private fun cursorSpot(): TextTools.Spot? {
+        if (!Prefs(this).fitSentence || !typingVisible()) return null // no keyboard: the text will be copied, not typed
+        val spot = runCatching {
+            val ic = if (Build.VERSION.SDK_INT >= 33) inputMethod?.currentInputConnection else null
+            val around = if (Build.VERSION.SDK_INT >= 33) ic?.getSurroundingText(AROUND, AROUND, 0) else null
+            if (around != null) {
+                val chars = around.text
+                val start = minOf(around.selectionStart, around.selectionEnd).coerceIn(0, chars.length)
+                val end = maxOf(around.selectionStart, around.selectionEnd).coerceIn(start, chars.length)
+                TextTools.spot(chars.subSequence(0, start), chars.subSequence(end, chars.length))
+            } else {
+                val f = focusedEditable()?.let { fieldState(it) } ?: return null
+                TextTools.spot(f.text.substring(0, f.start), f.text.substring(f.end))
+            }
+        }.getOrNull()
+        return spot?.takeUnless { it.plain }
+    }
+
+    /** A text box's real text (empty while it only shows its placeholder) and its selection, in order and in range. */
+    private class FieldState(val text: String, val start: Int, val end: Int)
+
+    private fun fieldState(node: AccessibilityNodeInfo): FieldState {
+        // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
+        // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
+        val raw = node.text?.toString() ?: ""
+        val hintText = node.hintText?.toString()
+        val caretAtStart = node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
+        val looksLikePlaceholder = caretAtStart &&
+            raw.trim().trimEnd('…', '.').lowercase() in COMMON_PLACEHOLDERS
+        val hint = node.isShowingHintText || raw.isEmpty() || (hintText != null && raw == hintText) || looksLikePlaceholder
+        val current = if (hint) "" else raw
+        var start = if (hint) 0 else node.textSelectionStart
+        var end = if (hint) 0 else node.textSelectionEnd
+        if (start < 0 || end < 0) { start = current.length; end = current.length }
+        if (start > end) { val t = start; start = end; end = t }
+        start = start.coerceAtMost(current.length)
+        end = end.coerceAtMost(current.length)
+        return FieldState(current, start, end)
     }
 
     /**
@@ -1166,7 +1361,7 @@ class OfflineFlowService : AccessibilityService() {
             val end = maxOf(around.selectionStart, around.selectionEnd)
             if (start < 0 || end > chars.length) return false
             val piece = TextTools.pad(
-                text,
+                fitHere(text, chars.subSequence(0, start), chars.subSequence(end, chars.length)),
                 before = if (start > 0) chars[start - 1] else null,
                 after = if (end < chars.length) chars[end] else null,
             )
@@ -1211,7 +1406,7 @@ class OfflineFlowService : AccessibilityService() {
             if (caret != around.selectionEnd || caret < n || caret > chars.length) return false
             if (chars.subSequence(caret - n, caret).toString() != li.piece) return false
             val piece = TextTools.pad(
-                text,
+                fitHere(text, chars.subSequence(0, caret - n), chars.subSequence(caret, chars.length)),
                 before = if (caret > n) chars[caret - n - 1] else null,
                 after = if (caret < chars.length) chars[caret] else null,
             )
@@ -1225,24 +1420,13 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     private fun rewriteField(node: AccessibilityNodeInfo, text: String): Boolean {
-        // Empty boxes report their placeholder ("Message", "Search"…) as their text. Some apps
-        // (e.g. WhatsApp) don't flag that reliably, so also compare against the hint itself.
-        val raw = node.text?.toString() ?: ""
-        val hintText = node.hintText?.toString()
-        val caretAtStart = node.textSelectionStart <= 0 && node.textSelectionEnd <= 0
-        val looksLikePlaceholder = caretAtStart &&
-            raw.trim().trimEnd('…', '.').lowercase() in COMMON_PLACEHOLDERS
-        val hint = node.isShowingHintText || raw.isEmpty() || (hintText != null && raw == hintText) || looksLikePlaceholder
-        val current = if (hint) "" else raw
-        var start = if (hint) 0 else node.textSelectionStart
-        var end = if (hint) 0 else node.textSelectionEnd
-        if (start < 0 || end < 0) { start = current.length; end = current.length }
-        if (start > end) { val t = start; start = end; end = t }
-        start = start.coerceAtMost(current.length)
-        end = end.coerceAtMost(current.length)
+        val f = fieldState(node)
+        val current = f.text
+        val start = f.start
+        val end = f.end
 
         val piece = TextTools.pad(
-            text,
+            fitHere(text, current.substring(0, start), current.substring(end)),
             before = if (start > 0) current[start - 1] else null,
             after = if (end < current.length) current[end] else null,
         )
@@ -1270,7 +1454,7 @@ class OfflineFlowService : AccessibilityService() {
         // Only when the field still holds exactly what the insert left there.
         if (!li.node.refresh() || (li.node.text?.toString() ?: "") != li.after) return false
         val piece = TextTools.pad(
-            text,
+            fitHere(text, li.before.substring(0, li.caret), li.before.substring(li.end)),
             before = if (li.caret > 0) li.before[li.caret - 1] else null,
             after = if (li.end < li.before.length) li.before[li.end] else null,
         )

@@ -107,6 +107,8 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it under Settings › API keys.
 3. **Talk.** Click into any text box, hold **Ctrl+Win** while you talk, and let go. Tap Ctrl+Win once for hands-free and tap again to finish. Esc cancels.
 
+No text box? Turn on **Voice notes (beta)** in Settings, then hold **Ctrl+Shift+Win** (or pick *New voice note* in the tray menu): each dictation is saved as a note and copied to the clipboard.
+
 > [!NOTE]
 > Windows may show "Windows protected your PC" because the installer isn't code-signed yet. Click **More info → Run anyway**. Every release is built by GitHub Actions from this code.
 
@@ -141,7 +143,7 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 - **Android:** the accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to put your words into that text box. Tokalot doesn't read your messages or notifications, and it skips password fields.
 - **Windows:** the Ctrl+Win listener only watches for that shortcut; it never records your typing. API keys are encrypted with your Windows account, and dictated text is kept out of Windows clipboard history.
 - History, recordings, settings and keys live only on your device. Backups leave out your API keys unless you choose to include them.
-- Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into and your dictionary words, so the model can match the style and spelling. With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
+- Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into, your dictionary words and, on Android, whether the cursor is in the middle of a sentence (never the text around it), so the model can match the style, spelling and capitals. With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
 - Sync is optional and off by default. It works through one small file that you keep in a folder you already sync (Google Drive, OneDrive, Dropbox, Syncthing); there is no Tokalot account or server. History and recordings are never put in it, and API keys only if you turn that on.
 - The apps check GitHub for new releases. There are no Tokalot servers, accounts or tracking.
 
@@ -155,7 +157,7 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 gradle assembleRelease
 ```
 
-To release, bump `versionCode` and `versionName` in `app/build.gradle.kts` and push to `main`. The workflow publishes a signed Release for that version, and installed copies offer it as an update. Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
+To release, bump `versionCode` and `versionName` in `app/build.gradle.kts`, add a `## <version>` section at the top of [`app/src/main/assets/CHANGELOG.md`](app/src/main/assets/CHANGELOG.md) (a unit test checks it's there), and push to `main`. The workflow publishes a signed Release for that version with that section as its notes, and installed copies offer it as an update, with the changes under the banner's "What's new". Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
 
 **Windows** (`windows/Tokalot.Desktop`). Requirements: the .NET 10 SDK. Then:
 

@@ -73,5 +73,17 @@ jobs:
             exit 0
           fi
           cp app/build/outputs/apk/release/app-release.apk "Tokalot-v$VERSION.apk"
+          # The release text is this version's section of the changelog the app shows
+          # (the "## <version>" heading's "- " lines); GitHub's generated notes if there is none.
+          awk -v v="$VERSION" '
+            /^## / { split(substr($0, 4), h, " "); on = (h[1] == v); next }
+            on && /^- / { print }
+          ' app/src/main/assets/CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then
+            NOTES=(--notes-file notes.md)
+          else
+            echo "::warning::No '## $VERSION' section in app/src/main/assets/CHANGELOG.md; using generated notes."
+            NOTES=(--generate-notes)
+          fi
           gh release create "v$VERSION" "Tokalot-v$VERSION.apk" \
-            --target "$GITHUB_SHA" --title "Tokalot $VERSION" --generate-notes
+            --target "$GITHUB_SHA" --title "Tokalot $VERSION" "${NOTES[@]}"

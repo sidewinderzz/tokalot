@@ -70,6 +70,7 @@ class DictionaryScreen(private val a: MainActivity) {
     fun build(): View = with(a) {
         val col = column()
         intro(col, "Dictionary", "Names, places and jargon Tokalot should always spell right. They're given to speech recognition and to the cleanup model as hints.")
+        suggestionsCard()?.let { col.addView(it, lp().margins(this, b = 16)) }
 
         val input = field("Add words, separated by commas\ne.g. Kubernetes, Nguyen, PostgreSQL", multiLine = true).apply { minLines = 2 }
         col.addView(input, lp())
@@ -201,13 +202,17 @@ class StyleScreen(private val a: MainActivity) {
         if (!prefs.cleanupReady) {
             col.addView(card(18).apply {
                 addView(text("AI cleanup isn't active, so styles won't apply yet. Pick a cleanup model and add its key in Settings.", 15f, C.WARN))
-                setOnClickListener { openSettings() }
+                setOnClickListener { openSettings(SettingsScreen.SPEECH) }
             }, lp().margins(this, b = 16))
         }
 
         col.addView(card().apply {
             addView(switchRow("Polish my wording", "Off: your own words are kept, with fillers removed and punctuation and formatting fixed. On: the AI may also tighten and clarify what you said, and for a few seconds after each dictation you can tap My wording to put your own words back.", prefs.polish) {
                 prefs.polish = it
+            })
+            addView(divider())
+            addView(switchRow("Fit into the sentence", "Dictating into the middle of a sentence: no capital at the start, and no period when the sentence carries on. Tokalot only looks at the characters right next to the cursor; the AI is just told \"mid-sentence\", never your text.", prefs.fitSentence) {
+                prefs.fitSentence = it
             })
         }, lp().margins(this, b = 16))
 
@@ -278,11 +283,78 @@ class StyleScreen(private val a: MainActivity) {
     }
 }
 
+// ------------------------------------------------------------------ Notes (beta)
+
+class NotesScreen(private val a: MainActivity) {
+    fun build(): View = with(a) {
+        val col = column()
+        intro(col, "Notes", "One note per dictation, saved here and copied to the clipboard. Start one from the Voice note tile in Quick Settings, or the accessibility shortcut if you set it to notes.")
+        // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
+        col.addView(card(18).apply {
+            addView(text("Voice notes are a beta. Worth keeping?", 16f, bold = true))
+            addView(text("Opens a short form on GitHub (a free account is needed). It's public, so your notes aren't in it.", 14f, C.SUB), lp().margins(this@with, t = 2, b = 6))
+            fun open(vote: String) = startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Notes.feedbackUrl(this@with, vote))))
+            addView(row(pill("Useful", filled = true) { open("useful") }, spacer(wDp = 8), pill("Not for me") { open("not for me") }))
+        }, lp().margins(this, b = 16))
+        val notes = Notes.all(this)
+        if (notes.isEmpty()) {
+            col.addView(card(22).apply {
+                addView(text("No notes yet. Swipe down twice from the top of the screen, tap Tokalot Voice note and talk. Tap the button when you're done.", 16f, C.SUB))
+            })
+            return scroll(col)
+        }
+        // Grouped by day, newest first, each note with Copy, Share and Delete.
+        notes.groupBy { dayLabel(it.time) }.forEach { (label, group) ->
+            col.addView(text(label.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply { letterSpacing = 0.08f },
+                lp().margins(this, t = 12, b = 8, l = 4))
+            val c = card()
+            group.forEachIndexed { i, n ->
+                if (i > 0) c.addView(divider())
+                val box = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(20), dp(14), dp(12), dp(6))
+                }
+                box.addView(text(java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time)), 13f, C.SUB))
+                box.addView(text(n.text, 16f).apply { setTextIsSelectable(true) }, lp().margins(this, t = 2, r = 8))
+                box.addView(row(
+                    weightSpacer(),
+                    iconButton(R.drawable.ic_copy, "Copy note", 20, C.SUB) { copy(n.text) },
+                    pill("Share") {
+                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, n.text), "Share note"))
+                    },
+                    spacer(wDp = 4),
+                    iconButton(R.drawable.ic_close, "Delete note", 20, C.SUB) {
+                        confirm("Delete this note? It stays in history.", "Delete") { Notes.delete(this, n.id); render() }
+                    },
+                ))
+                c.addView(box)
+            }
+            col.addView(c)
+        }
+        scroll(col)
+    }
+}
+
 // ------------------------------------------------------------------ Settings
 
 class SettingsScreen(private val a: MainActivity) {
 
     companion object {
+        const val SETUP = "Setup"
+        const val SPEECH = "Speech & cleanup"
+        const val DATA = "Your data"
+        const val RECORDING = "Recording & look"
+        private const val SECTION = "section:"
+
+        /** Settings categories, in order, each with its sections in the order shown when it's open. */
+        val CATEGORIES = listOf(
+            SETUP to listOf("Setup"),
+            SPEECH to listOf("Speech to text", "AI cleanup", "API keys", "Speed"),
+            RECORDING to listOf("Recording", "Without a text box", "Appearance"),
+            DATA to listOf("Recordings", "Sync", "Backup", "Usage"),
+            "About" to listOf("About"),
+        )
+
         @Volatile var downloadPct: Int? = null
         @Volatile var downloadError: String? = null
         // Progress updates only change this label; redrawing the whole screen each tick made it flash.
@@ -421,6 +493,67 @@ class SettingsScreen(private val a: MainActivity) {
                 android.widget.Toast.makeText(this, "Back at the right edge, just above the keyboard", android.widget.Toast.LENGTH_SHORT).show()
             }
         ), lp().margins(this, t = 8, l = 4))
+
+        // --- Without a text box: the Quick Settings tiles, voice notes (beta) and the accessibility shortcut
+        section(col, "Without a text box")
+        val hand = card()
+        hand.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(16), dp(10))
+            addView(text("Dictate tile", 17f))
+            addView(text("Talk while you read or scroll, with no text box open. The text goes into the text box if the keyboard is up, and onto the clipboard if it isn't. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
+            if (Build.VERSION.SDK_INT >= 33) addView(row(pill("Add the tile") {
+                StartTile.requestAdd(this@with, DictateTile::class.java, "Dictate", R.drawable.ic_mic)
+            }), lp().margins(this@with, t = 6))
+        })
+        hand.addView(divider())
+        hand.addView(switchRow("Voice notes (beta)", "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Notes stay on this phone; they're in backups but not in sync.", prefs.notesBeta) { on ->
+            prefs.notesBeta = on
+            StartTile.setNoteTile(this, on)
+            if (!on && prefs.shortcutAction == "note") prefs.shortcutAction = "off"
+            if (on) StartTile.requestAdd(this, NoteTile::class.java, "Voice note", R.drawable.ic_note)
+            render()
+        })
+        if (prefs.notesBeta) {
+            // Start any dictation with one of these and it's saved as a note instead of typed.
+            hand.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(20), 0, dp(16), dp(16))
+                addView(text("Start any dictation with one of these and it's saved as a note instead of typed. Only the very start counts, and a text box gets a Type it instead button in case you meant it as words.", 14f, C.SUB))
+                addView(field(TextTools.DEFAULT_NOTE_PHRASES, prefs.notePhrases).apply {
+                    onChange { prefs.notePhrases = it.ifBlank { TextTools.DEFAULT_NOTE_PHRASES } }
+                }, lp().margins(this@with, t = 8))
+            })
+        }
+        col.addView(hand)
+
+        col.addView(text("Android's accessibility shortcut (hold both volume keys) does", 15f, C.SUB), lp().margins(this, t = 16, b = 6, l = 4))
+        // The shortcut can only reach the app on Android 11 and newer; before that it switches Tokalot off and on.
+        if (Build.VERSION.SDK_INT < 30) {
+            col.addView(card(18).apply {
+                addView(text("Needs Android 11 or newer. On this phone the shortcut can only switch Tokalot off and on, so use the Dictate tile instead.", 14f, C.SUB))
+            })
+        }
+        val actions = if (Build.VERSION.SDK_INT < 30) emptyList() else buildList {
+            add("off" to ("Nothing" to "Holding the keys shows a reminder to pick an action here."))
+            add("dictate" to ("Dictate" to "Same as the Dictate tile."))
+            if (prefs.notesBeta) add("note" to ("New voice note" to "Same as the Voice note tile."))
+        }
+        val sc = card()
+        actions.forEachIndexed { i, (id, label) ->
+            if (i > 0) sc.addView(divider())
+            sc.addView(choiceRow(label.first, label.second, prefs.shortcutAction == id) {
+                prefs.shortcutAction = id
+                render()
+            })
+        }
+        if (actions.isNotEmpty()) col.addView(sc)
+        if (Build.VERSION.SDK_INT >= 30 && prefs.shortcutAction != "off") {
+            col.addView(text("Then turn the shortcut on in Android: Settings › Accessibility › Tokalot › Tokalot shortcut, and pick \"Hold volume keys\" (or the accessibility button or gesture). It starts the action above; it doesn't switch Tokalot off.", 13f, C.SUB), lp().margins(this, t = 8, l = 4))
+            col.addView(link("Open accessibility settings") {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }, lp().margins(this, l = 4))
+        }
 
         // --- Speed
         section(col, "Speed")
@@ -638,16 +771,84 @@ class SettingsScreen(private val a: MainActivity) {
             }.start()
         }), lp())
         about.addView(status, lp().margins(this, t = 2))
+        about.addView(link("What's new in ${Tour.VERSION}") { Tour.show(this) }, lp().margins(this, t = 4))
+        about.addView(link("Changelog") {
+            val entries = Changelog.bundled(this)
+            if (entries.isEmpty()) info("Changelog", "The changelog couldn't be read.")
+            else sheet("Changelog", changeList(entries), positive = "Close", negative = null)
+        }, lp().margins(this, t = 4))
         about.addView(link("Open-source licenses") { info("Open-source licenses", Licenses.TEXT) }, lp().margins(this, t = 4))
         col.addView(about)
 
+        fold(col)
         scroll(col)
     }
 
+    /** A section's small heading. Its title is kept on the view, so [fold] can put the section in its category. */
     private fun section(col: LinearLayout, title: String) = with(a) {
         col.addView(text(title.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply {
             letterSpacing = 0.08f
+            tag = SECTION + title
         }, lp().margins(this, t = 28, b = 8, l = 4))
+    }
+
+    /**
+     * Regroups the finished page into [CATEGORIES]: each a header you tap to open or close, holding its
+     * sections. The sections are built as before; this only moves each one (its heading and everything up to
+     * the next heading) under its category. Which ones are open is remembered, and Setup stays open while
+     * setup isn't finished.
+     */
+    private fun fold(col: LinearLayout) = with(a) {
+        val views = (0 until col.childCount).map { col.getChildAt(it) }
+        val sections = LinkedHashMap<String, MutableList<View>>()
+        val top = mutableListOf<View>()
+        var current: MutableList<View>? = null
+        for (v in views) {
+            val t = v.tag as? String
+            if (t != null && t.startsWith(SECTION)) current = mutableListOf<View>().also { sections[t.removePrefix(SECTION)] = it }
+            (current ?: top).add(v)
+        }
+        col.removeAllViews()
+        top.forEach { col.addView(it) }
+        val open = prefs.openSettings + if (setupComplete()) emptySet() else setOf(SETUP)
+        for ((name, titles) in CATEGORIES) {
+            val parts = titles.filter { it in sections }
+            if (parts.isEmpty()) continue
+            val isOpen = name in open
+            val chevron = icon(R.drawable.ic_expand, 22, C.SUB).apply { rotation = if (isOpen) 180f else 0f }
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(name, 20f, bold = true))
+                if (parts.size > 1 || parts[0] != name) addView(text(parts.joinToString(" · "), 13f, C.SUB))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            col.addView(row(texts, chevron).apply {
+                background = pressable(rounded(C.CARD, 20))
+                setPadding(dp(20), dp(16), dp(16), dp(16))
+                minimumHeight = dp(TOUCH_DP)
+                contentDescription = "$name, ${if (isOpen) "open" else "closed"}"
+                setOnClickListener {
+                    prefs.openSettings = if (name in prefs.openSettings) prefs.openSettings - name else prefs.openSettings + name
+                    render()
+                }
+            }, lp().margins(this, t = 12))
+            if (!isOpen) continue
+            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(8)) }
+            for (title in parts) {
+                val part = sections.getValue(title)
+                // A category holding one section of its own name doesn't need the small heading as well.
+                val skipHeading = parts.size == 1 && title == name
+                part.forEachIndexed { i, v ->
+                    if (i == 0 && skipHeading) return@forEachIndexed
+                    val p = v.layoutParams as? LinearLayout.LayoutParams
+                    // The first heading sits closer to the category header than headings between sections.
+                    if (i == 0 && title == parts[0] && p != null) p.topMargin = dp(16)
+                    if (i == 1 && skipHeading && p != null) p.topMargin = dp(12)
+                    body.addView(v)
+                }
+            }
+            col.addView(body)
+        }
     }
 
     /** One card: an invitation while sync is off, its status and controls once a file is chosen. */

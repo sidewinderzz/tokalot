@@ -6,19 +6,20 @@ namespace Tokalot.Desktop.Platform;
 
 /**
  * Watches the keyboard system-wide for Ctrl+Win being held (a "low-level keyboard hook").
- * It only looks at Ctrl, Win and, while the combo is held, the next key; it never logs keys.
+ * It only looks at Ctrl, Win, whether Shift is down as the combo starts and, while the combo is held,
+ * the next key; it never logs keys.
  * Also stops Windows from opening the Start menu when Win is released after the combo.
  */
 public sealed class HotkeyHook : IDisposable
 {
-    public event Action? Pressed;          // Ctrl+Win both went down
+    public event Action? Pressed;          // Ctrl+Win both went down (read ShiftAtPress for Ctrl+Shift+Win)
     public event Action? Released;         // one of them came back up
     public event Action<int>? KeyWhileHeld; // another key while the combo (or recording) is active
     public event Action? Escape;            // Esc pressed (used to cancel recording)
 
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, WM_SYSKEYDOWN = 0x0104, WM_SYSKEYUP = 0x0105;
-    private const int VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3, VK_CONTROL = 0x11, VK_ESCAPE = 0x1B;
+    private const int VK_LWIN = 0x5B, VK_RWIN = 0x5C, VK_LCONTROL = 0xA2, VK_RCONTROL = 0xA3, VK_CONTROL = 0x11, VK_SHIFT = 0x10, VK_ESCAPE = 0x1B;
     private const uint LLKHF_INJECTED = 0x10;
     private static readonly IntPtr OurMarker = new(0x544B4C54); // "TKLT": tags keys we send ourselves
 
@@ -41,6 +42,12 @@ public sealed class HotkeyHook : IDisposable
     private IntPtr hook;
     private uint threadId;
     private volatile bool ctrl, win, active, comboUsed;
+
+    /**
+     * Whether Shift was held too when Ctrl+Win went down (Ctrl+Shift+Win, a voice note). Set just before
+     * Pressed is raised, on the hook's thread, so read it there. Shift itself never starts or ends the combo.
+     */
+    public volatile bool ShiftAtPress;
 
     /** When true, Esc and other keys are reported even after the combo is released (hands-free). */
     public volatile bool Listening;
@@ -180,6 +187,7 @@ public sealed class HotkeyHook : IDisposable
         {
             active = true;
             comboUsed = true;
+            ShiftAtPress = Held(VK_SHIFT);
             Pressed?.Invoke();
         }
         else if (active && (!ctrl || !win))

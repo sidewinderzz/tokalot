@@ -11,7 +11,7 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
- * One-file backup: a .zip holding settings, dictionary, snippets, styles, usage, history,
+ * One-file backup: a .zip holding settings, dictionary, snippets, styles, usage, history, notes,
  * and optionally recordings and API keys. Keys are left out unless explicitly included,
  * so a backup sitting in Drive or Downloads doesn't leak them.
  * Both directions block; call them off the main thread.
@@ -72,6 +72,12 @@ object Backup {
                 history.inputStream().use { it.copyTo(zip) }
                 zip.closeEntry()
             }
+            val notes = File(app.filesDir, Notes.FILE)
+            if (notes.exists()) {
+                zip.putNextEntry(ZipEntry(Notes.FILE))
+                notes.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
             if (includeAudio) {
                 AudioStore.dir(app).listFiles { f -> f.name.endsWith(".m4a") }?.forEach { f ->
                     zip.putNextEntry(ZipEntry("audio/${f.name}"))
@@ -127,6 +133,7 @@ object Backup {
         try {
             var manifestJson: String? = null
             var historyJson: String? = null
+            var notesJson: String? = null
             val audio = ArrayList<String>()
             ZipInputStream(input.buffered()).use { zip ->
                 while (true) {
@@ -135,6 +142,7 @@ object Backup {
                     when {
                         name == "backup.json" -> manifestJson = readText(zip)
                         name == "history.json" -> historyJson = readText(zip)
+                        name == Notes.FILE -> notesJson = readText(zip)
                         // Only plain file names under audio/ (no paths) are accepted.
                         name.startsWith("audio/") && name.removePrefix("audio/").matches(AUDIO_NAME) -> {
                             val file = name.removePrefix("audio/")
@@ -149,6 +157,12 @@ object Backup {
             if (history != null) {
                 try { History.parse(history) } catch (_: Exception) {
                     throw IllegalArgumentException("That backup's history is damaged, so nothing was changed")
+                }
+            }
+            val notes = notesJson
+            if (notes != null) {
+                try { Notes.parse(notes) } catch (_: Exception) {
+                    throw IllegalArgumentException("That backup's notes are damaged, so nothing was changed")
                 }
             }
 
@@ -183,6 +197,13 @@ object Backup {
                 if (!tmp.renameTo(target)) { tmp.copyTo(target, overwrite = true); tmp.delete() }
             }
             History.reload()
+            if (notes != null) {
+                val target = File(app.filesDir, Notes.FILE)
+                val tmp = File(app.filesDir, "notes.restore")
+                tmp.writeText(notes)
+                if (!tmp.renameTo(target)) { tmp.copyTo(target, overwrite = true); tmp.delete() }
+            }
+            runCatching { StartTile.setNoteTile(app, Prefs(app).notesBeta) } // the restored setting decides the tile
             var recordings = 0
             for (file in audio) {
                 val from = File(holding, file)

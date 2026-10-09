@@ -97,6 +97,37 @@ object Learn {
         "january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december",
     )
 
+    // ---------- words spelled out while dictating ----------
+
+    /** Three or more lone letters in a row, the way a recognizer writes spelling: "K-U-B-O-T-A", "K U B O T A", "S. T. E." */
+    private val SPELLED = Regex("""(?<![\p{L}\d])\p{L}(?![\p{L}\d])(?:[\s.,-]+\p{L}(?![\p{L}\d])){2,}""")
+    private val SAID_SPELLED = Regex("""(?i)\b(?:spelled|spelt|spelling|spells?)\W*$""")
+
+    /**
+     * Words the user spelled out letter by letter in [raw] (the transcript before cleanup) to make clear how
+     * they're written: "ask Kowalski, K-O-W-A-L-S-K-I" or "Stewart, spelled S-T-E-W-A-R-T". Only letters that
+     * follow "spelled", or that come right after a word that sounds like them, count, so a part number or
+     * initials ("part A-B-C") aren't taken for a word. Words already in [known] are left out.
+     */
+    fun spelled(raw: String, known: Collection<String>): List<String> {
+        val out = mutableListOf<String>()
+        for (m in SPELLED.findAll(raw)) {
+            val letters = m.value.filter { it.isLetter() }
+            if (letters.length !in 3..24) continue
+            val lower = letters.lowercase()
+            val before = raw.substring(0, m.range.first)
+            val near = tokens(before).takeLast(4).map { bare(it) }.filter { it.length >= 2 }
+            val said = SAID_SPELLED.containsMatchIn(before)
+            if (!said && near.none { distance(it.lowercase(), lower) <= maxOf(1, letters.length / 3) }) continue
+            // Keep the casing of the word as said when it was heard right (NASA, iPhone); otherwise like a name.
+            val word = near.lastOrNull { it.equals(letters, ignoreCase = true) && it.drop(1).any { c -> c.isUpperCase() } }
+                ?: lower.replaceFirstChar { it.uppercaseChar() }
+            if (known.any { it.equals(word, ignoreCase = true) } || out.any { it.equals(word, ignoreCase = true) }) continue
+            out += word
+        }
+        return out
+    }
+
     /** How many single-letter edits turn [a] into [b]. */
     fun distance(a: String, b: String): Int {
         var prev = IntArray(b.length + 1) { it }

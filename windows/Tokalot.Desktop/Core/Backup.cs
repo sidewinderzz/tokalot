@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 namespace Tokalot.Desktop.Core;
 
 /**
- * One-file backup (.zip): settings, dictionary, snippets, styles, usage, history, and
+ * One-file backup (.zip): settings, dictionary, snippets, styles, usage, history, voice notes (Windows), and
  * optionally recordings and API keys. Keys are left out unless explicitly included.
  */
 public static class Backup
@@ -46,7 +46,7 @@ public static class Backup
         {
             using (var w = new StreamWriter(zip.CreateEntry("backup.json").Open()))
                 w.Write(manifest.ToJsonString(Settings.Json));
-            foreach (var name in new[] { "history.json", "usage.json" })
+            foreach (var name in new[] { "history.json", "usage.json", "notes.json" })
                 if (File.Exists(Paths.File(name))) zip.CreateEntryFromFile(Paths.File(name), name);
             if (includeAudio)
                 foreach (var f in Directory.GetFiles(Paths.Dir("audio")))
@@ -74,7 +74,7 @@ public static class Backup
         var old = Settings.Current;
         var restored = manifest["settings"].Deserialize<Settings>(Settings.Json) ?? new Settings();
         // Check the rest of the zip reads cleanly before replacing anything, so a damaged backup changes nothing.
-        foreach (var name in new[] { "history.json", "usage.json" })
+        foreach (var name in new[] { "history.json", "usage.json", "notes.json" })
             if (zip.GetEntry(name) is { } je)
             {
                 using var r = new StreamReader(je.Open());
@@ -93,7 +93,7 @@ public static class Backup
         var recordings = 0;
         foreach (var e in zip.Entries)
         {
-            if (e.FullName is "history.json" or "usage.json")
+            if (e.FullName is "history.json" or "usage.json" or "notes.json")
             {
                 var tmp = Paths.File(e.FullName + ".restore");
                 e.ExtractToFile(tmp, true);

@@ -70,4 +70,20 @@ class LearnTest {
         assertEquals(2, Learn.distance("kaitlin", "caitlyn"))
         assertEquals(3, Learn.distance("kitten", "sitting"))
     }
+
+    // ---------- words spelled out while dictating ----------
+
+    @Test fun spelledWordsAreFound() {
+        assertEquals(listOf("Kowalski"), Learn.spelled("Ask Kowalski, K-O-W-A-L-S-K-I, about the report.", emptyList()))
+        assertEquals(listOf("Kowalski"), Learn.spelled("ask Kovalski K O W A L S K I today", emptyList())) // misheard, then spelled
+        assertEquals(listOf("Stewart"), Learn.spelled("Ask Stuart, spelled S-T-E-W-A-R-T.", emptyList()))
+        assertEquals(listOf("NASA"), Learn.spelled("Like NASA, N. A. S. A.", emptyList()))
+    }
+
+    @Test fun lettersThatArentSpellingAreLeftAlone() {
+        assertEquals(emptyList<String>(), Learn.spelled("Order part A-B-C and two filters.", emptyList()))
+        assertEquals(emptyList<String>(), Learn.spelled("The call sign is K-D-9.", emptyList()))
+        assertEquals(emptyList<String>(), Learn.spelled("Ask Kowalski, K-O-W-A-L-S-K-I.", listOf("kowalski"))) // already known
+        assertEquals(emptyList<String>(), Learn.spelled("Plain words with nothing spelled.", emptyList()))
+    }
 }

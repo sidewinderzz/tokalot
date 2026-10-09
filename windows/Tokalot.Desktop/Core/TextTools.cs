@@ -33,8 +33,9 @@ public static class TextTools
 
     public static int WordCount(string s) => Spaces.Split(s).Count(w => w.Length > 0);
 
-    // Things only the AI cleanup can deal with: fillers, self-corrections, spoken punctuation and formatting.
-    private static readonly Regex NeedsAi = new(@"(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol)\b");
+    // Things only the AI cleanup can deal with: fillers, self-corrections, spoken punctuation and formatting,
+    // and a word spelled out letter by letter ("K-U-B-O-T-A").
+    private static readonly Regex NeedsAi = new(@"(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol|spelled|spelt)\b|(?<![\p{L}\d])\p{L}(?:[\s.,-]+\p{L}(?![\p{L}\d])){2,}(?![\p{L}\d])");
     private static readonly Regex Stutter = new(@"(?i)\b(\w+)[ ,]+\1\b");
     public const int QuickWords = 20;
 

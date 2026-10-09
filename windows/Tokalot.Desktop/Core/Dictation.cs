@@ -64,6 +64,12 @@ public sealed class Dictation : IDisposable
      */
     public static volatile float SttRate = 150f, CleanRate = 6f;
 
+    /**
+     * What speech recognition heard (sound tags taken out), raised on the dictation's own thread before cleanup.
+     * The Windows app looks in it for words spelled out letter by letter, to offer them for the dictionary.
+     */
+    public static event Action<string>? Heard;
+
     /** How the last dictation's wait was spent, for the log. */
     public static string LastTiming { get; private set; } = "";
 
@@ -127,6 +133,8 @@ public sealed class Dictation : IDisposable
         StageChars = baseText.Length;
         Stage = 1;
         if (baseText.Length == 0 || (sparse && TextTools.IsPhantom(baseText))) return new Outcome("", warnings.FirstOrDefault(), null);
+        // A word spelled out letter by letter is offered for the dictionary in the app (nothing is added unasked).
+        try { Heard?.Invoke(baseText); } catch { }
 
         // 2-4. Snippets + cleanup
         var (protectedText, map) = TextTools.Protect(baseText, s.Snippets);

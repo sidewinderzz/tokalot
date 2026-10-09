@@ -39,8 +39,13 @@ class Dictation(context: Context) {
     /**
      * plain: the user's own wording, cleaned up without AI. Only set when "Polish my wording" is on,
      * the AI cleanup ran, and it differs from [text]; it is what "My wording" puts back.
+     * fitted: the AI cleanup was told the text goes mid-sentence, so its first capital is deliberate.
+     * note: it started with a note phrase ("Note this…"), so it's a voice note: saved to Notes, not typed.
      */
-    class Outcome(val text: String, val warning: String?, val entryId: Long? = null, val plain: String? = null)
+    class Outcome(
+        val text: String, val warning: String?, val entryId: Long? = null, val plain: String? = null,
+        val fitted: Boolean = false, val note: Boolean = false,
+    )
 
     companion object {
         private const val IDLE_UNLOAD_MS = 60_000L
@@ -54,7 +59,7 @@ class Dictation(context: Context) {
     }
 
     /** One process() call: what cancel() and the deadline act on. */
-    private inner class Job(val live: LiveStt?, val onDone: (Outcome?, String?) -> Unit) {
+    private inner class Job(val live: LiveStt?, val spot: TextTools.Spot?, val onDone: (Outcome?, String?) -> Unit) {
         val call = Call()
         /** CANCELLED or TIMED_OUT once the job was stopped from outside. */
         @Volatile var halted: String? = null
@@ -136,14 +141,15 @@ class Dictation(context: Context) {
      * sparse: barely any sound was heard, so a stock Whisper phrase ("Thank you.") is treated as silence.
      * retry: the failed or cancelled history entry these samples belong to; the result replaces it.
      * live: the pieces of this recording already sent off while the user was talking, if any.
+     * spot: where the cursor was in the text box when the user stopped talking, for the cleanup.
      */
     fun process(
         samples: FloatArray, appPkg: String?, sparse: Boolean = false, retry: Entry? = null, live: LiveStt? = null,
-        onDone: (Outcome?, String?) -> Unit,
+        spot: TextTools.Spot? = null, onDone: (Outcome?, String?) -> Unit,
     ) {
         main.removeCallbacks(unload)
         stage = 0
-        val job = Job(live, onDone)
+        val job = Job(live, spot, onDone)
         current = job
         val audioMs = samples.size * 1000L / Recorder.SAMPLE_RATE
         main.postDelayed(job.deadline, Timeouts.deadlineMs(audioMs))
@@ -200,8 +206,8 @@ class Dictation(context: Context) {
     private fun run(job: Job, id: Long, samples: FloatArray, appPkg: String?, sparse: Boolean, retry: Entry?): Outcome {
         val call = job.call
         val prefs = Prefs(app)
-        val category = AppContext.categorize(appPkg, prefs)
-        val appLabel = appPkg?.let { AppContext.label(app, it) }
+        var category = AppContext.categorize(appPkg, prefs)
+        var appLabel = appPkg?.let { AppContext.label(app, it) }
         val warnings = ArrayList<String>()
         // The cleanup model still gets the full dictionary.
         val hint = hint(prefs)
@@ -268,11 +274,19 @@ class Dictation(context: Context) {
             usedLocal = true
         }
         val sttMs = (System.nanoTime() - began) / 1_000_000
-        val base = TextTools.stripNoise(raw)
-        if (base.isBlank() || (sparse && TextTools.isPhantom(base))) return Outcome("", warnings.firstOrNull())
+        val heard = TextTools.stripNoise(raw)
+        if (heard.isBlank() || (sparse && TextTools.isPhantom(heard))) return Outcome("", warnings.firstOrNull())
+        // Voice notes (beta): "Note this…" at the very start makes it a note, written in the plain style.
+        val asNote = if (prefs.notesBeta) TextTools.noteTrigger(heard, prefs.notePhrases.split(',')) else null
+        val base = asNote ?: heard
+        if (base.isBlank()) return Outcome("", warnings.firstOrNull()) // only the note phrase was said
+        if (asNote != null) { category = AppCategory.OTHER; appLabel = null }
+        val spot = if (asNote != null) null else job.spot // a note isn't going into the sentence around the cursor
 
         stageChars = base.length
         stage = 1
+        // A word spelled out letter by letter is offered for the dictionary in the app (nothing is added unasked).
+        runCatching { prefs.suggestWords(Learn.spelled(base, prefs.words)) }
 
         // 2-4. Snippets + cleanup
         val snippets = prefs.snippets
@@ -291,7 +305,7 @@ class Dictation(context: Context) {
         for (c in if (noCleanup || quick) emptyList() else cleanupOrder(prefs)) {
             call.check()
             try {
-                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces)
+                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces, spot)
                 Usage.recordLlm(app, c, r.inTokens, r.outTokens)
                 cleaned = true
                 finalText = TextTools.restore(r.text, map)
@@ -338,7 +352,7 @@ class Dictation(context: Context) {
         runCatching { History.put(app, Entry(id, retry?.time ?: id, finalText, base, audioMs, cleaned, appPkg ?: "")) }
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
         Usage.recordEdits(app, AppContext.fillerCount(base), if (cleaned) AppContext.correctionCount(base) else 0)
-        return Outcome(finalText, warnings.firstOrNull(), id, plain)
+        return Outcome(finalText, warnings.firstOrNull(), id, plain, fitted = cleaned && spot?.mid == true, note = asNote != null)
     }
 
     /** Sends the compressed file when there is one; if the provider rejects the format, sends WAV instead. */

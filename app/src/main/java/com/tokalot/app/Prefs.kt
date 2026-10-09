@@ -283,6 +283,28 @@ class Prefs(ctx: Context) {
         }.getOrDefault(emptySet())
         set(v) = sp.edit().putString("learned_words", JSONArray(v.toList()).toString()).apply()
 
+    private fun stringList(key: String): List<String> = runCatching {
+        val arr = JSONArray(sp.safeString(key, "[]"))
+        List(arr.length()) { arr.getString(it) }
+    }.getOrDefault(emptyList())
+
+    /** Words the user spelled out while dictating, waiting for Add or Not now (see [Learn.spelled]). This device only. */
+    var suggestedWords: List<String>
+        get() = stringList("suggested_words")
+        set(v) = sp.edit().putString("suggested_words", JSONArray(v).toString()).apply()
+
+    /** Suggestions the user turned down, so the same spelling isn't offered again. */
+    var dismissedWords: Set<String>
+        get() = stringList("dismissed_words").toSet()
+        set(v) = sp.edit().putString("dismissed_words", JSONArray(v.toList()).toString()).apply()
+
+    /** Offers [found] for the dictionary, leaving out words already there, offered or turned down. */
+    fun suggestWords(found: List<String>) {
+        val have = (words + suggestedWords + dismissedWords).map { it.lowercase() }.toSet()
+        val fresh = found.filter { it.lowercase() !in have }
+        if (fresh.isNotEmpty()) suggestedWords = suggestedWords + fresh
+    }
+
     var snippets: List<Snippet>
         get() = runCatching {
             val arr = JSONArray(sp.safeString("snippets", "[]"))
@@ -428,6 +450,37 @@ class Prefs(ctx: Context) {
     var polish: Boolean
         get() = sp.safeBoolean("polish", false)
         set(v) = sp.edit().putBoolean("polish", v).apply()
+
+    /**
+     * Fit a dictation into the sentence around the cursor: no capital in the middle of a sentence, no
+     * period when the sentence carries on. Only where the cursor sits is used, never the text itself.
+     */
+    var fitSentence: Boolean
+        get() = sp.safeBoolean("fit_sentence", true)
+        set(v) = sp.edit().putBoolean("fit_sentence", v).apply()
+
+    /** Voice notes (beta): the Notes page, the "Voice note" Quick Settings tile and notes from the shortcut. */
+    var notesBeta: Boolean
+        get() = sp.safeBoolean("notes_beta", false)
+        set(v) = sp.edit().putBoolean("notes_beta", v).apply()
+
+    /** Phrases that, said at the very start of a dictation, make it a voice note (comma-separated). */
+    var notePhrases: String
+        get() = sp.safeString("note_phrases", null) ?: TextTools.DEFAULT_NOTE_PHRASES
+        set(v) = sp.edit().putString("note_phrases", v).apply()
+
+    /**
+     * What Android's accessibility shortcut (holding both volume keys, or the accessibility button) does:
+     * "off", "dictate" (type into the text box, or copy when there isn't one) or "note" (a voice note).
+     */
+    var shortcutAction: String
+        get() = sp.safeString("shortcut_action", "off") ?: "off"
+        set(v) = sp.edit().putString("shortcut_action", v).apply()
+
+    /** The Settings categories left open (see SettingsScreen.CATEGORIES); all closed until one is opened. */
+    var openSettings: Set<String>
+        get() = sp.getStringSet("open_settings", emptySet())?.toSet() ?: emptySet()
+        set(v) = sp.edit().putStringSet("open_settings", v).apply()
 
     /** How long to keep recordings: 0 = don't save, Int.MAX_VALUE = forever. */
     var audioKeepDays: Int

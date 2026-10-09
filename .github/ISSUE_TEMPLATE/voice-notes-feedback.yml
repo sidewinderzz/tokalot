@@ -1,0 +1,31 @@
+# Opened from the Notes page in the apps (Voice notes beta) with the vote in the title and the
+# app and device filled in. Labels are only added if they exist in the repo: create "voice-notes-beta".
+name: Voice notes (beta) feedback
+description: Tell us whether voice notes are worth keeping, and what would make them better.
+title: "[Voice notes] "
+labels: ["voice-notes-beta", "feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying voice notes. Everything here is public, so leave out anything private, like what your notes say.
+  - type: dropdown
+    id: keep
+    attributes:
+      label: Should voice notes stay in Tokalot?
+      options:
+        - "Yes, I use them"
+        - "Maybe, with changes"
+        - "No, I don't need them"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What would make them better? (optional)
+      description: How you use notes, what's missing, what gets in the way.
+  - type: input
+    id: app
+    attributes:
+      label: App and version
+      description: Filled in by the app.

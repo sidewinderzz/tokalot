@@ -213,6 +213,16 @@ internal static class Shots
         Check("quick: long text, snippets, email, very casual and own instructions don't", !Q(string.Join(" ", Enumerable.Repeat("word", 21))) && !Q("Here is my address.", snip: true)
             && !Q("Thanks for the update.", cat: "EMAIL") && !Q("Thanks for the update.", style: "VERY_CASUAL") && !Q("Thanks for the update.", custom: "Always use British spelling."));
         Check("quick: the default instruction alone is fine", Q("Thanks for the update.", custom: Catalog.DefaultInstructions));
+        Check("quick: spelling a word out doesn't", !Q("Ask Kowalski, K-O-W-A-L-S-K-I.") && !Q("Ask Stewart, spelled with a W."));
+
+        // Words spelled out while dictating, offered for the dictionary.
+        string Sp(string raw, string[]? known = null) => string.Join(",", Learn.Spelled(raw, known ?? none));
+        Check("spelled: right after the word", Sp("Ask Kowalski, K-O-W-A-L-S-K-I, about the report.") == "Kowalski");
+        Check("spelled: after a misheard word, letters with spaces", Sp("ask Kovalski K O W A L S K I today") == "Kowalski");
+        Check("spelled: after \"spelled\"", Sp("Ask Stuart, spelled S-T-E-W-A-R-T.") == "Stewart");
+        Check("spelled: capitals kept when heard right", Sp("Like NASA, N. A. S. A.") == "NASA");
+        Check("spelled: a part number or call sign is not a word", Sp("Order part A-B-C and two filters.") == "" && Sp("The call sign is K-D-9.") == "");
+        Check("spelled: already known is skipped", Sp("Ask Kowalski, K-O-W-A-L-S-K-I, about the report.", new[] { "kowalski" }) == "");
         File.WriteAllLines(Path.Combine(dir, "learn-checks.txt"), lines);
     }
 

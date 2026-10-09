@@ -21,7 +21,7 @@ namespace Tokalot.Desktop.UI;
 /** The settings and history window. Closing it leaves Tokalot running in the tray. */
 public sealed class MainWindow : Window
 {
-    public enum Page { Home, Dictionary, Style, Snippets, Settings }
+    public enum Page { Home, Dictionary, Style, Snippets, Notes, Settings }
 
     public Page CurrentPage { get; private set; } = Page.Home;
 
@@ -34,7 +34,7 @@ public sealed class MainWindow : Window
     private StackPanel? historyBox;
     private TextBlock? bannerText;
     private TextBlock? modelStatus;
-    private int historyLimit = 100;
+    private int historyLimit = 100, notesLimit = 100;
     private readonly HashSet<long> expanded = new(), showOriginal = new();
     private static string styleTab = "MESSAGING";
     private static int? downloadPct;
@@ -88,6 +88,7 @@ public sealed class MainWindow : Window
         root.ColumnDefinitions.Add(new ColumnDefinition());
         root.Children.Add(Sidebar());
         var contentGrid = new Grid { Margin = new Thickness(0, CaptionHeight, 0, 0) };
+        scroller.PreviewMouseWheel += PassWheelToPage;
         contentGrid.Children.Add(scroller);
         contentGrid.Children.Add(toast);
         Grid.SetColumn(contentGrid, 1);
@@ -221,12 +222,35 @@ public sealed class MainWindow : Window
         Item(Page.Dictionary, "book", "Dictionary");
         Item(Page.Style, "style", "Style");
         Item(Page.Snippets, "snippet", "Snippets");
+        if (S.NotesBeta) Item(Page.Notes, "notes", "Notes");
         nav.Children.Add(new Border { Height = 14 });
         Item(Page.Settings, "settings", "Settings");
     }
 
     /** Full height of the current page (screenshot mode). */
     internal double ExtentHeight => scroller.ExtentHeight;
+
+    /**
+     * Every text and key box holds a small scroll area of its own, and WPF lets it take the mouse wheel even
+     * when it has nothing to scroll. So the page stopped while the pointer crossed one, which is most noticeable
+     * over the stack of boxes in Settings › API keys. The wheel now goes to the page unless something under the
+     * pointer can really scroll that way.
+     */
+    private void PassWheelToPage(object sender, MouseWheelEventArgs e)
+    {
+        ScrollViewer? inner = null;
+        for (var d = e.OriginalSource as DependencyObject; d != null && d != scroller;
+             d = d is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+        {
+            if (d is not ScrollViewer sv) continue;
+            var canScroll = e.Delta > 0 ? sv.VerticalOffset > 0 : sv.VerticalOffset < sv.ScrollableHeight;
+            if (sv.ScrollableHeight > 0 && canScroll) return; // a box with more text than shows: let it scroll
+            inner ??= sv;
+        }
+        if (inner == null) return; // nothing in the way: the page gets the wheel as usual
+        e.Handled = true;
+        scroller.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta) { RoutedEvent = UIElement.MouseWheelEvent, Source = scroller });
+    }
 
     internal void SetStyleTab(string id) => styleTab = id;
 
@@ -243,6 +267,7 @@ public sealed class MainWindow : Window
     public void Render()
     {
         var offset = scroller.VerticalOffset;
+        if (CurrentPage == Page.Notes && !S.NotesBeta) CurrentPage = Page.Home; // voice notes were switched off (or restored away)
         RenderNav();
         var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 10, 36, 48) };
         switch (CurrentPage)
@@ -251,6 +276,7 @@ public sealed class MainWindow : Window
             case Page.Dictionary: BuildDictionary(col); break;
             case Page.Style: BuildStyle(col); break;
             case Page.Snippets: BuildSnippets(col); break;
+            case Page.Notes: BuildNotes(col); break;
             case Page.Settings: BuildSettings(col); break;
         }
         wideLayout = IsWide;
@@ -424,12 +450,14 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(c, 0, 0, 0, 14));
         }
 
+        SpelledCard(col);
+
         if (!SetupComplete)
         {
             var c = Ui.Stack(
                 Ui.Heading("Finish setup", 30),
                 Spaced(Ui.Text("Add a Groq API key (free) or download the offline model, and Ctrl+Win will start working in any app.", 15, C.Sub), 0, 6, 0, 14),
-                Ui.Button("Open settings", () => Go(Page.Settings), filled: true));
+                Ui.Button("Open settings", () => OpenSettingsAt(SetupCategory), filled: true));
             col.Children.Add(Spaced(Ui.Card(c, 22), 0, 0, 0, 16));
         }
 
@@ -451,7 +479,7 @@ public sealed class MainWindow : Window
             statCard.Children.Add(Spaced(Ui.Text($"Cleaned up {Plural(m.Fillers, "filler word")} and {Plural(m.Corrections, "self-correction")}", 13, C.Sub), 0, 10, 0, 0));
         var sc = Ui.Card(statCard, 22);
         sc.Cursor = Cursors.Hand;
-        sc.MouseLeftButtonUp += (_, _) => Go(Page.Settings);
+        sc.MouseLeftButtonUp += (_, _) => OpenSettingsAt(DataCategory);
         col.Children.Add(Spaced(sc, 0, 0, 0, 16));
 
         (searchBox.Parent as Panel)?.Children.Remove(searchBox);
@@ -600,6 +628,7 @@ public sealed class MainWindow : Window
     private void BuildDictionary(StackPanel col)
     {
         Intro(col, "Dictionary", "Names, places and jargon Tokalot should always spell right. They're given to speech recognition and to the cleanup model as hints.");
+        SpelledCard(col);
         var (box, input) = Ui.Field("", "Add words, separated by commas, e.g. Kubernetes, Nguyen, PostgreSQL", multiLine: true);
         col.Children.Add(box);
         var add = Ui.Button("Add", () =>
@@ -643,6 +672,119 @@ public sealed class MainWindow : Window
             return (UIElement)Spaced(Spread(name, remove), 20, 8, 12, 8);
         }).ToArray();
         col.Children.Add(Ui.List(rows));
+    }
+
+    /**
+     * Words the user spelled out letter by letter while dictating (see Learn.Spelled), offered for the dictionary.
+     * Shown on Home and Dictionary until each is added or turned down.
+     */
+    private void SpelledCard(StackPanel col)
+    {
+        var words = S.SuggestedWords.Where(w => !S.Words.Contains(w, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (words.Count == 0) return;
+        var rows = new List<UIElement>
+        {
+            Spaced(Ui.Stack(
+                Ui.Text(words.Count == 1 ? "You spelled out a word" : $"You spelled out {words.Count} words", 15.5, bold: true),
+                Ui.Text(words.Count == 1
+                    ? "Add it to your dictionary so it's spelled right without spelling it next time."
+                    : "Add them to your dictionary so they're spelled right without spelling them next time.", 13.5, C.Sub)), 20, 14, 18, 14),
+        };
+        foreach (var w in words)
+        {
+            var notNow = Ui.Button("Not now", () =>
+            {
+                S.SuggestedWords.Remove(w);
+                if (!S.DismissedWords.Contains(w, StringComparer.OrdinalIgnoreCase)) S.DismissedWords.Add(w);
+                S.Save();
+                Render();
+            });
+            var add = Ui.Button("Add", () =>
+            {
+                S.SuggestedWords.Remove(w);
+                if (!S.Words.Contains(w, StringComparer.OrdinalIgnoreCase)) S.Words.Add(w);
+                S.Save();
+                Render();
+                Toast($"Added “{w}” to your dictionary");
+            }, filled: true);
+            rows.Add(Spaced(Spread(Ui.Text(w, 16), notNow, add), 20, 10, 16, 10));
+        }
+        col.Children.Add(Spaced(Ui.List(rows.ToArray()), 0, 0, 0, 16));
+    }
+
+    // ---------- Notes (beta) ----------
+
+    private void BuildNotes(StackPanel col)
+    {
+        Intro(col, "Notes", "Dictate without a text box: hold Ctrl+Shift+Win, or pick New voice note in the tray menu. Each dictation is saved here as its own note and copied to the clipboard.");
+        // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
+        var useful = Ui.Button("Useful", () => Open(NotesFeedbackUrl("useful")), filled: true);
+        useful.Margin = new Thickness(0, 0, 8, 0);
+        col.Children.Add(Spaced(Ui.Card(Ui.Stack(
+            Ui.Text("Voice notes are a beta. Worth keeping?", 15.5, bold: true),
+            Spaced(Ui.Text("Opens a short form on GitHub (a free account is needed). It's public, so your notes aren't in it.", 13.5, C.Sub), 0, 2, 0, 10),
+            Ui.Row(useful, Ui.Button("Not for me", () => Open(NotesFeedbackUrl("not for me"))))), 20), 0, 0, 0, 16));
+        var notes = Notes.All();
+        if (notes.Count == 0)
+        {
+            col.Children.Add(Ui.Card(Ui.Text("No notes yet. Press Ctrl+Shift+Win, or New voice note in the tray menu, and talk.", 16, C.Sub), 24));
+            return;
+        }
+        string lastDay = "";
+        StackPanel? group = null;
+        foreach (var n in notes.Take(notesLimit))
+        {
+            var day = DayLabel(n.Time);
+            if (day != lastDay)
+            {
+                // Each day is a section, so on a wide window the days fill both columns.
+                var heading = Spaced(Ui.Heading(day, 30), 0, group == null ? 0 : 24, 0, 12);
+                heading.Tag = "section";
+                col.Children.Add(heading);
+                group = new StackPanel();
+                col.Children.Add(Ui.Card(group));
+                lastDay = day;
+            }
+            else group!.Children.Add(Ui.Divider());
+            group!.Children.Add(NoteView(n));
+        }
+        if (notes.Count > notesLimit)
+        {
+            var more = Ui.Button("Show older", () => { notesLimit += 200; Render(); });
+            more.HorizontalAlignment = HorizontalAlignment.Center;
+            col.Children.Add(Spaced(more, 0, 20, 0, 0));
+        }
+    }
+
+    /**
+     * The beta's feedback form on GitHub (.github/ISSUE_TEMPLATE/voice-notes-feedback.yml), with the vote in the
+     * title and the app and Windows version filled in. Nothing else about the PC or the notes is sent.
+     */
+    private static string NotesFeedbackUrl(string vote) =>
+        Updater.RepoUrl + "/issues/new?template=voice-notes-feedback.yml&title=" + Uri.EscapeDataString("[Voice notes] " + vote) +
+        "&app=" + Uri.EscapeDataString($"Tokalot {Updater.CurrentVersion} on Windows {Environment.OSVersion.Version}");
+
+    private UIElement NoteView(Note n)
+    {
+        var box = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
+        // Selectable, so part of a note can be copied too.
+        box.Children.Add(new TextBox
+        {
+            Text = n.Text, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+            Foreground = C.Text, FontSize = 16.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
+        });
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
+        box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
+        var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(n.Text); Toast("Copied"); }, icon: "copy");
+        var delete = Ui.Button("Delete", () =>
+        {
+            if (!Ui.Dialog(this, "Delete this note? It can't be brought back.", "Delete")) return;
+            Notes.Delete(n.Id);
+            Render();
+        });
+        copy.Margin = new Thickness(0, 0, 8, 0);
+        box.Children.Add(Ui.Row(copy, delete));
+        return box;
     }
 
     // ---------- Snippets ----------
@@ -715,7 +857,7 @@ public sealed class MainWindow : Window
         {
             var warn = Ui.Card(Ui.Text("AI cleanup isn't active, so styles won't apply yet. Pick a cleanup model and add its key in Settings.", 15, C.Warn), 18);
             warn.Cursor = Cursors.Hand;
-            warn.MouseLeftButtonUp += (_, _) => Go(Page.Settings);
+            warn.MouseLeftButtonUp += (_, _) => OpenSettingsAt(SpeechCategory);
             col.Children.Add(Spaced(warn, 0, 0, 0, 16));
         }
 
@@ -796,16 +938,138 @@ public sealed class MainWindow : Window
 
     // ---------- Settings ----------
 
+    private const string SetupCategory = "Setup", SpeechCategory = "Speech & cleanup", DataCategory = "Your data";
+
+    /** Settings categories, in order, each with its sections in the order shown when it's open. Same as the Android app. */
+    private static readonly (string Name, string[] Sections)[] Categories =
+    {
+        (SetupCategory, new[] { "Setup" }),
+        (SpeechCategory, new[] { "Speech to text", "AI cleanup", "API keys", "Speed" }),
+        ("Recording & look", new[] { "Recording", "Recording indicator", "Appearance" }),
+        (DataCategory, new[] { "Recordings", "Sync", "Backup", "Usage" }),
+        ("About", new[] { "About" }),
+    };
+
+    /** On a wide window the categories from this one on go in the right column. A fixed split, so opening one never moves the others across. */
+    private const string RightColumnFrom = "Recording & look";
+
+    /** Screenshot mode shows every category open, so the pictures cover everything. */
+    private static readonly bool ShotMode = Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() == "--screenshots";
+
+    /**
+     * Setup opens by itself while setup isn't finished. It then stays open for the rest of this run, so adding a
+     * key doesn't fold it away under the pointer, unless it's closed by hand.
+     */
+    private static bool setupHeld, setupFolded;
+
+    /** Each category as last built (header first), for focus and scrolling after a rebuild. */
+    private readonly Dictionary<string, StackPanel> categoryViews = new();
+
+    /** Marks a section's small heading with its title, so Fold can tell where each section starts. */
+    private sealed record SectionStart(string Title);
+
     private static void Section(StackPanel col, string title)
     {
         var l = Ui.Label(title);
-        l.Tag = "section";
+        l.Tag = new SectionStart(title);
         col.Children.Add(l);
+    }
+
+    /** Opens Settings with one category open and in view, for links that send the user there to fix something. */
+    internal void OpenSettingsAt(string category)
+    {
+        if (category == SetupCategory) setupFolded = false;
+        if (!S.OpenSettings.Contains(category)) { S.OpenSettings.Add(category); S.Save(); }
+        Go(Page.Settings);
+        if (!categoryViews.TryGetValue(category, out var panel)) return;
+        // Its header near the top, and as much of what's inside as fits.
+        panel.BringIntoView(new Rect(0, 0, panel.ActualWidth, Math.Min(panel.ActualHeight, scroller.ViewportHeight * 0.8)));
+    }
+
+    /**
+     * Regroups the finished Settings page into Categories: each a header you click to open or close, holding its
+     * sections. The sections are built as before; this only moves each one (its heading and everything up to the
+     * next heading) under its category. Anything before the first section (the page title) stays on top.
+     */
+    private void Fold(StackPanel col)
+    {
+        var items = col.Children.Cast<UIElement>().ToList();
+        col.Children.Clear(); // an element can only have one parent, so let go of them all before moving them
+        var sections = new Dictionary<string, List<UIElement>>();
+        List<UIElement>? current = null;
+        foreach (var e in items)
+        {
+            if (e is FrameworkElement { Tag: SectionStart start }) sections[start.Title] = current = new List<UIElement>();
+            if (current != null) current.Add(e); else col.Children.Add(e);
+        }
+
+        if (!SetupComplete && !setupFolded) setupHeld = true;
+        var open = new HashSet<string>(S.OpenSettings);
+        if (setupHeld) open.Add(SetupCategory);
+        if (ShotMode) open.UnionWith(Categories.Select(c => c.Name));
+
+        categoryViews.Clear();
+        foreach (var (name, titles) in Categories)
+        {
+            var parts = titles.Where(sections.ContainsKey).ToList();
+            if (parts.Count == 0) continue;
+            if (name == RightColumnFrom) col.Children.Add(new ColBreak());
+            var isOpen = open.Contains(name);
+            var panel = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            panel.Children.Add(CategoryHeader(name, parts, isOpen));
+            if (isOpen)
+            {
+                var body = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+                foreach (var title in parts)
+                {
+                    var part = sections[title];
+                    // A category holding one section of its own name doesn't need the small heading as well.
+                    var skipHeading = parts.Count == 1 && title == name;
+                    for (int i = skipHeading ? 1 : 0; i < part.Count; i++)
+                    {
+                        // The first thing inside sits a little closer to the header than headings between sections.
+                        if (body.Children.Count == 0 && part[i] is FrameworkElement first)
+                            first.Margin = new Thickness(first.Margin.Left, skipHeading ? 12 : 18, first.Margin.Right, first.Margin.Bottom);
+                        body.Children.Add(part[i]);
+                    }
+                }
+                panel.Children.Add(body);
+            }
+            col.Children.Add(panel);
+            categoryViews[name] = panel;
+        }
+    }
+
+    /** A category's header: its name, the sections inside, and a chevron. Click it (or Enter) to open or close it. */
+    private FrameworkElement CategoryHeader(string name, List<string> parts, bool isOpen)
+    {
+        var texts = Ui.Stack(Ui.Text(name, 17.5, bold: true));
+        if (parts.Count > 1 || parts[0] != name) texts.Children.Add(Ui.Text(string.Join(" · ", parts), 13, C.Sub));
+        var chevron = Icons.Get("expand", 22, C.Sub);
+        chevron.RenderTransformOrigin = new Point(0.5, 0.5);
+        if (isOpen) chevron.RenderTransform = new RotateTransform(180); // points up while open
+        var inner = new Border { CornerRadius = new CornerRadius(20), Padding = new Thickness(20, 15, 16, 15), Background = Brushes.Transparent, Child = Spread(texts, chevron) };
+        var header = new Border { CornerRadius = new CornerRadius(20), Background = C.Card, Cursor = Cursors.Hand, Child = inner };
+        header.MouseEnter += (_, _) => inner.Background = C.Hover;
+        header.MouseLeave += (_, _) => inner.Background = Brushes.Transparent;
+        void Toggle()
+        {
+            var keyboard = header.IsKeyboardFocused;
+            if (isOpen) S.OpenSettings.Remove(name);
+            else if (!S.OpenSettings.Contains(name)) S.OpenSettings.Add(name);
+            if (name == SetupCategory) { setupFolded = isOpen; setupHeld = false; }
+            S.Save();
+            Render();
+            // The page was rebuilt: put the keyboard back on the same header.
+            if (keyboard && categoryViews.TryGetValue(name, out var panel)) panel.Children[0].Focus();
+        }
+        header.MouseLeftButtonUp += (_, _) => Toggle();
+        return Ui.Keys(header, Toggle, $"{name}, {(isOpen ? "open" : "closed")}");
     }
 
     private void BuildSettings(StackPanel col)
     {
-        col.Children.Add(Ui.Heading("Settings"));
+        col.Children.Add(Spaced(Ui.Heading("Settings"), 0, 0, 0, 8));
         col.Children.Add(new HeaderEnd());
 
         // --- Setup
@@ -820,7 +1084,8 @@ public sealed class MainWindow : Window
         var modelText = ModelManager.IsReady ? "Downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
         col.Children.Add(Ui.List(
             Status("Ctrl+Win shortcut", hookOk, "Working", "Not working. Restart Tokalot."),
-            Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key below (free)"),
+            Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key (free)",
+                S.CloudSttReady ? null : Ui.Button("Add key", () => OpenSettingsAt(SpeechCategory))),
             Status("Offline backup model (60 MB)", ModelManager.IsReady || downloadPct != null, modelText, modelText,
                 ModelManager.IsReady || downloadPct != null ? null : Ui.Button("Download", StartDownload)),
             Ui.SettingRow("Start with Windows", Updater.CanUpdate ? "Runs quietly in the tray so Ctrl+Win always works." : "Available in the installed version.",
@@ -895,7 +1160,9 @@ public sealed class MainWindow : Window
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
-                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); }))));
+                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); })),
+            Ui.SettingRow("Voice notes (beta)", "A Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. Each dictation is saved as its own note and copied to the clipboard.",
+                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); }))));
 
         // --- Speed
         Section(col, "Speed");
@@ -952,7 +1219,7 @@ public sealed class MainWindow : Window
             keys.Children.Add(Spaced(box, 0, 6, 0, 0));
         }
         col.Children.Add(Ui.Card(keys, 20));
-        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync below and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync (in Your data) and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
 
         // --- Recordings
         Section(col, "Recordings");
@@ -1040,6 +1307,8 @@ public sealed class MainWindow : Window
         about.Children.Add(licenses);
         about.Children.Add(Spaced(Link("Quit Tokalot", () => App.Current.Quit()), 0, 12, 0, 0));
         col.Children.Add(Ui.Card(about, 20));
+
+        Fold(col);
     }
 
     /** One choosable indicator style with a live preview on a little dark "screen". */

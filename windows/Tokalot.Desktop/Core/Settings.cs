@@ -77,6 +77,14 @@ public sealed class Settings
     public bool LearnWords { get; set; }
     /** The dictionary words that were learned rather than typed in, so the Dictionary page can mark them. */
     public List<string> LearnedWords { get; set; } = new();
+    /** Words the user spelled out while dictating, waiting for Add or Not now (see Learn.Spelled). This PC only: not synced. */
+    public List<string> SuggestedWords { get; set; } = new();
+    /** Suggestions the user turned down, so the same spelling isn't offered again. */
+    public List<string> DismissedWords { get; set; } = new();
+    /** Beta: a Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. */
+    public bool NotesBeta { get; set; }
+    /** The Settings categories left open, so the page opens the way it was left. This PC only: not synced. */
+    public List<string> OpenSettings { get; set; } = new();
     /** Optional sync: the shared file's path on this PC ("" = off), and whether this PC puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }
@@ -106,6 +114,18 @@ public sealed class Settings
         if (value.Length == 0) { EncryptedKeys.Remove(service); return; }
         var enc = ProtectedData.Protect(Encoding.UTF8.GetBytes(value), Entropy, DataProtectionScope.CurrentUser);
         EncryptedKeys[service] = Convert.ToBase64String(enc);
+    }
+
+    // ---------- spelled-out words ----------
+
+    /** Offers found words for the dictionary, leaving out words already there, offered or turned down. True when any were added. */
+    public bool SuggestWords(IEnumerable<string> found)
+    {
+        var have = new HashSet<string>(Words.Concat(SuggestedWords).Concat(DismissedWords), StringComparer.OrdinalIgnoreCase);
+        var added = false;
+        foreach (var w in found)
+            if (have.Add(w)) { SuggestedWords.Add(w); added = true; }
+        return added;
     }
 
     // ---------- derived ----------
