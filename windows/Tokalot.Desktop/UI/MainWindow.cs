@@ -33,6 +33,8 @@ public sealed class MainWindow : Window
     private readonly Border searchBox;
     private StackPanel? historyBox;
     private TextBlock? bannerText;
+    /** The update line in Settings › About, which shows the download progress too. */
+    private TextBlock? settingsUpdateText;
     private TextBlock? modelStatus;
     private int historyLimit = 100, notesLimit = 100;
     private readonly HashSet<long> expanded = new(), showOriginal = new();
@@ -418,7 +420,9 @@ public sealed class MainWindow : Window
 
     public void SetBannerProgress(int pct)
     {
-        if (bannerText != null) bannerText.Text = $"Downloading Tokalot {App.Current.UpdateVersion}… {pct}%";
+        var line = $"Downloading Tokalot {App.Current.UpdateVersion}… {pct}%";
+        if (bannerText != null) bannerText.Text = line;
+        if (settingsUpdateText != null) settingsUpdateText.Text = line;
     }
 
     private void BuildHome(StackPanel col)
@@ -1161,7 +1165,7 @@ public sealed class MainWindow : Window
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
                 Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); })),
-            Ui.SettingRow("Voice notes (beta)", "A Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. Each dictation is saved as its own note and copied to the clipboard.",
+            Ui.SettingRow("Voice notes (beta)", "A Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. Each dictation is saved as its own note and copied to the clipboard. Notes go in sync when it's set up.",
                 Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); }))));
 
         // --- Speed
@@ -1287,14 +1291,24 @@ public sealed class MainWindow : Window
         about.Children.Add(Ui.Text("Tokalot for Windows " + Updater.CurrentVersion, 16, bold: true));
         about.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this PC. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The Ctrl+Win listener only watches for that shortcut; it never records your typing.", 14, C.Sub), 0, 4, 0, 0));
         about.Children.Add(Spaced(Link("Source code: github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)), 0, 8, 0, 0));
-        var status = Ui.Text("", 14, C.Sub);
-        about.Children.Add(Spaced(Ui.Button("Check for updates", async () =>
+        // A new version can be installed from here too, not only from the banner on Home.
+        var app = App.Current;
+        var downloading = app.UpdateProgress != null;
+        var status = Ui.Text(app.UpdateVersion == null ? "" : downloading
+            ? $"Downloading Tokalot {app.UpdateVersion}… {app.UpdateProgress}%"
+            : $"Version {app.UpdateVersion} is available.", 14, C.Sub);
+        settingsUpdateText = status;
+        var check = Ui.Button("Check for updates", async () =>
         {
             if (!Updater.CanUpdate) { status.Text = "Updates work in the installed version (TokalotSetup.exe)."; return; }
             status.Text = "Checking…";
             var v = await App.Current.CheckForUpdates();
-            status.Text = v != null ? $"Version {v} is available. See the banner on Home." : "You're up to date.";
-        }), 0, 12, 0, 0));
+            if (v != null) Render(); // brings up the Update button
+            else status.Text = Updater.LastCheckFailed ? "Couldn't check for updates. Check your connection and try again." : "You're up to date.";
+        });
+        about.Children.Add(Spaced(app.UpdateVersion != null && !downloading
+            ? Ui.Row(Ui.Button("Update", () => _ = app.InstallUpdate(), filled: true), Spaced(check, 8, 0, 0, 0))
+            : (FrameworkElement)check, 0, 12, 0, 0));
         about.Children.Add(Spaced(status, 0, 6, 0, 0));
         var licenses = new TextBox
         {
@@ -1417,14 +1431,14 @@ public sealed class MainWindow : Window
     internal void ShowToast(string msg) => Toast(msg);
 
     private const string SyncInfo =
-        "Tokalot keeps your dictionary, snippets, styles and instructions in one small file. Put that file in a folder you already sync, " +
+        "Tokalot keeps your dictionary, snippets, styles, instructions and voice notes in one small file. Put that file in a folder you already sync, " +
         "such as OneDrive, Google Drive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.\n\n" +
         "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. " +
         "Your history and recordings are never put in it.\n\n" +
         "API keys are left out unless you turn on Include API keys. The file isn't encrypted, so only do that if the folder is private to you. " +
         "You can stop syncing at any time; your settings stay on this device.";
 
-    /** Optional: share dictionary, snippets, styles and instructions between devices through one file in a synced folder. */
+    /** Optional: share dictionary, snippets, styles, instructions and voice notes between devices through one file in a synced folder. */
     private void BuildSync(StackPanel col)
     {
         var info = Ui.Button("", () => Ui.Dialog(this, SyncInfo, "Got it", cancel: null, title: "How sync works"), icon: "info");

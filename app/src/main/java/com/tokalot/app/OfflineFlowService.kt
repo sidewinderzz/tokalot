@@ -42,8 +42,8 @@ import kotlin.math.abs
  * drag to move (the spot is remembered). Drag it into the red zone at the top of the screen
  * to dismiss it; it comes back the next time an input field is focused or the keyboard
  * reopens. If the field or keyboard closes while you talk,
- * recording continues; when you stop, the text goes into the focused field if the keyboard is
- * up, or to the clipboard if it isn't.
+ * recording continues; when you stop, the text goes into the focused field (with no keyboard showing,
+ * not in the apps on Settings' clipboard-only list), or to the clipboard if there isn't one.
  * Does nothing (no mic, no model in memory, no network) until you tap.
  */
 class OfflineFlowService : AccessibilityService() {
@@ -699,7 +699,7 @@ class OfflineFlowService : AccessibilityService() {
 
     /**
      * Starts a dictation with no text box needed (a Quick Settings tile, or the accessibility shortcut).
-     * DICTATE types into the text box if the keyboard is up, and copies the text if it isn't; NOTE saves it
+     * DICTATE types into the selected text box, and copies the text if there isn't one; NOTE saves it
      * to Notes and copies it. The button shows wherever it was last put, and a tap on it finishes. Called again
      * while recording, it finishes too, so a second tap on the tile stops.
      */
@@ -1133,7 +1133,7 @@ class OfflineFlowService : AccessibilityService() {
                     when {
                         mode == Manual.NOTE -> saveNote(outcome.text)
                         // Said "Note this…": a note, with the choice to type it after all if a text box was open.
-                        outcome.note -> saveNote(outcome.text, offerTyping = typingVisible())
+                        outcome.note -> saveNote(outcome.text, offerTyping = focusedEditable()?.let { mayType(it) } == true)
                         else -> deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
                     }
                     Haptics.play(this, Haptics.Kind.DONE)
@@ -1209,9 +1209,9 @@ class OfflineFlowService : AccessibilityService() {
 
     /** fitted: the AI cleanup already chose the first capital for where the text goes (see [fitHere]). */
     private fun deliver(text: String, plain: String? = null, entryId: Long? = null, fitted: Boolean = false) {
-        // Only type when a keyboard shows the user is in a text box. Some apps keep an invisible box focused
-        // (Niagara Launcher's home screen holds its app search that way), and typing there opens it.
-        val node = if (typingVisible()) focusedEditable() else null
+        // Typed into the selected text box, keyboard or not, except in the apps set to get the clipboard
+        // (launchers to start with: Niagara's home screen keeps its app search selected out of sight).
+        val node = focusedEditable()?.takeIf { mayType(it) }
         fitCaps = !fitted
         lastFitted = null
         if (node == null || !insert(node, text)) {
@@ -1224,6 +1224,10 @@ class OfflineFlowService : AccessibilityService() {
             else showUndoChip(5000)
         }
     }
+
+    /** Whether dictated text may go into [node]: always with a keyboard showing, otherwise unless its app is set to get the clipboard. */
+    private fun mayType(node: AccessibilityNodeInfo) =
+        typingVisible() || node.packageName?.toString() !in Prefs(this).clipboardApps
 
     /** A keyboard is on screen: the on-screen one, or a hardware keyboard that's plugged in and open. */
     private fun typingVisible(): Boolean {
@@ -1297,7 +1301,8 @@ class OfflineFlowService : AccessibilityService() {
      * nothing around the cursor, or the setting is off.
      */
     private fun cursorSpot(): TextTools.Spot? {
-        if (!Prefs(this).fitSentence || !typingVisible()) return null // no keyboard: the text will be copied, not typed
+        if (!Prefs(this).fitSentence) return null
+        if (focusedEditable()?.let { mayType(it) } != true) return null // the text will be copied, not typed
         val spot = runCatching {
             val ic = if (Build.VERSION.SDK_INT >= 33) inputMethod?.currentInputConnection else null
             val around = if (Build.VERSION.SDK_INT >= 33) ic?.getSurroundingText(AROUND, AROUND, 0) else null

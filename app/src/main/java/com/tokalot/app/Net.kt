@@ -201,13 +201,13 @@ class Upload(val fileName: String, val mime: String, val length: Long, val write
 /** Cloud speech-to-text through the OpenAI-compatible endpoint (Groq and OpenAI both speak it). */
 object CloudStt {
     /** The multipart text before the audio bytes. Split out so the request length is known up front. */
-    fun head(boundary: String, model: String, prompt: String, english: Boolean, audio: Upload): String {
+    fun head(boundary: String, model: String, prompt: String, english: Boolean, audio: Upload, format: String = "json"): String {
         fun field(name: String, value: String) =
             "--$boundary\r\nContent-Disposition: form-data; name=\"$name\"\r\n\r\n$value\r\n"
         return buildString {
             append(field("model", model))
             if (english) append(field("language", "en")) // omitted = the model detects the language
-            append(field("response_format", "json"))
+            append(field("response_format", format))
             if (prompt.isNotBlank()) append(field("prompt", prompt))
             append("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"${audio.fileName}\"\r\n")
             append("Content-Type: ${audio.mime}\r\n\r\n")
@@ -219,7 +219,9 @@ object CloudStt {
         english: Boolean = true, audioMs: Long = 0, call: Call? = null,
     ): String {
         val boundary = "----tokalot${System.nanoTime()}"
-        val head = head(boundary, model, prompt, english, audio).toByteArray()
+        // Whisper models also say how likely each stretch was to be silence, which tells a stray "Thank you." from a real one.
+        val verbose = model.startsWith("whisper")
+        val head = head(boundary, model, prompt, english, audio, if (verbose) "verbose_json" else "json").toByteArray()
         val tail = "\r\n--$boundary--\r\n".toByteArray()
 
         val conn = URL("$baseUrl/audio/transcriptions").openConnection() as HttpURLConnection
@@ -239,10 +241,25 @@ object CloudStt {
                 out.write(tail)
             }
             val t1 = System.nanoTime()
-            val text = Net.readResponse(conn).optString("text")
+            val reply = Net.readResponse(conn)
             call?.let { it.sendMs += (t1 - t0) / 1_000_000; it.waitMs += (System.nanoTime() - t1) / 1_000_000 }
-            text
+            text(reply)
         }
         return if (call != null) call.track(conn, send) else send()
     }
+
+    /**
+     * The transcript, or "" when it's one of the phrases Whisper invents for noise ("Thank you.") and Whisper
+     * itself rated every part of the audio as probably not speech. A "thank you" that was said comes through.
+     */
+    fun text(reply: JSONObject): String {
+        val text = reply.optString("text")
+        val segments = reply.optJSONArray("segments") ?: return text
+        if (segments.length() == 0 || !TextTools.isPhantom(text)) return text
+        val silent = (0 until segments.length()).all { (segments.optJSONObject(it)?.optDouble("no_speech_prob", 0.0) ?: 0.0) >= NO_SPEECH }
+        return if (silent) "" else text
+    }
+
+    /** Whisper's own cut-off for "this was silence" is 0.6; a stock phrase on top of it needs less. */
+    const val NO_SPEECH = 0.5
 }

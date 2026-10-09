@@ -77,7 +77,7 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
     </td>
     <td valign="top">
       <b>Yours to keep</b><br>
-      One-file backup and restore, in-app updates, light and dark themes, a usage and cost tracker, and optional sync of your dictionary, snippets and styles between devices.
+      One-file backup and restore, in-app updates, light and dark themes, a usage and cost tracker, and optional sync of your dictionary, snippets, styles and voice notes between devices.
     </td>
   </tr>
 </table>

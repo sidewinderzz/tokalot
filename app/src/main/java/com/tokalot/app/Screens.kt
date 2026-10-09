@@ -377,7 +377,7 @@ class SettingsScreen(private val a: MainActivity) {
         }
 
         val SYNC_INFO = listOf(
-            "Tokalot keeps your dictionary, snippets, styles and instructions in one small file. Put that file in a folder you already sync, such as Google Drive, OneDrive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.",
+            "Tokalot keeps your dictionary, snippets, styles, instructions and voice notes in one small file. Put that file in a folder you already sync, such as Google Drive, OneDrive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.",
             "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. Your history and recordings are never put in it.",
             "API keys are left out unless you turn on Include API keys. The file isn't encrypted, so only do that if the folder is private to you. You can stop syncing at any time; your settings stay on this device.",
         ).joinToString("\n\n")
@@ -501,13 +501,40 @@ class SettingsScreen(private val a: MainActivity) {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(14), dp(16), dp(10))
             addView(text("Dictate tile", 17f))
-            addView(text("Talk while you read or scroll, with no text box open. The text goes into the text box if the keyboard is up, and onto the clipboard if it isn't. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
+            addView(text("Talk while you read or scroll, with no text box open. The text goes into the selected text box if there is one, and onto the clipboard if not. Swipe down twice from the top, tap the pencil, and drag Tokalot Dictate into your tiles.", 14f, C.SUB))
             if (Build.VERSION.SDK_INT >= 33) addView(row(pill("Add the tile") {
                 StartTile.requestAdd(this@with, DictateTile::class.java, "Dictate", R.drawable.ic_mic)
             }), lp().margins(this@with, t = 6))
         })
         hand.addView(divider())
-        hand.addView(switchRow("Voice notes (beta)", "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Notes stay on this phone; they're in backups but not in sync.", prefs.notesBeta) { on ->
+        // With no keyboard showing, these apps get the clipboard rather than having the text typed in.
+        hand.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(16), dp(10))
+            addView(text("Clipboard only", 17f))
+            addView(text("With no keyboard showing, Tokalot still types into the selected text box, except in these apps, where the text is copied instead. Launchers start out here: some keep a hidden search box selected on the home screen.", 14f, C.SUB))
+            val listed = prefs.clipboardApps
+            listed.map { it to AppContext.label(this@with, it) }.sortedBy { it.second.lowercase() }.forEach { (pkg, name) ->
+                addView(row(
+                    text(name, 15f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                    iconButton(R.drawable.ic_close, "Remove $name", 20, C.SUB) { prefs.clipboardApps = prefs.clipboardApps - pkg; render() },
+                ).apply { minimumHeight = dp(44) }, lp().margins(this@with, t = 4))
+            }
+            addView(row(pill("Add an app") {
+                val apps = AppContext.launchable(this@with).filter { it.first !in prefs.clipboardApps }
+                lateinit var d: android.app.Dialog
+                val list = LinearLayout(this@with).apply { orientation = LinearLayout.VERTICAL }
+                apps.forEach { (pkg, name) ->
+                    list.addView(text(name, 16f).apply {
+                        setPadding(dp(4), dp(12), dp(4), dp(12))
+                        setOnClickListener { prefs.clipboardApps = prefs.clipboardApps + pkg; d.dismiss(); render() }
+                    })
+                }
+                d = sheet("Clipboard only", list)
+            }), lp().margins(this@with, t = 6))
+        })
+        hand.addView(divider())
+        hand.addView(switchRow("Voice notes (beta)", "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Notes are in backups, and in sync when it's set up.", prefs.notesBeta) { on ->
             prefs.notesBeta = on
             StartTile.setNoteTile(this, on)
             if (!on && prefs.shortcutAction == "note") prefs.shortcutAction = "off"
@@ -752,24 +779,35 @@ class SettingsScreen(private val a: MainActivity) {
         about.addView(link("Source code: github.com/${Updater.REPO}") {
             startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/${Updater.REPO}")))
         }, lp())
-        val status = text("", 14f, C.SUB)
-        about.addView(row(pill("Check for updates") {
+        // A new version can be installed from here too, not only from the banner on Home.
+        val ready = Updater.available(this, evenDismissed = true)
+        val downloaded = Updater.progress
+        val status = text(when {
+            ready == null -> ""
+            downloaded != null -> "Downloading Tokalot ${ready.version}… $downloaded%"
+            else -> "Version ${ready.version} is available."
+        }, 14f, C.SUB)
+        settingsUpdateText = status
+        val check = pill("Check for updates") {
             status.text = "Checking…"
             val app = applicationContext
             Thread {
                 Updater.check(app, force = true)
                 val failed = Updater.lastCheckFailed
-                val r = Updater.available(app)
+                val r = Updater.available(app, evenDismissed = true)
                 runOnUiThread {
-                    status.text = when {
-                        r != null -> "Version ${r.version} is available. See the banner on Home."
+                    if (r != null) render() // brings up the Update button
+                    else status.text = if (failed) {
                         // Not the same as "up to date": we simply don't know.
-                        failed -> "Couldn't check for updates. Check your connection and try again."
-                        else -> "You're up to date."
-                    }
+                        "Couldn't check for updates. Check your connection and try again."
+                    } else "You're up to date."
                 }
             }.start()
-        }), lp())
+        }
+        about.addView(
+            if (ready != null && downloaded == null) row(pill("Update", filled = true) { startUpdate(ready) }, spacer(wDp = 8), check) else row(check),
+            lp(),
+        )
         about.addView(status, lp().margins(this, t = 2))
         about.addView(link("What's new in ${Tour.VERSION}") { Tour.show(this) }, lp().margins(this, t = 4))
         about.addView(link("Changelog") {

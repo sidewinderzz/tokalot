@@ -9,7 +9,8 @@ import java.io.File
 
 /**
  * Voice notes (beta): one note per dictation started with "New voice note" (a Quick Settings tile or the
- * accessibility shortcut). Stored as one JSON file in app-private storage, newest first, on this phone only.
+ * accessibility shortcut). Stored as one JSON file in app-private storage, newest first, and shared with
+ * the other devices through the sync file when one is set up.
  */
 object Notes {
     class Note(val id: Long, val time: Long, val text: String)
@@ -48,11 +49,30 @@ object Notes {
     fun add(ctx: Context, text: String): Long {
         val now = System.currentTimeMillis()
         save(ctx, listOf(Note(now, now, text)) + all(ctx))
+        Sync.changed(ctx)
         return now
     }
 
     @Synchronized
-    fun delete(ctx: Context, id: Long) = save(ctx, all(ctx).filter { it.id != id })
+    fun delete(ctx: Context, id: Long) {
+        save(ctx, all(ctx).filter { it.id != id })
+        Sync.changed(ctx)
+    }
+
+    /** The notes as the sync file holds them. Throws if the file is there but can't be read, so a sync never takes that for "no notes". */
+    @Synchronized
+    fun forSync(ctx: Context): List<SyncNote> {
+        val f = file(ctx)
+        return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text) } else emptyList()
+    }
+
+    /** Stores a sync's result, unless a note was added or deleted here since [before] was read (the caller then syncs again). */
+    @Synchronized
+    fun applySynced(ctx: Context, before: List<SyncNote>, after: List<SyncNote>): Boolean {
+        if (forSync(ctx) != before) return false
+        save(ctx, after.map { Note(it.id, it.time, it.text) })
+        return true
+    }
 
     /**
      * The beta's feedback form on GitHub (.github/ISSUE_TEMPLATE/voice-notes-feedback.yml), with [vote] in

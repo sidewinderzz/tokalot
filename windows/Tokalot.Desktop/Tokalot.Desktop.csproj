@@ -16,7 +16,7 @@
     <Product>Tokalot</Product>
     <Company>sidewinderzz</Company>
     <!-- Bump this to release a new desktop version (CI publishes desktop-v<Version>). -->
-    <Version>1.9.0</Version>
+    <Version>1.10.0</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>

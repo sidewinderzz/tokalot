@@ -15,11 +15,16 @@
     <!-- In-app updates: lets Tokalot hand a newer signed APK to Android's installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
-    <!-- Lets Tokalot show app names (e.g. "Gmail") in history and the Style tab. -->
+    <!-- Lets Tokalot show app names (e.g. "Gmail") in history and the Style tab, and find the launchers
+         that start out on Settings' clipboard-only list. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
         </intent>
     </queries>
 

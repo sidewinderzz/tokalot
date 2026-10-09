@@ -148,7 +148,8 @@ object Sync {
         val remote = SyncFormat.parse(String(bytes, Charsets.UTF_8))
 
         val prefs = Prefs(app)
-        val local = prefs.syncState()
+        val localNotes = try { Notes.forSync(app) } catch (_: Exception) { throw IOException("Couldn't read your notes. Will try again.") }
+        val local = prefs.syncState().copy(notes = localNotes)
         val localKeys = SyncFormat.SERVICES.associateWith { prefs.key(it) }
         val base = SyncFormat.parseBase(if (firstSync) null else prefs.syncBase, DEFAULT_INSTRUCTIONS)
         val known = prefs.knownKeys
@@ -156,8 +157,17 @@ object Sync {
         val nowKnown = known + result.localKeys.filterValues { it.isNotEmpty() }.keys
         if (nowKnown != known) prefs.knownKeys = nowKnown
 
-        if (result.state != local || result.localKeys != localKeys) {
+        if (result.state.copy(notes = localNotes) != local || result.localKeys != localKeys) {
             prefs.applySynced(result.state, result.localKeys)
+            changed[0] = true
+        }
+        if (result.state.notes != localNotes) {
+            // A note made or deleted mid-sync: leave both as they are and run again, which picks it up.
+            if (!Notes.applySynced(app, localNotes, result.state.notes)) {
+                if (firstSync) throw IOException("A note changed while syncing. Choose the file again.")
+                again = true
+                return
+            }
             changed[0] = true
         }
         if (result.write) {

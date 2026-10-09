@@ -32,11 +32,12 @@ object Updater {
     private fun sp(ctx: Context) = ctx.applicationContext.getSharedPreferences("updates", Context.MODE_PRIVATE)
 
     /** The newer release found last time we checked, if any (no network). */
-    fun available(ctx: Context): Release? {
+    /** The newer release found by the last check, or null. [evenDismissed]: also when its banner was closed (Settings offers it anyway). */
+    fun available(ctx: Context, evenDismissed: Boolean = false): Release? {
         val s = sp(ctx)
         val v = s.getString("version", null) ?: return null
         if (!isNewer(v, currentVersion(ctx))) return null
-        if (s.getString("dismissed", null) == v) return null
+        if (!evenDismissed && s.getString("dismissed", null) == v) return null
         return Release(v, s.getString("url", "")!!, s.getLong("size", 0), s.getString("notes", "")!!)
     }
 

@@ -9,13 +9,18 @@ import org.json.JSONObject
  * change nothing here without changing them too.
  */
 
-/** The settings that sync: dictionary, snippets, explicitly chosen styles and the custom instructions. */
+/** One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one. */
+data class SyncNote(val id: Long, val time: Long, val text: String)
+
+/** What syncs: dictionary, snippets, explicitly chosen styles, the custom instructions and voice notes. */
 data class SyncState(
     val words: List<String> = emptyList(),
     val snippets: List<Snippet> = emptyList(),
     /** Category id -> style id, only for categories the user set themselves. */
     val styles: Map<String, String> = emptyMap(),
     val instructions: String = "",
+    /** Newest first. */
+    val notes: List<SyncNote> = emptyList(),
 )
 
 /** What a sync file held. A field the file didn't have is null, and is then left as it is on this device. */
@@ -28,6 +33,8 @@ class SyncRemote(
     val keys: Map<String, String>?,
     val updated: Long = 0,
     val by: String = "",
+    /** Null in a file last written by a version from before notes synced: this device's notes are then kept as they are. */
+    val notes: List<SyncNote>? = null,
 )
 
 class SyncResult(
@@ -95,9 +102,17 @@ object SyncFormat {
             for (name in k.keys()) (k.opt(name) as? String)?.trim()?.takeIf { it.isNotEmpty() }?.let { out[name] = it }
             out.takeIf { it.isNotEmpty() }
         }
+        val notes = o.optJSONArray("notes")?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                val n = arr.optJSONObject(i) ?: return@mapNotNull null
+                val id = (n.opt("id") as? Number)?.toLong() ?: return@mapNotNull null
+                val t = n.opt("text") as? String ?: return@mapNotNull null
+                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t)
+            }
+        }
         return SyncRemote(
             words, snippets, styles, o.opt("instructions") as? String, keys,
-            (o.opt("updated") as? Number)?.toLong() ?: 0, o.opt("by") as? String ?: "",
+            (o.opt("updated") as? Number)?.toLong() ?: 0, o.opt("by") as? String ?: "", notes,
         )
     }
 
@@ -114,6 +129,9 @@ object SyncFormat {
         })
         o.put("styles", JSONObject().also { s -> state.styles.forEach { (c, v) -> s.put(c, v) } })
         o.put("instructions", state.instructions)
+        o.put("notes", JSONArray().also { arr ->
+            state.notes.forEach { arr.put(JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)) }
+        })
         if (!keys.isNullOrEmpty()) o.put("keys", JSONObject().also { k -> keys.forEach { (name, v) -> k.put(name, v) } })
         return o.toString(2)
     }
@@ -123,7 +141,10 @@ object SyncFormat {
 
     fun parseBase(text: String?, defaultInstructions: String): SyncState {
         val r = (try { parse(text) } catch (_: SyncFormatException) { null }) ?: return firstBase(defaultInstructions)
-        return SyncState(r.words ?: emptyList(), r.snippets ?: emptyList(), r.styles ?: emptyMap(), r.instructions ?: defaultInstructions)
+        return SyncState(
+            r.words ?: emptyList(), r.snippets ?: emptyList(), r.styles ?: emptyMap(), r.instructions ?: defaultInstructions,
+            r.notes ?: emptyList(),
+        )
     }
 }
 
@@ -144,6 +165,7 @@ object SyncMerge {
             snippets(local.snippets, remote?.snippets, base.snippets),
             styles(local.styles, remote?.styles, base.styles),
             if (local.instructions == base.instructions && remote?.instructions != null) remote.instructions else local.instructions,
+            notes(local.notes, remote?.notes, base.notes),
         )
 
         // Keys have no base: an empty slot here is filled from the file, and the file only
@@ -218,6 +240,29 @@ object SyncMerge {
         return out
     }
 
+    /**
+     * Notes match by id. One that a side had at the last sync and no longer has was deleted there; a text
+     * changed since the last sync wins over the unchanged one. Newest first.
+     */
+    private fun notes(l: List<SyncNote>, r: List<SyncNote>?, b: List<SyncNote>): List<SyncNote> {
+        if (r == null) return l
+        val mine = LinkedHashMap<Long, SyncNote>().also { m -> l.forEach { m.putIfAbsent(it.id, it) } }
+        val theirs = LinkedHashMap<Long, SyncNote>().also { m -> r.forEach { m.putIfAbsent(it.id, it) } }
+        val base = b.associateBy { it.id }
+        val out = ArrayList<SyncNote>()
+        for (id in LinkedHashSet(theirs.keys + mine.keys)) {
+            val here = mine[id]
+            val there = theirs[id]
+            val was = base[id]
+            when {
+                here != null && there != null -> out.add(if (was != null && here.text == was.text) there else here)
+                here != null -> if (was == null) out.add(here) // else: deleted elsewhere
+                there != null -> if (was == null) out.add(there) // else: deleted here
+            }
+        }
+        return out.sortedWith(compareByDescending<SyncNote> { it.time }.thenByDescending { it.id })
+    }
+
     private fun styles(l: Map<String, String>, r: Map<String, String>?, b: Map<String, String>): Map<String, String> {
         if (r == null) return l
         val out = LinkedHashMap<String, String>()
@@ -233,5 +278,5 @@ object SyncMerge {
     /** Whether the file already says exactly what [state] says, so there is nothing to write. */
     fun sameContent(state: SyncState, r: SyncRemote): Boolean =
         state.words == r.words && state.snippets == r.snippets && state.styles == r.styles &&
-            state.instructions == r.instructions
+            state.instructions == r.instructions && state.notes == r.notes.orEmpty()
 }

@@ -56,6 +56,8 @@ class MainActivity : Activity() {
     private val showOriginal = HashSet<Long>()
     private var query = ""
     private var bannerText: TextView? = null
+    /** The update line in Settings › About, which shows the download progress too. */
+    var settingsUpdateText: TextView? = null
     private var bannerOpen = false // the update banner's "What's new" is showing
     private var logoBars: BarsView? = null
     private var historyBox: LinearLayout? = null
@@ -200,7 +202,11 @@ class MainActivity : Activity() {
             val poll = Thread {
                 while (Updater.progress != null) {
                     val pct = Updater.progress
-                    runOnUiThread { bannerText?.text = "Downloading Tokalot ${r.version}… ${pct ?: 0}%" }
+                    runOnUiThread {
+                        val line = "Downloading Tokalot ${r.version}… ${pct ?: 0}%"
+                        bannerText?.text = line
+                        settingsUpdateText?.text = line
+                    }
                     Thread.sleep(300)
                 }
             }.also { it.start() }

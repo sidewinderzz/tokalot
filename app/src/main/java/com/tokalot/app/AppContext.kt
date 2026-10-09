@@ -66,6 +66,23 @@ object AppContext {
         }.getOrNull() ?: knownNames[pkg] ?: pkg.substringAfterLast('.').replaceFirstChar { it.uppercaseChar() }
     }
 
+    /** The home-screen apps (launchers) installed on this phone. */
+    fun launchers(ctx: Context): Set<String> = runCatching {
+        val home = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME)
+        ctx.packageManager.queryIntentActivities(home, 0).map { it.activityInfo.packageName }
+            // "android" is the chooser, and Settings holds the stand-in shown while the phone starts.
+            .filter { it != "android" && it != "com.android.settings" && it != ctx.packageName }
+            .toSet()
+    }.getOrDefault(emptySet())
+
+    /** Apps with an icon in the app drawer, as (package, name), sorted by name: the list to pick from in Settings. */
+    fun launchable(ctx: Context): List<Pair<String, String>> = runCatching {
+        val main = android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        ctx.packageManager.queryIntentActivities(main, 0).map { it.activityInfo.packageName }
+            .filter { it != ctx.packageName }.distinct()
+            .map { it to label(ctx, it) }.sortedBy { it.second.lowercase() }
+    }.getOrDefault(emptyList())
+
     // ---------- cheap "what did cleanup fix" counters, from the raw transcript ----------
 
     private val FILLER = Regex("""(?i)\b(?:um+|uh+|erm|hmm+|you know)\b""")

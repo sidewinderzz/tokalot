@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -108,7 +109,7 @@ public static class CloudStt
             if (flacRefused != baseUrl)
             {
                 var (code, body) = await Send(baseUrl, key, model, Flac.Encode(samples), "audio/flac", "audio.flac", prompt, english, cts.Token);
-                if (code is >= 200 and < 300) return JsonNode.Parse(body)?["text"]?.ToString() ?? "";
+                if (code is >= 200 and < 300) return Text(body);
                 if (!FormatRefused(code, body)) throw new IOException($"HTTP {code}: {Net.ErrorMessage(body)}");
                 flacRefused = baseUrl;
             }
@@ -119,12 +120,28 @@ public static class CloudStt
                 if (flacRefused == baseUrl && c is 400 or 415) flacRefused = null;
                 throw new IOException($"HTTP {c}: {Net.ErrorMessage(text)}");
             }
-            return JsonNode.Parse(text)?["text"]?.ToString() ?? "";
+            return Text(text);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Timed out"); }
     }
 
     private static volatile string? flacRefused; // the service that last turned FLAC down
+
+    /** Whisper's own cut-off for "this was silence" is 0.6; a stock phrase on top of it needs less. */
+    public const double NoSpeech = 0.5;
+
+    /**
+     * The transcript, or "" when it's one of the phrases Whisper invents for noise ("Thank you.") and Whisper
+     * itself rated every part of the audio as probably not speech. A "thank you" that was said comes through.
+     */
+    public static string Text(string body)
+    {
+        var o = JsonNode.Parse(body);
+        var text = o?["text"]?.ToString() ?? "";
+        if (o?["segments"] is not JsonArray segs || segs.Count == 0 || !TextTools.IsPhantom(text)) return text;
+        try { return segs.All(seg => ((double?)seg?["no_speech_prob"] ?? 0) >= NoSpeech) ? "" : text; }
+        catch (Exception) { return text; } // an odd reply shape: keep what was heard
+    }
 
     /** A 400 can be about anything (a retired model, a blocked account); only one about the audio file means "send WAV". */
     private static bool FormatRefused(int code, string body)
@@ -141,7 +158,8 @@ public static class CloudStt
         using var form = new MultipartFormDataContent();
         form.Add(new StringContent(model), "model");
         if (english) form.Add(new StringContent("en"), "language"); // omitted = the model detects it
-        form.Add(new StringContent("json"), "response_format");
+        // Whisper models also say how likely each stretch was to be silence, which tells a stray "Thank you." from a real one.
+        form.Add(new StringContent(model.StartsWith("whisper") ? "verbose_json" : "json"), "response_format");
         if (!string.IsNullOrWhiteSpace(prompt)) form.Add(new StringContent(prompt), "prompt");
         var file = new ByteArrayContent(audio);
         file.Headers.ContentType = new MediaTypeHeaderValue(mime);
