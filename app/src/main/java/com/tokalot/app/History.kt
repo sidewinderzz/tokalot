@@ -6,6 +6,7 @@ import android.os.Looper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.Executors
 
 data class Entry(
     val id: Long,
@@ -30,6 +31,13 @@ object History {
 
     private var cache: MutableList<Entry>? = null
     private val main by lazy { Handler(Looper.getMainLooper()) }
+    /** Writes the file in the background, so a change made on the main thread never waits on (or crashes over) the disk. */
+    private val writer = Executors.newSingleThreadExecutor()
+    private var writeQueued = false
+    /** Bumped by [reload] and [restore], so a write queued before a restore can't put the old history back. */
+    private var generation = 0
+    /** Held while the file itself is written, by the writer and by [restore]. Always taken before History's own lock. */
+    private val fileLock = Any()
 
     /** Set by the app screen so the list refreshes live when a dictation lands. */
     @Volatile var onChange: (() -> Unit)? = null
@@ -82,18 +90,65 @@ object History {
         return list
     }
 
+    /**
+     * The in-memory list is what everything reads; the file follows it on the writer thread. Changes that come
+     * in quick succession are written once, and a full disk is logged rather than thrown at whoever made the change.
+     */
     @Synchronized
     private fun save(ctx: Context) {
-        val f = file(ctx)
-        val tmp = File(f.parentFile, "history.tmp")
-        tmp.writeText(toJson(cache ?: emptyList()))
-        tmp.renameTo(f)
         notifyChanged()
+        if (writeQueued) return
+        writeQueued = true
+        val app = ctx.applicationContext
+        val gen = generation
+        writer.execute { write(app, gen) }
+    }
+
+    private fun write(ctx: Context, gen: Int) {
+        synchronized(fileLock) {
+            val snapshot = synchronized(this) {
+                writeQueued = false
+                if (gen != generation) return
+                ArrayList(cache ?: return)
+            }
+            try {
+                replace(ctx, toJson(snapshot), "history.tmp")
+            } catch (e: Exception) {
+                android.util.Log.w("Tokalot", "Couldn't save history", e)
+            }
+        }
+    }
+
+    /** Written to a side file first and then swapped in, so a crash mid-write can't lose the history. */
+    private fun replace(ctx: Context, json: String, tmpName: String) {
+        val f = file(ctx)
+        val tmp = File(f.parentFile, tmpName)
+        tmp.writeText(json)
+        if (!tmp.renameTo(f)) { tmp.copyTo(f, overwrite = true); tmp.delete() }
+    }
+
+    /** Puts a backup's history in place of this one. No write from before it can land after it. Not on the main thread. */
+    fun restore(ctx: Context, json: String) = synchronized(fileLock) {
+        synchronized(this) {
+            replace(ctx, json, "history.restore")
+            cache = null
+            generation++
+        }
+        notifyChanged()
+    }
+
+    /** Blocks until every change so far is on disk (before a backup reads the file or a restore replaces it). Not on the main thread. */
+    fun flush() { runCatching { writer.submit {}.get() } }
+
+    /** Loads the file in the background, so the first screen that shows history doesn't wait for it. */
+    fun preload(ctx: Context) {
+        val app = ctx.applicationContext
+        writer.execute { runCatching { load(app) } }
     }
 
     /** Drops the in-memory copy so the next read comes from disk (after a restore). */
     @Synchronized
-    fun reload() { cache = null; notifyChanged() }
+    fun reload() { cache = null; generation++; notifyChanged() }
 
     /** Tells the open screen to redraw (e.g. once a recording finishes saving). */
     fun notifyChanged() { onChange?.let { cb -> main.post { cb() } } }
