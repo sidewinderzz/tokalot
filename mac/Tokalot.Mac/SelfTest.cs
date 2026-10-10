@@ -220,6 +220,15 @@ internal static unsafe class SelfTest
         if (r2 == TextInjector.Result.Pasted && swapped == own) Pass("revert", $"⌘Z then paste left \"{swapped}\"");
         else Fail("revert", $"result {r2}, file holds \"{swapped}\"");
 
+        // A screenshot on the clipboard must still be there after a dictation lands, not the dictation.
+        var png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
+        TextInjector.SetPicture(png);
+        var r3 = Pump(TextInjector.Paste(" And a picture stays put."));
+        Wait(300);
+        var pic = TextInjector.ReadPicture();
+        if (r3 == TextInjector.Result.Pasted && pic != null && pic.AsSpan().SequenceEqual(png)) Pass("picture restored", "the screenshot is still on the clipboard");
+        else Fail("picture restored", $"result {r3}, clipboard {(pic == null ? $"holds \"{TextInjector.Read()}\"" : "holds a different picture")}");
+
         Sh.Run("/usr/bin/killall", new[] { "TextEdit" }, timeoutMs: 5000);
         Console.WriteLine(failures == 0 ? "All checks passed." : $"{failures} check(s) failed.");
         return failures == 0 ? 0 : 1;

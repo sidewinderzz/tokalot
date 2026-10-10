@@ -87,8 +87,10 @@ model, `log.txt`), private to your user. API keys are in your login Keychain und
   choose the "Dvorak – QWERTY ⌘" layout, which keeps ⌘ shortcuts on QWERTY positions.
 - In password fields and apps with "Secure Keyboard Entry" on (Terminal, iTerm2 and some password
   managers offer it), macOS hides the keyboard from every other app, including Tokalot's shortcut.
-- If the clipboard held a picture or files before a dictation, the dictated text stays on the
-  clipboard afterwards (only text is put back).
+- After a dictation is pasted, what you had copied goes back on the clipboard: text, a picture
+  (a screenshot) or files. Formatted text comes back plain. A password copied from a password
+  manager isn't put back; the clipboard is left empty instead. The dictation only stays on the
+  clipboard when Tokalot couldn't press ⌘V itself (Accessibility not allowed yet).
 - Recordings are saved as WAV (about 2 MB a minute).
 - The window uses macOS's own buttons (top left), with Tokalot's pages drawn up under them.
 

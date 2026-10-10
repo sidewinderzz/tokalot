@@ -13,7 +13,8 @@ using Tokalot.Desktop.Core;
 namespace Tokalot.Desktop.Platform;
 
 /**
- * Puts text into whatever app has focus: clipboard + Ctrl+V, then puts your old clipboard text back.
+ * Puts text into whatever app has focus: clipboard + Ctrl+V, then puts your old clipboard back (text, a picture
+ * or files). The dictation is only left on the clipboard as a fallback, when Tokalot can't press the keys itself.
  * Ctrl+V is pressed on a virtual keyboard (/dev/uinput), which works on X11 and Wayland alike.
  * Without access to /dev/uinput it tries wtype / xdotool / ydotool, and if none of those works
  * the text is left on the clipboard for you to paste.
@@ -62,17 +63,15 @@ public static class TextInjector
         var terminal = AppDetect.IsTerminal(app);
         if (!await Task.Run(() => SendPaste(terminal))) return Result.Copied;
 
-        // Wayland can't say which app has focus, so the paste may have gone to a terminal as a plain Ctrl+V and done
-        // nothing. The dictation stays on the clipboard then, ready for Ctrl+Shift+V, instead of the old clipboard.
-        if (app == null && Sh.IsWayland) return Result.Pasted;
+        // The paste was sent, so the dictation doesn't stay on the clipboard: what was there before goes back, even on
+        // Wayland, where Tokalot can't tell a terminal (which wants Ctrl+Shift+V) from anything else. The dictation is
+        // in history either way, and TOKALOT_PASTE=ctrl+shift+v makes terminals work there.
         // Give the target app time to read the clipboard before restoring it.
         await Task.Delay(450);
-        // It held a picture, files, a password or something else that can't be put back as it was: leave the dictation there rather than a damaged copy.
-        if (before.Kind == Held.Other || before.Text == text) return Result.Pasted;
+        if (before.Kind == Held.Text && before.Text == text) return Result.Pasted;
         // Only put the old clipboard back if nothing else replaced ours in the meantime.
         try { if (await GetClipboard() is { } now && now != text) return Result.Pasted; } catch { }
-        if (before.Kind == Held.Text) await SetClipboard(before.Text!);
-        else await ClearClipboard(); // it was empty before, so leave it empty
+        if (!await Restore(before)) await ClearClipboard(); // it was empty (or held a password, or can't be put back): leave it empty
         return Result.Pasted;
     }
 
@@ -311,17 +310,23 @@ public static class TextInjector
         catch { }
     }
 
-    private enum Held { Text, Empty, Other }
+    /** Text: plain text. Picture / Files: kept as they were. Gone: empty, or nothing that can (or should) be put back. */
+    private enum Held { Text, Picture, Files, Gone }
+
+    /** What was on the clipboard before a paste. Mime and Bytes: the one type kept through wl-paste or xclip. */
+    private sealed record Saved(Held Kind, string? Text = null, string? Mime = null, byte[]? Bytes = null,
+        Avalonia.Media.Imaging.Bitmap? Picture = null, IReadOnlyList<Avalonia.Platform.Storage.IStorageItem>? Files = null);
+
+    /** Bigger copies than this (a huge picture, say) aren't held on to; the clipboard is emptied after the paste instead. */
+    private const int MaxHeld = 64 << 20;
 
     /**
-     * What the clipboard holds before a paste. Only text can be put back afterwards: a picture or a
-     * file list offered by another app can't be re-offered by Tokalot (a copied file would come back
-     * as just its name), and a password copied from a password manager would come back without its
-     * "secret" mark, so clipboard-history tools would keep it. Those are reported as Other and the
-     * dictation is left on the clipboard instead. Formatted text comes back as plain text. When it
-     * can't be told what the clipboard holds, it counts as Other too.
+     * What the clipboard holds before a paste. A picture (a screenshot) or copied files are kept so they come back
+     * after the paste. A password copied from a password manager is not: it would come back without its "secret"
+     * mark, so clipboard-history tools would keep it; the clipboard is emptied instead. Formatted text comes back
+     * as plain text. When it can't be told what the clipboard holds, it is emptied too.
      */
-    private static async Task<(Held Kind, string? Text)> Snapshot()
+    private static async Task<Saved> Snapshot()
     {
         try
         {
@@ -330,27 +335,81 @@ public static class TextInjector
             {
                 case Backend.Avalonia:
                     var formats = await OnUi(async () => await Host()!.GetDataFormatsAsync());
-                    if (formats.Any(f => f == DataFormat.File || f == DataFormat.Bitmap)) return (Held.Other, null);
+                    if (formats.Any(f => IsSecret(f.Identifier))) return new Saved(Held.Gone);
+                    if (formats.Any(f => f == DataFormat.File))
+                        return await OnUi(async () => await Host()!.TryGetFilesAsync()) is { Length: > 0 } files ? new Saved(Held.Files, Files: files) : new Saved(Held.Gone);
+                    var hasText = formats.Any(f => f == DataFormat.Text);
+                    if (!hasText && formats.Any(f => f == DataFormat.Bitmap))
+                        return await OnUi(async () => await Host()!.TryGetBitmapAsync()) is { } pic ? new Saved(Held.Picture, Picture: pic) : new Saved(Held.Gone);
                     types = formats.Select(f => f.Identifier).ToList();
+                    if (hasText) types.Add("text/plain");
                     break;
                 case Backend.WlCopy when Sh.Which("wl-paste") is { } wp:
                     var listed = await Task.Run(() => Sh.Run(wp, new[] { "--list-types" }, timeoutMs: 600));
                     // wl-paste fails when the clipboard is empty.
                     types = listed.Exit == 0 ? Lines(listed.Out) : new List<string>();
+                    if (await Keep(types, t => Sh.ReadBytes(wp, new[] { "--no-newline", "--type", t }, MaxHeld)) is { } wl) return wl;
                     break;
                 case Backend.Xclip:
-                    var targets = await Task.Run(() => Sh.Run(Sh.Which("xclip")!, new[] { "-selection", "clipboard", "-o", "-t", "TARGETS" }, timeoutMs: 600));
+                    var xclip = Sh.Which("xclip")!;
+                    var targets = await Task.Run(() => Sh.Run(xclip, new[] { "-selection", "clipboard", "-o", "-t", "TARGETS" }, timeoutMs: 600));
                     types = targets.Exit == 0 ? Lines(targets.Out) : new List<string>();
+                    if (await Keep(types, t => Sh.ReadBytes(xclip, new[] { "-selection", "clipboard", "-o", "-t", t }, MaxHeld)) is { } xc) return xc;
                     break;
             }
-            if (types != null && types.Any(CantPutBack)) return (Held.Other, null);
+            // Something only a plain-text copy can't carry, and no text to fall back on.
+            if (types != null && types.Any(CantPutBack) && !types.Any(IsText)) return new Saved(Held.Gone);
             var text = await GetClipboard();
-            if (!string.IsNullOrEmpty(text)) return (Held.Text, text);
-            // xsel can't list what the clipboard holds.
-            if (types != null) return (types.Count == 0 ? Held.Empty : Held.Other, null);
+            if (!string.IsNullOrEmpty(text)) return new Saved(Held.Text, text);
         }
         catch { }
-        return (Held.Other, null);
+        return new Saved(Held.Gone);
+    }
+
+    /**
+     * For wl-paste and xclip, which hand out one type at a time: a password (Gone), files (as the list of their
+     * addresses) or a picture (PNG if offered), read through [read]. A picture only when it's the point of the
+     * copy: a spreadsheet range or a web page also offers itself as a picture, drawn on request, which is slow
+     * for a big copy; those come back as their text. Null when the clipboard holds none of these.
+     */
+    private static async Task<Saved?> Keep(List<string> types, Func<string, byte[]?> read)
+    {
+        if (types.Any(IsSecret)) return new Saved(Held.Gone);
+        var picture = types.Any(IsText) ? null
+            : types.FirstOrDefault(t => t == "image/png") ?? types.FirstOrDefault(t => t.StartsWith("image/", StringComparison.OrdinalIgnoreCase));
+        var mime = types.Contains("text/uri-list") ? "text/uri-list" : picture;
+        if (mime == null) return null;
+        var bytes = await Task.Run(() => read(mime));
+        return bytes is { Length: > 0 } ? new Saved(mime == picture ? Held.Picture : Held.Files, Mime: mime, Bytes: bytes) : new Saved(Held.Gone);
+    }
+
+    /** Puts back what [Snapshot] kept. False: there was nothing to put back, or it couldn't be. */
+    private static async Task<bool> Restore(Saved before)
+    {
+        try
+        {
+            switch (before.Kind)
+            {
+                case Held.Text:
+                    return await SetClipboard(before.Text!);
+                case Held.Picture or Held.Files when before.Bytes != null:
+                    var mime = before.Mime!;
+                    return await Task.Run(() => Choose() switch
+                    {
+                        Backend.WlCopy => Sh.WriteBytes(Sh.Which("wl-copy")!, new[] { "--type", mime }, before.Bytes),
+                        Backend.Xclip => Sh.WriteBytes(Sh.Which("xclip")!, new[] { "-selection", "clipboard", "-t", mime, "-i" }, before.Bytes),
+                        _ => false,
+                    });
+                case Held.Picture when before.Picture != null:
+                    await OnUi(async () => { await Host()!.SetBitmapAsync(before.Picture); return true; });
+                    return true;
+                case Held.Files when before.Files != null:
+                    await OnUi(async () => { await Host()!.SetFilesAsync(before.Files); return true; });
+                    return true;
+            }
+        }
+        catch (Exception e) { App.Log("Clipboard restore failed: " + e.Message); }
+        return false;
     }
 
     private static List<string> Lines(string s) => s.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
@@ -359,9 +418,16 @@ public static class TextInjector
     private static bool CantPutBack(string type)
     {
         var t = type.ToLowerInvariant();
-        return t.StartsWith("image/") || t == "text/uri-list" || t.StartsWith("x-special/") || t.Contains("passwordmanagerhint")
+        return t.StartsWith("image/") || t == "text/uri-list" || t.StartsWith("x-special/") || IsSecret(t)
             || t == "application/x-kde-cutselection" || t is "files" or "filenames" or "file" or "bitmap" or "pixmap";
     }
+
+    /** Plain text, which every text copy offers. */
+    private static bool IsText(string type) =>
+        type.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase) || type is "UTF8_STRING" or "STRING" or "TEXT";
+
+    /** A password manager's mark on what it copies (KDE's, which KeePassXC and others use too). */
+    private static bool IsSecret(string type) => type.Contains("passwordmanagerhint", StringComparison.OrdinalIgnoreCase);
 
     /** The text on the clipboard, or null if there is none (or it holds something that isn't text). */
     private static async Task<string?> GetClipboard()

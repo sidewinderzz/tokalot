@@ -101,6 +101,62 @@ public static class Sh
         catch { return new Result(-1, ""); }
     }
 
+    /** Runs a program and returns what it printed, as bytes (a picture from wl-paste, say). Null if it failed, timed out or printed more than max. */
+    public static byte[]? ReadBytes(string file, string[] args, int max, int timeoutMs = 2000)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(file) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi);
+            if (p == null) return null;
+            _ = p.StandardError.ReadToEndAsync();
+            using var buffer = new MemoryStream();
+            var copy = System.Threading.Tasks.Task.Run(() =>
+            {
+                var chunk = new byte[81920];
+                int n;
+                while ((n = p.StandardOutput.BaseStream.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    if (buffer.Length + n > max) return false;
+                    buffer.Write(chunk, 0, n);
+                }
+                return true;
+            });
+            if (!copy.Wait(timeoutMs) || !copy.Result || !p.WaitForExit(500))
+            {
+                try { p.Kill(true); } catch { }
+                return null;
+            }
+            return p.ExitCode == 0 ? buffer.ToArray() : null;
+        }
+        catch { return null; }
+    }
+
+    /**
+     * Runs a program with these bytes as its input, without capturing its output (wl-copy and xclip stay behind to
+     * serve the clipboard). True when it took them and exited cleanly.
+     */
+    public static bool WriteBytes(string file, string[] args, byte[] input, int timeoutMs = 2000)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo(file) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi);
+            if (p == null) return false;
+            p.StandardInput.BaseStream.Write(input, 0, input.Length);
+            p.StandardInput.Close();
+            if (!p.WaitForExit(timeoutMs))
+            {
+                try { p.Kill(true); } catch { }
+                return false;
+            }
+            return p.ExitCode == 0;
+        }
+        catch { return false; }
+    }
+
     /** Starts a program and doesn't wait for it. */
     public static Process? Spawn(string file, params string[] args)
     {
