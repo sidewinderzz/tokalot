@@ -64,18 +64,53 @@ public sealed class IndicatorView : FrameworkElement
     /** Keeps animating even when idle (Settings previews). */
     public bool AlwaysAnimate { get; set; }
 
+    /**
+     * A preview in the settings window: it stands still while that window is in the background, minimized or
+     * hidden in the tray. Five of them redrawing every frame kept the CPU busy for a window nobody was looking at.
+     */
+    public bool PauseWhenInactive { get; set; }
+
+    private Window? host;
+
+    private bool Paused => PauseWhenInactive && host != null && (!host.IsActive || !host.IsVisible || host.WindowState == WindowState.Minimized);
+
     private void Refresh()
     {
-        bool animate = mode != Mode.Idle || AlwaysAnimate;
+        bool animate = (mode != Mode.Idle || AlwaysAnimate) && !Paused;
         if (animate && !hooked && IsLoaded) { CompositionTarget.Rendering += Tick; hooked = true; }
         if (!animate && hooked) { CompositionTarget.Rendering -= Tick; hooked = false; }
         InvalidateVisual();
     }
 
+    private void HostChanged(object? s, EventArgs e) => Refresh();
+    private void HostVisibleChanged(object s, DependencyPropertyChangedEventArgs e) => Refresh();
+
     public IndicatorView()
     {
-        Loaded += (_, _) => Refresh();
-        Unloaded += (_, _) => { if (hooked) { CompositionTarget.Rendering -= Tick; hooked = false; } };
+        Loaded += (_, _) =>
+        {
+            if (PauseWhenInactive && host == null && Window.GetWindow(this) is { } w)
+            {
+                host = w;
+                w.Activated += HostChanged;
+                w.Deactivated += HostChanged;
+                w.StateChanged += HostChanged;
+                w.IsVisibleChanged += HostVisibleChanged;
+            }
+            Refresh();
+        };
+        Unloaded += (_, _) =>
+        {
+            if (hooked) { CompositionTarget.Rendering -= Tick; hooked = false; }
+            if (host != null)
+            {
+                host.Activated -= HostChanged;
+                host.Deactivated -= HostChanged;
+                host.StateChanged -= HostChanged;
+                host.IsVisibleChanged -= HostVisibleChanged;
+                host = null;
+            }
+        };
     }
 
     private void Tick(object? s, EventArgs e) => InvalidateVisual();

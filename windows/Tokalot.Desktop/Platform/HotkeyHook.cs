@@ -81,7 +81,8 @@ public sealed class HotkeyHook : IDisposable
                 if (msg.message != WM_REHOOK) continue;
                 // Mid-shortcut (even just Win still down after Ctrl+Win) the swap would lose track of the keys
                 // and let the Start menu open. Skip it; the next refresh is under a minute away.
-                if (active || comboUsed || Held(VK_CONTROL) || Held(VK_LWIN) || Held(VK_RWIN)) continue;
+                // (A leftover comboUsed with Win no longer down is stale, from a Win-up the hook never saw: not a reason to skip.)
+                if (active || Held(VK_CONTROL) || Held(VK_LWIN) || Held(VK_RWIN)) continue;
                 // Take the hook out and put it back. If Windows had dropped it, this is what brings it back.
                 if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
                 ctrl = win = active = comboUsed = false;
@@ -161,6 +162,10 @@ public sealed class HotkeyHook : IDisposable
         // can be missed there. Re-read the key this event isn't about, so a stale "held" never sticks.
         if (!isCtrl) ctrl = Held(VK_CONTROL);
         if (!isWin) win = Held(VK_LWIN) || Held(VK_RWIN);
+        // The same goes for "the combo was used, swallow the next Win-up": once Win isn't down, that Win-up
+        // already happened out of sight. A hook sees a key before Windows records it, so a Win-down for which
+        // neither Win key reads as held is a fresh press (not auto-repeat), and its Win-up must open Start.
+        if (comboUsed && !active && (isWin ? down && !Held(VK_LWIN) && !Held(VK_RWIN) : !win)) comboUsed = false;
 
         if (active && OwnKey != 0 && vk == OwnKey && DateTime.UtcNow < OwnKeyUntil)
         {

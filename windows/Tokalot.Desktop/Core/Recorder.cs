@@ -106,6 +106,16 @@ public sealed class Recorder : IDisposable
         }
     }
 
+    /**
+     * Keeps listening for [tailMs] more, then stops. Letting go of the keys right on the last word would
+     * otherwise clip it: the end of a word is often still in the microphone's buffer at that moment.
+     */
+    public async System.Threading.Tasks.Task<float[]> Stop(int tailMs)
+    {
+        await System.Threading.Tasks.Task.Delay(tailMs);
+        return Stop();
+    }
+
     /** Stops the mic and returns the audio as floats in [-1, 1]. */
     public float[] Stop()
     {
@@ -123,6 +133,7 @@ public sealed class Recorder : IDisposable
             var outp = new float[samples.Count];
             for (int i = 0; i < outp.Length; i++) outp[i] = samples[i] / 32768f;
             samples.Clear();
+            samples.TrimExcess(); // a long dictation grows this to tens of MB; don't hold on to that between dictations
             return outp;
         }
     }

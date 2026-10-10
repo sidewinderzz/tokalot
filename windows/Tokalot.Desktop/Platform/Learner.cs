@@ -23,7 +23,7 @@ public sealed class Learner
     private string? stable;  // the same word found three looks running (unchanged for 3 s, so not caught mid-typing)
     private int same;        // looks in a row that found `seen`
     private int misses;      // looks in a row that didn't find the dictation
-    private bool busy;
+    private Task reading = Task.CompletedTask; // the last read of the text box, which can outlast the wait for it
 
     /** A word was added to the dictionary. */
     public event Action<string>? Learned;
@@ -46,17 +46,18 @@ public sealed class Learner
     private async void Look()
     {
         var watching = text;
-        if (busy || watching == null) return;
-        busy = true;
+        // A read that's still waiting on a slow app: don't start another beside it. Each one holds a thread
+        // until the app answers, and an app that never does would otherwise collect one every 1.5 s.
+        if (!reading.IsCompleted || watching == null) return;
         string? field;
         try
         {
             // Some apps answer slowly or not at all: never wait on them for long.
             var read = Task.Run(ReadFocused);
+            reading = read;
             field = await Task.WhenAny(read, Task.Delay(1200)) == read ? read.Result : null;
         }
         catch { field = null; }
-        finally { busy = false; }
         if (text != watching) return; // stopped, or a newer dictation, while reading
 
         var now = field == null ? null : Learn.Look(watching, field, Settings.Current.Words, !Settings.Current.AutoLanguage);
