@@ -187,7 +187,13 @@ public static class TextInjector
 
     private readonly record struct Held(string? Text, bool Empty);
 
-    /** What the clipboard holds before a paste: text (which can be put back), nothing, or something else. */
+    /**
+     * What the clipboard holds before a paste: text (which can be put back), nothing, or something else.
+     * Only the plain text could be put back, so a copied file (which would come back as just its name),
+     * a picture, or a password from a password manager (which would come back without its "concealed"
+     * mark, so clipboard-history apps would keep it and the manager's auto-clear would stop working) count
+     * as something else: the dictation is left on the clipboard instead. Formatted text comes back plain.
+     */
     private static Held Snapshot()
     {
         if (!OperatingSystem.IsMacOS()) return new Held(null, false);
@@ -195,6 +201,11 @@ public static class TextInjector
         {
             using var pool = Native.AutoreleasePool();
             var board = Board;
+            var types = Native.Send(board, "types");
+            if (types != IntPtr.Zero)
+                for (nint i = 0, n = Native.CFArrayGetCount(types); i < n; i++)
+                    if (Native.Text(Native.CFArrayGetValueAtIndex(types, i)) is { } type && CantPutBack(type))
+                        return new Held(null, false);
             var text = Native.Text(Native.Send(board, "stringForType:", Native.NSString(TextType)));
             if (!string.IsNullOrEmpty(text)) return new Held(text, false);
             var items = Native.Send(board, "pasteboardItems");
@@ -202,6 +213,12 @@ public static class TextInjector
         }
         catch { return new Held(null, false); }
     }
+
+    /** Pasteboard types a plain-text copy would lose: files, pictures, and the marks password managers put on what they copy. */
+    private static bool CantPutBack(string type) =>
+        type is "public.file-url" or "NSFilenamesPboardType" or "org.nspasteboard.ConcealedType"
+            or "public.tiff" or "public.png" or "public.jpeg" or "public.heic" or "com.adobe.pdf" or "NSTIFFPboardType"
+        || type.StartsWith("com.agilebits.", StringComparison.Ordinal); // 1Password's own marks
 
     /** The text on the clipboard, or null (used by --selftest). */
     internal static string? Read()

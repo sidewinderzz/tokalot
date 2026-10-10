@@ -39,6 +39,9 @@ public sealed class HotkeyHook : IDisposable
     private readonly Thread scanner;
     private volatile bool disposed;
     private bool ctrl, win, active, suppressed;
+    private int press;           // counts combo presses, so a lock-screen check that comes back late knows which one it was for
+    private bool deciding;       // the lock-screen check for this press is still out
+    private bool releasedEarly;  // the combo was let go before that check came back
     private static volatile bool modifiersDown, comboHeld;
 
     /** When true, Esc and other keys are reported even after the combo is released (hands-free). */
@@ -66,8 +69,11 @@ public sealed class HotkeyHook : IDisposable
             {
                 Thread.Sleep(3000);
                 if (disposed) break;
-                Scan();
-                Poll();
+                // /dev/input only changes when a keyboard comes or goes; until then there's nothing to look for.
+                var stamp = InputStamp();
+                if (stamp != scannedStamp) Scan();
+                // A missed key-up only matters while a key is believed held.
+                if (modifiersDown) Poll();
             }
         }) { IsBackground = true, Name = "Tokalot hotkey scan" };
         scanner.Start();
@@ -76,10 +82,18 @@ public sealed class HotkeyHook : IDisposable
     /** At least one keyboard is being read. */
     public bool Installed { get { lock (gate) return devices.Count > 0; } }
 
+    private DateTime scannedStamp;
+
+    private static DateTime InputStamp()
+    {
+        try { return Directory.GetLastWriteTimeUtc("/dev/input"); } catch { return DateTime.MinValue; }
+    }
+
     private void Scan()
     {
         try
         {
+            scannedStamp = InputStamp();
             if (!Directory.Exists("/dev/input")) return;
             bool denied = false;
             foreach (var path in Directory.GetFiles("/dev/input", "event*"))
@@ -231,13 +245,31 @@ public sealed class HotkeyHook : IDisposable
         {
             active = true;
             // The devices keep delivering keys on the lock screen and while another user is switched in:
-            // the shortcut does nothing there. (This runs on a keyboard thread, never the window's.)
-            suppressed = !Session.Usable;
-            if (!suppressed) Pressed?.Invoke();
+            // the shortcut does nothing there. Asking can mean running loginctl, so it is asked on another
+            // thread: waiting here, with the lock held, would hold up every keyboard's events meanwhile.
+            deciding = true;
+            releasedEarly = false;
+            var mine = ++press;
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                var usable = Session.Usable;
+                lock (gate)
+                {
+                    if (mine != press || disposed) return;
+                    deciding = false;
+                    // Still held: the release decides what to report. Already let go: this press is over either way.
+                    suppressed = !usable && !releasedEarly;
+                    if (!usable) return;
+                    Pressed?.Invoke();
+                    // A quick tap can be over before the answer came.
+                    if (releasedEarly) Released?.Invoke();
+                }
+            });
         }
         else if (active && (!ctrl || !win))
         {
             active = false;
+            if (deciding) { releasedEarly = true; return; }
             if (!suppressed) Released?.Invoke();
             suppressed = false;
         }
