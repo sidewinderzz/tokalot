@@ -163,30 +163,46 @@ public sealed class Settings
         {
             lock (Gate)
             {
-                if (current != null) return current;
+                // Still on stand-in defaults because the file was locked: look again now and then, and switch to
+                // the real settings as soon as they can be read.
+                if (current != null && (!current.unread || DateTime.UtcNow < retryAt)) return current;
                 var f = Paths.File("settings.json");
-                try
+                for (int attempt = 0; ; attempt++)
                 {
-                    current = System.IO.File.Exists(f)
-                        ? JsonSerializer.Deserialize<Settings>(Files.ReadText(f), Json) ?? new Settings()
-                        : new Settings();
-                }
-                catch (IOException)
-                {
-                    // The file is there but locked: run on defaults for now and never save over it (it holds the API keys).
-                    current = new Settings { unread = true };
-                }
-                catch
-                {
-                    // Keep the broken file for recovery rather than silently losing it.
-                    try { System.IO.File.Copy(f, Paths.File("settings.corrupt.json"), true); } catch { }
-                    current = new Settings();
+                    try
+                    {
+                        current = System.IO.File.Exists(f)
+                            ? JsonSerializer.Deserialize<Settings>(Files.ReadText(f), Json) ?? new Settings()
+                            : new Settings();
+                        break;
+                    }
+                    catch (IOException) when (attempt < 2 && current == null)
+                    {
+                        // Antivirus or a backup tool often holds a file for a moment right after sign-in.
+                        System.Threading.Thread.Sleep(150);
+                    }
+                    catch (IOException)
+                    {
+                        // The file is there but locked: run on defaults for now and never save over it (it holds the
+                        // API keys). Tried again on a later access, rather than staying this way until restart.
+                        current ??= new Settings { unread = true };
+                        retryAt = DateTime.UtcNow.AddSeconds(2);
+                        break;
+                    }
+                    catch
+                    {
+                        // Keep the broken file for recovery rather than silently losing it.
+                        try { System.IO.File.Copy(f, Paths.File("settings.corrupt.json"), true); } catch { }
+                        current = new Settings();
+                        break;
+                    }
                 }
                 return current;
             }
         }
     }
 
+    private static DateTime retryAt;
     private bool unread;
 
     public void Save()
