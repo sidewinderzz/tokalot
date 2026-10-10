@@ -267,4 +267,55 @@ class SyncTest {
         assertEquals(listOf(b, a), r.notes)
         assertEquals(state.copy(instructions = ""), SyncFormat.parseBase(SyncFormat.encodeBase(state), "default"))
     }
+
+    // ---------- usage ----------
+
+    private val oct = mapOf("2026-10" to UsageMonth(words = 500, dictations = 20))
+    private val phone = DeviceUsage("Android · Pixel 8", 1, oct)
+    private val pc = DeviceUsage("Windows · FARM-PC", 2, mapOf("2026-09" to UsageMonth(1200, 40), "2026-10" to UsageMonth(300, 9)))
+
+    @Test fun eachDeviceOnlyReplacesItsOwnUsage() {
+        val first = SyncMerge.usage(mapOf("pc" to pc), "phone", phone)
+        assertEquals(mapOf("pc" to pc, "phone" to phone), first)
+        // The phone dictates more: its entry changes, the PC's is carried over untouched.
+        val more = phone.copy(updated = 9, months = mapOf("2026-10" to UsageMonth(800, 31)))
+        val second = SyncMerge.usage(first, "phone", more)
+        assertEquals(pc, second["pc"])
+        assertEquals(more, second["phone"])
+        assertEquals(1200L + 300 + 800, second.values.sumOf { it.words })
+    }
+
+    @Test fun syncingAgainWithTheSameCountsChangesNothing() {
+        val file = mapOf("pc" to pc, "phone" to phone)
+        // Same counts at a later time: the entry is kept as it was, so the file isn't rewritten for it.
+        assertEquals(file, SyncMerge.usage(file, "phone", phone.copy(updated = 99)))
+        // A device with nothing counted adds no entry.
+        assertEquals(mapOf("pc" to pc), SyncMerge.usage(mapOf("pc" to pc), "new", DeviceUsage("Linux", 5, emptyMap())))
+    }
+
+    @Test fun usageSurvivesTheFile() {
+        val usage = mapOf("pc" to pc, "phone" to phone)
+        val r = SyncFormat.parse(SyncFormat.encode(SyncState(), null, 1, "Android", usage))!!
+        assertEquals(usage, r.usage)
+        assertEquals(usage, SyncFormat.parseUsage(SyncFormat.encodeUsage(usage)))
+        // The base never holds usage, and a file without any leaves "usage" out.
+        assertFalse(SyncFormat.encodeBase(SyncState()).contains("usage"))
+        assertNull(SyncFormat.parse(SyncFormat.encode(SyncState(), null, 1, "Android"))!!.usage)
+    }
+
+    @Test fun badUsageIsSkippedNotAnError() {
+        val r = SyncFormat.parse(
+            """{"app":"tokalot-sync","format":1,"usage":{"a":{"name":"Mac","months":{"2026-10":{"words":12,"dictations":-3},""" +
+                """"oops":{"words":5},"2026-11":"x"}},"b":"not a device"}}"""
+        )!!
+        assertEquals(mapOf("a" to DeviceUsage("Mac", 0, mapOf("2026-10" to UsageMonth(12, 0)))), r.usage)
+        assertEquals(emptyMap<String, DeviceUsage>(), SyncFormat.parseUsage("not json"))
+        assertEquals(emptyMap<String, DeviceUsage>(), SyncFormat.parseUsage(null))
+    }
+
+    /** Usage changes nothing about the empty-file guard: a device that shared settings still refuses an empty file. */
+    @Test fun usageDoesNotWeakenTheEmptyFileGuard() {
+        assertTrue(SyncMerge.remoteLost(null, SyncState(words = listOf("Kowalski"))))
+        assertFalse(SyncMerge.remoteLost(null, SyncState()))
+    }
 }

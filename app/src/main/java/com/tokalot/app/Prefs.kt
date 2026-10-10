@@ -364,6 +364,11 @@ class Prefs(ctx: Context) {
         get() = syncSp.safeString("base", null)
         set(v) = syncSp.edit().putString("base", v).apply()
 
+    /** Every device's usage as the sync file had it after the last sync (see [Usage.everywhere]). */
+    var syncUsage: String?
+        get() = syncSp.safeString("usage", null)
+        set(v) = syncSp.edit().putString("usage", v).apply()
+
     /** When the last successful sync finished, in ms; 0 = never. */
     var syncLast: Long
         get() = try { syncSp.getLong("last", 0) } catch (_: ClassCastException) { 0 }

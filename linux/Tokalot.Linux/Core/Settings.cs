@@ -109,6 +109,8 @@ public sealed class Settings
     public bool SyncKeys { get; set; }
     /** Services this device has held a key for. One of these with no key now was cleared by the user, so sync doesn't refill it. */
     public List<string> KnownKeys { get; set; } = new();
+    /** This device's id for its own word counts in the sync file (made on its first sync). Not this device's name. */
+    public string UsageDevice { get; set; } = "";
     /**
      * Same name as on Windows (the shared Backup code copies it), but on Linux the value is only a
      * note of where that service's key is kept: "keyring" or "file". The key itself is in KeyStore.

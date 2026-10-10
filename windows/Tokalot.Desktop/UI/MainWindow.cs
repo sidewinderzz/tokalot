@@ -510,6 +510,9 @@ public sealed class MainWindow : Window
         var statCard = Ui.Stack(Ui.Text(DateTime.Now.ToString("MMMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant(), 12, C.Sub, bold: true), stats);
         if (m.Fillers + m.Corrections > 0)
             statCard.Children.Add(Spaced(Ui.Text($"Cleaned up {Plural(m.Fillers, "filler word")} and {Plural(m.Corrections, "self-correction")}", 13, C.Sub), 0, 10, 0, 0));
+        // Every device that syncs, once there's more than this one in the sync file.
+        if (Sync.AllDevices() is { Each.Count: > 1 } everywhere)
+            statCard.Children.Add(Spaced(Ui.Text($"On all {everywhere.Each.Count} devices: {Ui.Compact(everywhere.Month)} words this month · {Ui.Compact(everywhere.Total)} all time", 13, C.Sub), 0, 10, 0, 0));
         var sc = Ui.Card(statCard, 22);
         sc.Cursor = Cursors.Hand;
         sc.MouseLeftButtonUp += (_, _) => OpenSettingsAt(DataCategory);
@@ -1313,6 +1316,18 @@ public sealed class MainWindow : Window
             return (UIElement)box;
         }).ToArray()));
         col.Children.Add(Spaced(Ui.Text("Estimated at each provider's paid list price. Free-tier usage actually costs $0. Check your provider's dashboard for real billing.", 13, C.Sub), 4, 8, 0, 0));
+
+        // Words on every device that shares the sync file, from each device's own entry in it.
+        if (Sync.AllDevices() is { } all)
+        {
+            var box = new StackPanel { Margin = new Thickness(20, 15, 20, 15) };
+            box.Children.Add(Spread(Ui.Text("All your devices", 15.5, bold: true), Ui.Text($"{Ui.Compact(all.Total)} words", 15.5, bold: true)));
+            box.Children.Add(Ui.Text($"{Ui.Compact(all.Month)} words this month", 13.5, C.Sub));
+            foreach (var d in all.Each)
+                box.Children.Add(Ui.Text($"{(d.Name.Length > 0 ? d.Name : "Unnamed device")}: {Ui.Compact(d.Words)} words · {d.Dictations} dictations", 13.5, C.Sub));
+            col.Children.Add(Spaced(Ui.List((UIElement)box), 0, 12, 0, 0));
+            col.Children.Add(Spaced(Ui.Text("Each device adds its own counts to the sync file when it syncs.", 13, C.Sub), 4, 8, 0, 0));
+        }
 
         // --- About
         Section(col, "About");

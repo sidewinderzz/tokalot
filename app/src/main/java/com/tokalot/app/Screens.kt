@@ -774,6 +774,21 @@ class SettingsScreen(private val a: MainActivity) {
         col.addView(u)
         col.addView(text("Estimated at each provider's paid list price. Free-tier usage actually costs $0. Check your provider's dashboard for real billing.", 13f, C.SUB), lp().margins(this, t = 8))
 
+        // Words on every device that shares the sync file, from each device's own entry in it.
+        Usage.everywhere(this)?.let { e ->
+            val all = card(18)
+            all.addView(row(
+                text("All your devices", 17f, bold = true).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                text("${MainActivity.compact(e.total.toInt())} words", 17f, bold = true)
+            ))
+            all.addView(text("${MainActivity.compact(e.month.toInt())} words this month", 14f, C.SUB))
+            for (d in e.each) {
+                all.addView(text("${d.name.ifBlank { "Unnamed device" }}: ${MainActivity.compact(d.words.toInt())} words · ${d.dictations} dictations", 14f, C.SUB))
+            }
+            col.addView(all, lp().margins(this, t = 12))
+            col.addView(text("Each device adds its own counts to the sync file when it syncs.", 13f, C.SUB), lp().margins(this, t = 8))
+        }
+
         // --- About
         section(col, "About")
         val about = card(18)
