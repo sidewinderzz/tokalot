@@ -99,6 +99,16 @@ object TextTools {
         return t
     }
 
+    /** Words that carry text: list numbers, bullets and bare punctuation don't count. */
+    private fun spoken(s: String) = s.split(SPACES).count { w -> w.any { it.isLetter() } }
+
+    /**
+     * True when a cleanup result has clearly more words than went in. Cleanup removes fillers and reformats;
+     * it never adds sentences. When it does, the model has answered the dictation instead of cleaning it
+     * (a request to an AI, say, got a reply written under it), and the result must not be typed.
+     */
+    fun addedText(input: String, output: String) = spoken(output) > spoken(input) * 1.25 + 5
+
     // Things only the AI cleanup can deal with: fillers, self-corrections, spoken punctuation and formatting.
     private val NEEDS_AI = Regex("""(?i)\b(?:um+|uh+|er+m?|hmm+|you know|i mean|actually|scratch that|no wait|wait no|sorry|or rather|correction|let me rephrase|new line|new paragraph|next line|bullet|number (?:one|two|three|four|five|\d+)|first(?:ly)?|second(?:ly)?|third(?:ly)?|comma|period|full stop|question mark|exclamation (?:point|mark)|colon|semicolon|quote|unquote|open paren\w*|close paren\w*|dash|hyphen|slash|at sign|dot com|hashtag|emoji|all caps|capital|lol|spelled|spelt)\b|(?<![\p{L}\d])\p{L}(?:[\s.,-]+\p{L}(?![\p{L}\d])){2,}(?![\p{L}\d])""")
     private val STUTTER = Regex("""(?i)\b(\w+)[ ,]+\1\b""")

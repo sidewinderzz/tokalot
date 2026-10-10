@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.5.3
+
+- Cleanup can no longer type a reply of its own. When a dictation was itself a request to an AI ("give me three designs"), the cleanup model could answer it and its answer was pasted along with your words. The instructions are firmer, and a result with clearly more words than you said is now thrown away in favour of the backup or basic cleanup.
+
 ## New in 0.5.1
 
 - Long dictations in noisy places: Tokalot sends a long dictation for transcription in pieces while you talk, cutting at pauses. Where it is never quiet it never saw a pause, so the whole recording went up at the end. It now also cuts at a dip between words after 15 seconds, and at the quietest moment after 25. Settings › Recording › "Transcribe while I talk" turns pieces off.

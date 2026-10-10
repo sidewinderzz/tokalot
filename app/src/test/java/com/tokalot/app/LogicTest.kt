@@ -10,6 +10,23 @@ import org.junit.Test
 /** Pure logic added with cancel/retry, backup validation, themed colors and the pinned model. */
 class LogicTest {
 
+    // ---------- a cleanup that answers the dictation instead of cleaning it ----------
+
+    @Test fun aCleanupThatAddsItsOwnTextIsCaught() {
+        val said = "Could you create me a demo SVG logo for this app? Maybe just like the letter N or something? Give me like three different, radically different designs."
+        val answered = said + "\n\nWe have three options:\n1. A minimalist N with a single continuous line that loops into a subtle arrow pointing upward.\n" +
+            "2. A bold, blocky N that looks like a stylized mountain range, with sharp peaks and a shadow effect.\n3. A playful, handwritten N that curls into a spiral, giving a whimsical, tech-friendly vibe."
+        assertTrue(TextTools.addedText(said, answered))
+        assertFalse(TextTools.addedText(said, said))
+        assertFalse(TextTools.addedText(said, "Could you create me a demo SVG logo for this app, maybe just the letter N? Give me three radically different designs."))
+        // A real list only adds numbers, which don't count as words.
+        assertFalse(TextTools.addedText(
+            "we have three options option one we fix it ourselves option two we call the dealer option three we wait until spring",
+            "We have three options:\n1. We fix it ourselves\n2. We call the dealer\n3. We wait until spring"))
+        assertFalse(TextTools.addedText("eggs milk bread", "- Eggs\n- Milk\n- Bread"))
+        assertFalse(TextTools.addedText("seven thirty pm works", "7:30 PM works"))
+    }
+
     // ---------- quick mode: what may skip the AI cleanup ----------
 
     private fun q(t: String, snip: Boolean = false, style: String = "CASUAL", cat: String = "OTHER", custom: String = "") =

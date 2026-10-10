@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.29 · 2026-10-09
+- Cleanup can no longer type a reply of its own. When a dictation was itself a request to an AI ("give me three designs"), the cleanup could answer it, and its answer was typed along with your words. The instructions are firmer, and a result with clearly more words than you said is thrown away in favour of the backup or basic cleanup.
+
 ## 1.28 · 2026-10-09
 - Settings › About can install a new version right there: "Check for updates" now brings up an Update button, even if you closed the banner on Home.
 - Voice notes are part of sync: with a sync file set up, notes made on one device show up on the others, and deleting one deletes it everywhere. Update Tokalot on every device to share them.

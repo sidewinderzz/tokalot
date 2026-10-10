@@ -217,6 +217,12 @@ internal static class Shots
         Check("already known is skipped", L("I talked to Caitlyn about the get hub repo on Tuesday.", new[] { "caitlyn" }) == null);
         Check("edit distance", Learn.Distance("same", "same") == 0 && Learn.Distance("kaitlin", "caitlyn") == 2 && Learn.Distance("kitten", "sitting") == 3);
 
+        // A cleanup that answers the dictation instead of cleaning it.
+        const string said = "Could you create me a demo SVG logo for this app? Maybe just like the letter N or something? Give me like three different, radically different designs.";
+        Check("an added reply is caught", TextTools.AddedText(said, said + "\n\nWe have three options:\n1. A minimalist N with a single continuous line that loops into a subtle arrow pointing upward.\n2. A bold, blocky N that looks like a stylized mountain range.\n3. A playful, handwritten N that curls into a spiral."));
+        Check("ordinary cleanup and real lists are not", !TextTools.AddedText(said, said) && !TextTools.AddedText("eggs milk bread", "- Eggs\n- Milk\n- Bread")
+            && !TextTools.AddedText("we have three options option one we fix it ourselves option two we call the dealer option three we wait until spring", "We have three options:\n1. We fix it ourselves\n2. We call the dealer\n3. We wait until spring"));
+
         // Quick mode: what may skip the AI cleanup.
         bool Q(string t, bool snip = false, string style = "CASUAL", string cat = "OTHER", string custom = "") => TextTools.NothingToFix(t, snip, style, cat, custom);
         Check("quick: a short clean sentence skips", Q("Can you send me the report by Friday?") && Q("Sounds good, see you then.", cat: "MESSAGING") && Q("Fix the login bug first thing tomorrow.", cat: "AI_CODE", custom: Catalog.DefaultInstructions) == false);

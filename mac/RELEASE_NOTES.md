@@ -2,6 +2,10 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.3.3
+
+- Cleanup can no longer type a reply of its own. When a dictation was itself a request to an AI ("give me three designs"), the cleanup model could answer it and its answer was pasted along with your words. The instructions are firmer, and a result with clearly more words than you said is now thrown away in favour of the backup or basic cleanup.
+
 ## New in 0.3.1
 
 - Long dictations in noisy places: Tokalot sends a long dictation for transcription in pieces while you talk, cutting at pauses. Where it is never quiet it never saw a pause, so the whole recording went up at the end. It now also cuts at a dip between words after 15 seconds, and at the quietest moment after 25. Settings › Recording › "Transcribe while I talk" turns pieces off.
