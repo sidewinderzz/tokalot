@@ -130,10 +130,6 @@ object Net {
     }
 
     /**
-     * Makes a tiny authenticated request so the TLS connection is already open (and pooled)
-     * by the time the real upload happens. Saves a few hundred ms per dictation.
-     */
-    /**
      * How long one small request to the service takes right now, in milliseconds (-1 if it failed).
      * Asked on a connection that is already open, so it measures the link as it is at this moment:
      * a few dozen milliseconds on good Wi-Fi, a second or more in a bad service zone. HEAD, so no body comes back.
@@ -152,15 +148,29 @@ object Net {
         -1
     }
 
+    /** When each host was last warmed (milliseconds, monotonic), so a burst of taps doesn't open it again each time. */
+    private val warmedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private const val WARM_FRESH_MS = 30_000L
+
+    /**
+     * Opens a connection to [url]'s host ahead of the real request (DNS, TCP and TLS out of the way). HEAD, so
+     * nothing but headers comes back: a GET of /models was tens of KB of model list on every tap.
+     * Saves a few hundred ms per dictation.
+     */
     fun warm(url: String, headers: Map<String, String>) {
+        val host = runCatching { URL(url).host }.getOrNull() ?: return
+        val now = System.nanoTime() / 1_000_000
+        if (now - (warmedAt[host] ?: Long.MIN_VALUE / 2) < WARM_FRESH_MS) return
         try {
             val conn = URL(url).openConnection() as HttpURLConnection
+            conn.requestMethod = "HEAD"
             conn.connectTimeout = 4000
             conn.readTimeout = 4000
             headers.forEach { (k, v) -> conn.setRequestProperty(k, v) }
             val code = conn.responseCode
-            // Reading the body to the end lets the socket go back into the keep-alive pool.
-            (if (code in 200..299) conn.inputStream else conn.errorStream)?.use { it.readBytes() }
+            // Closing the (empty) stream lets the socket go back into the keep-alive pool.
+            runCatching { (if (code in 200..299) conn.inputStream else conn.errorStream)?.close() }
+            warmedAt[host] = now
         } catch (_: Exception) {}
     }
 

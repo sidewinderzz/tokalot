@@ -44,18 +44,36 @@ object Notes {
         if (f.exists()) parse(f.readText()) else emptyList()
     }.getOrDefault(emptyList())
 
+    /**
+     * The notes, for a change that is about to be saved. A file that is there but isn't valid notes is first moved
+     * aside (notes.corrupt-<time>.json, kept for recovery) so saving can never write over the notes in it.
+     */
+    private fun forChange(ctx: Context): List<Note> {
+        val f = file(ctx)
+        if (!f.exists()) return emptyList()
+        val json = f.readText() // a read error throws: nothing is changed or saved
+        return try {
+            parse(json)
+        } catch (e: Exception) {
+            val aside = File(f.parentFile, "notes.corrupt-${System.currentTimeMillis()}.json")
+            // Not even moved aside: refuse the change rather than overwrite the notes.
+            if (!f.renameTo(aside)) throw java.io.IOException("Couldn't read the notes file", e)
+            emptyList()
+        }
+    }
+
     /** Saves a new note and returns its id. */
     @Synchronized
     fun add(ctx: Context, text: String): Long {
         val now = System.currentTimeMillis()
-        save(ctx, listOf(Note(now, now, text)) + all(ctx))
+        save(ctx, listOf(Note(now, now, text)) + forChange(ctx))
         Sync.changed(ctx)
         return now
     }
 
     @Synchronized
     fun delete(ctx: Context, id: Long) {
-        save(ctx, all(ctx).filter { it.id != id })
+        save(ctx, forChange(ctx).filter { it.id != id })
         Sync.changed(ctx)
     }
 

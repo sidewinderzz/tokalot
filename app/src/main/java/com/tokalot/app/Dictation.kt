@@ -22,6 +22,8 @@ class Dictation(context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private var whisperCtx = 0L
     @Volatile private var localRunning = false
+    /** This instance's own cancel flag for on-device Whisper (a retry in the app and the button can run at once). */
+    private val abortFlag by lazy { WhisperBridge.newAbort() }
     private val unload = Runnable { exec.execute { releaseLocal() } }
     private var current: Job? = null // main thread only
 
@@ -72,7 +74,7 @@ class Dictation(context: Context) {
             halted = reason
             call.cancel()
             live?.cancel()
-            if (localRunning) WhisperBridge.setAbort(true)
+            if (localRunning) WhisperBridge.setAbort(abortFlag, true)
             deliver(null, reason)
         }
 
@@ -444,9 +446,13 @@ class Dictation(context: Context) {
         if (whisperCtx == 0L) {
             whisperCtx = WhisperBridge.init(ModelManager.modelFile(app).absolutePath)
             if (whisperCtx == 0L) {
-                // A file Whisper can't open is useless; remove it so Settings offers the download again.
-                ModelManager.modelFile(app).delete()
-                throw IllegalStateException("The on-device model couldn't be loaded. Download it again in Settings.")
+                // The file was checked when it was downloaded, so a failed load is usually the phone being short of
+                // memory. Only a file that no longer matches is removed (so Settings offers the download again).
+                if (!ModelManager.verify(app)) {
+                    ModelManager.modelFile(app).delete()
+                    throw IllegalStateException("The on-device model was damaged. Download it again in Settings.")
+                }
+                throw IllegalStateException("Not enough memory for the on-device model. Close some apps and try again.")
             }
         }
         val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
@@ -454,11 +460,16 @@ class Dictation(context: Context) {
         // cancel that lands anywhere around these lines is caught by one of the two checks.
         localRunning = true
         try {
-            WhisperBridge.setAbort(false)
+            WhisperBridge.setAbort(abortFlag, false)
             job.call.check()
-            val text = WhisperBridge.transcribe(whisperCtx, samples, threads, hint)
+            val bytes = try {
+                WhisperBridge.transcribe(whisperCtx, abortFlag, samples, threads, hint)
+            } catch (e: IllegalStateException) {
+                job.call.check() // aborted by a cancel or the deadline: that's what gets reported
+                throw e // a real failure: the recording is kept as a failed entry that can be retried
+            }
             job.call.check()
-            return text
+            return String(bytes, Charsets.UTF_8)
         } finally {
             localRunning = false
         }

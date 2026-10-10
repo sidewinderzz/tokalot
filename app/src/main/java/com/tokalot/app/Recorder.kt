@@ -133,7 +133,13 @@ class Recorder {
     }
 
     /** Stops the mic immediately and returns the audio as floats in [-1, 1]. */
-    fun stop(): FloatArray {
+    fun stop(): FloatArray = stopMic().audio().samples
+
+    /**
+     * Stops the mic immediately and hands over what was recorded, still as 16-bit chunks. Turning a long
+     * recording into floats (up to ~19 MB) is left to [Taken.audio], which can run on any thread.
+     */
+    fun stopMic(): Taken {
         running = false
         level = 0f
         thread?.join(500)
@@ -144,12 +150,32 @@ class Recorder {
         }
         record = null
         return synchronized(chunks) {
-            val out = FloatArray(total)
-            var i = 0
-            for (c in chunks) for (s in c) out[i++] = s / 32768f
+            val taken = Taken(ArrayList(chunks), total)
             chunks.clear()
             total = 0
-            out
+            taken
+        }
+    }
+
+    /** The audio as floats in [-1, 1], and its loudest sample. */
+    class Audio(val samples: FloatArray, val peak: Float)
+
+    /** A finished recording. */
+    class Taken(private val chunks: List<ShortArray>, val size: Int) {
+        /** The first [keep] samples as floats, with their peak, in one pass. */
+        fun audio(keep: Int = size): Audio {
+            val n = keep.coerceIn(0, size)
+            val out = FloatArray(n)
+            var peak = 0f
+            var i = 0
+            outer@ for (c in chunks) for (s in c) {
+                if (i >= n) break@outer
+                val v = s / 32768f
+                out[i++] = v
+                val a = if (v < 0f) -v else v
+                if (a > peak) peak = a
+            }
+            return Audio(out, peak)
         }
     }
 }
