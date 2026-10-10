@@ -22,28 +22,38 @@ public static class Notes
 
     private static string FilePath => Paths.File("notes.json");
 
-    /** The file exists but couldn't be read (not corrupt, just unavailable): never save over it. */
+    /**
+     * The file exists but couldn't be read (not corrupt, just unavailable): never save over it. It is
+     * read again on later use, and notes made meanwhile are kept and joined to it once it reads.
+     */
     private static bool unread;
+    private static long triedAt;
 
     private static List<Note> Load()
     {
-        if (cache != null) return cache;
+        if (cache != null && !(unread && Files.RetryDue(ref triedAt))) return cache;
+        List<Note> read;
         try
         {
-            cache = File.Exists(FilePath)
-                ? JsonSerializer.Deserialize<List<Note>>(Files.ReadText(FilePath), Settings.Json) ?? new()
+            read = File.Exists(FilePath)
+                ? JsonSerializer.Deserialize<List<Note>>(Files.ReadText(FilePath, unread ? 1 : 6), Settings.Json) ?? new()
                 : new();
         }
         catch (JsonException)
         {
             try { File.Copy(FilePath, Paths.File("notes.corrupt.json"), true); } catch { }
-            cache = new();
+            read = new();
         }
         catch
         {
-            unread = true;
-            cache = new();
+            if (cache == null) { unread = true; triedAt = Environment.TickCount64; cache = new(); }
+            return cache;
         }
+        var made = unread && cache != null ? cache.Where(n => read.All(x => x.Id != n.Id)).ToList() : new();
+        read.InsertRange(0, made);
+        cache = read;
+        unread = false;
+        if (made.Count > 0) try { Save(); } catch { }
         return cache;
     }
 
@@ -105,6 +115,6 @@ public static class Notes
     /** Drops the in-memory copy so the next read comes from disk (after a restore). */
     public static void Reload()
     {
-        lock (Gate) cache = null;
+        lock (Gate) { cache = null; unread = false; }
     }
 }

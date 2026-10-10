@@ -19,12 +19,14 @@ namespace Tokalot.Desktop;
  */
 public sealed class Controller : IDisposable
 {
-    private enum State { Idle, Recording, Processing }
+    // Starting: the microphone is being opened in the background (which can take seconds on Linux).
+    private enum State { Idle, Starting, Recording, Processing }
 
     private const int TapMs = 350;          // shorter press = hands-free
     private const int ShortcutWindowMs = 600; // another key this soon = a desktop shortcut, not dictation
     private const int AutoStopSeconds = 30;
     private const int RevertSeconds = 8;
+    private const int MicRetrySeconds = 5;  // after no microphone would start, presses this soon say so at once
     private string? plainText;             // the user's own wording for the last (polished) dictation
     private long? plainEntry;
     private ActiveApp? plainApp;
@@ -41,6 +43,9 @@ public sealed class Controller : IDisposable
     private bool handsFree;
     private bool ignoreNextRelease;
     private DateTime pressedAt;
+    private DateTime? releasedAt;          // the shortcut was let go while the microphone was still starting
+    private DateTime micFailedAt = DateTime.MinValue;
+    private bool micOpening;
     private ActiveApp? app;
     private Task<ActiveApp?>? appLookup;   // which app has focus, found in the background while recording
     private CancellationTokenSource? work; // the transcription in progress, so Esc can stop it
@@ -99,11 +104,18 @@ public sealed class Controller : IDisposable
         if (state == State.Recording) { Finish(); return; }
         if (state == State.Processing) { CancelWork(); return; }
         if (state != State.Idle) return;
-        if (Begin(handsFreeMode: true)) Hint($"Listening · click again or press {Host.Shortcut} to finish", 3500);
+        Begin(handsFreeMode: true);
     }
 
-    private bool Begin(bool handsFreeMode)
+    /**
+     * Opens the microphone off the window's thread (trying each recorder program can take seconds when
+     * none answers) and starts listening. A release, Esc or desktop shortcut that comes meanwhile is
+     * handled once the microphone is open.
+     */
+    private async void Begin(bool handsFreeMode)
     {
+        if (micOpening) return; // a start that was cancelled is still finishing
+
         // Finding the focused app can mean starting a helper program; it runs beside the recording and is
         // only needed once the recording is over.
         app = null;
@@ -112,28 +124,56 @@ public sealed class Controller : IDisposable
         // measured from when the mic was ready and so be taken for a tap.
         pressedAt = DateTime.UtcNow;
         recorder.CueSamples = Settings.Current.Sounds ? Recorder.SampleRate * 6 / 10 : 0;
-        if (!recorder.Start())
+        state = State.Starting;
+        handsFree = handsFreeMode;
+        releasedAt = null;
+        hook.Listening = true; // so Esc is reported while the microphone starts
+        // No microphone would start a moment ago: say so straight away instead of trying them all again.
+        bool started = false;
+        micOpening = true;
+        try
         {
+            started = (DateTime.UtcNow - micFailedAt).TotalSeconds >= MicRetrySeconds && await Task.Run(recorder.Start);
+            if (state != State.Starting)
+            {
+                // Cancelled (Esc, a desktop shortcut) while the microphone was starting.
+                if (started) await Task.Run(recorder.Stop);
+                return;
+            }
+        }
+        finally { micOpening = false; }
+        if (!started)
+        {
+            micFailedAt = DateTime.UtcNow;
+            state = State.Idle;
+            hook.Listening = false;
             Sounds.Play(Sounds.Kind.Error);
             Say(Host.MicProblem(), 4000);
-            return false;
+            return;
         }
+        micFailedAt = DateTime.MinValue;
         state = State.Recording;
-        handsFree = handsFreeMode;
-        hook.Listening = true;
         dictation.WarmUp();
         live = LiveStt.Usable(Settings.Current) ? new LiveStt(Settings.Current) : null;
         Sounds.Play(Sounds.Kind.Start);
         indicator.SetMode(IndicatorView.Mode.Listening);
         tick.Start();
-        return true;
+        if (handsFree) Hint($"Listening · click again or press {Host.Shortcut} to finish", 3500);
+        // Let go while the microphone was starting: a tap or a hold, measured from when it really happened.
+        else if (releasedAt is { } r) Released(r);
     }
 
     private void OnReleased()
     {
         if (ignoreNextRelease) { ignoreNextRelease = false; return; }
+        if (state == State.Starting && !handsFree) { releasedAt = DateTime.UtcNow; return; }
         if (state != State.Recording || handsFree) return;
-        if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < TapMs)
+        Released(DateTime.UtcNow);
+    }
+
+    private void Released(DateTime at)
+    {
+        if ((at - pressedAt).TotalMilliseconds < TapMs)
         {
             handsFree = true;
             Hint($"Hands-free · {Host.Shortcut} to finish · Esc to cancel", 3500);
@@ -151,7 +191,7 @@ public sealed class Controller : IDisposable
             if (state == State.Idle) Revert();
             return;
         }
-        if (state != State.Recording || handsFree) return;
+        if (state is not (State.Recording or State.Starting) || handsFree) return;
         // Shortcut+D, Shortcut+Arrow, etc.: the user meant a desktop shortcut.
         if ((DateTime.UtcNow - pressedAt).TotalMilliseconds < ShortcutWindowMs) Cancel(false);
     }
@@ -179,7 +219,13 @@ public sealed class Controller : IDisposable
         }
         // In hold mode, ask the keyboards what is really held, in case a key-up never arrived.
         if (!handsFree) hook.Poll();
-        if (recorder.Full)
+        if (recorder.Died)
+        {
+            // The recorder program quit (microphone unplugged, sound server restarted): keep what was heard.
+            Say("The microphone stopped. Transcribing what it heard…", 3000);
+            Finish();
+        }
+        else if (recorder.Full)
         {
             Say("Reached the 10 minute limit. Transcribing…", 3000);
             Finish();
@@ -198,6 +244,15 @@ public sealed class Controller : IDisposable
     /** Stops recording without transcribing. */
     public void Cancel(bool audible)
     {
+        if (state == State.Starting)
+        {
+            // The microphone is still opening; Begin closes it again when it's done.
+            state = State.Idle;
+            handsFree = false;
+            hook.Listening = false;
+            if (audible) Say("Cancelled", 1200);
+            return;
+        }
         if (state != State.Recording) return;
         var samples = recorder.Stop();
         live?.Cancel();
