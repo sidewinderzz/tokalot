@@ -33,6 +33,8 @@ public sealed class Recorder : IDisposable
     private static string? proven;
 
     public bool IsRecording { get; private set; }
+    /** The recorder program quit by itself mid-recording (microphone unplugged, sound server restarted). */
+    public bool Died { get; private set; }
     /** The 10 minute cap was reached; later audio is not being kept. */
     public bool Full { get { lock (gate) return samples.Count >= MaxSamples; } }
     /** Loudness of the latest chunk (RMS 0..1), for the animated bars. */
@@ -122,6 +124,7 @@ public sealed class Recorder : IDisposable
                 }
                 proc = p;
                 reader = t;
+                Died = false; // a recorder that failed its try-out above may have quit with this flag
                 IsRecording = true;
                 return true;
             }
@@ -198,7 +201,7 @@ public sealed class Recorder : IDisposable
         }
         catch { }
         // The recorder died on its own (microphone unplugged, sound server restarted).
-        if (session == mine) Level = 0;
+        if (session == mine) { Level = 0; Died = true; }
     }
 
     /** Reads until the buffer is full or the stream ends, so every chunk is a whole 50 ms. */

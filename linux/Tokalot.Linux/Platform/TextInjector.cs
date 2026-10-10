@@ -62,9 +62,12 @@ public static class TextInjector
         var terminal = AppDetect.IsTerminal(app);
         if (!await Task.Run(() => SendPaste(terminal))) return Result.Copied;
 
+        // Wayland can't say which app has focus, so the paste may have gone to a terminal as a plain Ctrl+V and done
+        // nothing. The dictation stays on the clipboard then, ready for Ctrl+Shift+V, instead of the old clipboard.
+        if (app == null && Sh.IsWayland) return Result.Pasted;
         // Give the target app time to read the clipboard before restoring it.
         await Task.Delay(450);
-        // It held a picture, files or something else that can't be put back: leave the dictation there rather than nothing.
+        // It held a picture, files, a password or something else that can't be put back as it was: leave the dictation there rather than a damaged copy.
         if (before.Kind == Held.Other || before.Text == text) return Result.Pasted;
         // Only put the old clipboard back if nothing else replaced ours in the meantime.
         try { if (await GetClipboard() is { } now && now != text) return Result.Pasted; } catch { }
@@ -312,31 +315,52 @@ public static class TextInjector
 
     /**
      * What the clipboard holds before a paste. Only text can be put back afterwards: a picture or a
-     * file list offered by another app can't be re-offered by Tokalot, so those are reported as
-     * Other and the dictation is left on the clipboard instead of wiping it. When it can't be told
-     * whether the clipboard is empty, it counts as Other too.
+     * file list offered by another app can't be re-offered by Tokalot (a copied file would come back
+     * as just its name), and a password copied from a password manager would come back without its
+     * "secret" mark, so clipboard-history tools would keep it. Those are reported as Other and the
+     * dictation is left on the clipboard instead. Formatted text comes back as plain text. When it
+     * can't be told what the clipboard holds, it counts as Other too.
      */
     private static async Task<(Held Kind, string? Text)> Snapshot()
     {
         try
         {
-            var text = await GetClipboard();
-            if (!string.IsNullOrEmpty(text)) return (Held.Text, text);
+            List<string>? types = null;
             switch (Choose())
             {
                 case Backend.Avalonia:
                     var formats = await OnUi(async () => await Host()!.GetDataFormatsAsync());
-                    return (formats.Count == 0 ? Held.Empty : Held.Other, null);
+                    if (formats.Any(f => f == DataFormat.File || f == DataFormat.Bitmap)) return (Held.Other, null);
+                    types = formats.Select(f => f.Identifier).ToList();
+                    break;
                 case Backend.WlCopy when Sh.Which("wl-paste") is { } wp:
-                    var types = await Task.Run(() => Sh.Run(wp, new[] { "--list-types" }, timeoutMs: 600));
-                    return (types.Exit != 0 || types.Out.Trim().Length == 0 ? Held.Empty : Held.Other, null);
+                    var listed = await Task.Run(() => Sh.Run(wp, new[] { "--list-types" }, timeoutMs: 600));
+                    // wl-paste fails when the clipboard is empty.
+                    types = listed.Exit == 0 ? Lines(listed.Out) : new List<string>();
+                    break;
                 case Backend.Xclip:
                     var targets = await Task.Run(() => Sh.Run(Sh.Which("xclip")!, new[] { "-selection", "clipboard", "-o", "-t", "TARGETS" }, timeoutMs: 600));
-                    return (targets.Exit != 0 || targets.Out.Trim().Length == 0 ? Held.Empty : Held.Other, null);
+                    types = targets.Exit == 0 ? Lines(targets.Out) : new List<string>();
+                    break;
             }
+            if (types != null && types.Any(CantPutBack)) return (Held.Other, null);
+            var text = await GetClipboard();
+            if (!string.IsNullOrEmpty(text)) return (Held.Text, text);
+            // xsel can't list what the clipboard holds.
+            if (types != null) return (types.Count == 0 ? Held.Empty : Held.Other, null);
         }
         catch { }
         return (Held.Other, null);
+    }
+
+    private static List<string> Lines(string s) => s.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    /** Clipboard types that a plain-text copy would lose: pictures, files, and a password manager's "secret" mark. */
+    private static bool CantPutBack(string type)
+    {
+        var t = type.ToLowerInvariant();
+        return t.StartsWith("image/") || t == "text/uri-list" || t.StartsWith("x-special/") || t.Contains("passwordmanagerhint")
+            || t == "application/x-kde-cutselection" || t is "files" or "filenames" or "file" or "bitmap" or "pixmap";
     }
 
     /** The text on the clipboard, or null if there is none (or it holds something that isn't text). */

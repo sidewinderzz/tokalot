@@ -46,6 +46,7 @@ public static class Backup
         {
             using (var w = new StreamWriter(zip.CreateEntry("backup.json").Open()))
                 w.Write(manifest.ToJsonString(Settings.Json));
+            Usage.Flush(); // counts from the last moment may not be on disk yet
             foreach (var name in new[] { "history.json", "usage.json", "notes.json" })
                 if (File.Exists(Paths.File(name))) zip.CreateEntryFromFile(Paths.File(name), name);
             if (includeAudio)
@@ -91,6 +92,7 @@ public static class Backup
         Settings.Replace(restored);
 
         var recordings = 0;
+        Usage.Reload(); // drops counts waiting to be saved, so they can't land over the restored file
         foreach (var e in zip.Entries)
         {
             if (e.FullName is "history.json" or "usage.json" or "notes.json")

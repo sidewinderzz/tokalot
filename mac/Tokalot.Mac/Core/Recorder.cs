@@ -48,6 +48,8 @@ public sealed unsafe class Recorder : IDisposable
     private readonly object gate = new();
 
     public bool IsRecording { get; private set; }
+    /** Core Audio keeps an input queue running through device changes, so it never stops by itself (see the Linux recorder). */
+    public bool Died => false;
     /** The 10 minute cap was reached; later audio is not being kept. */
     public bool Full { get { lock (gate) return samples.Count >= MaxSamples; } }
     /** Loudness of the latest chunk (RMS 0..1), for the animated bars. */

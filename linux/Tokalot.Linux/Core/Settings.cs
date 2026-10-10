@@ -180,6 +180,7 @@ public sealed class Settings
 
     private static Settings? current;
     private static readonly object Gate = new();
+    private static long triedAt;
 
     /** The live settings object. Call Save() after changing it. */
     public static Settings Current
@@ -188,12 +189,14 @@ public sealed class Settings
         {
             lock (Gate)
             {
-                if (current != null) return current;
+                // A file that couldn't be read at start-up (locked for a moment) is tried again, rather than running
+                // the whole session on defaults with no keys and every change thrown away.
+                if (current != null && !(current.unread && Files.RetryDue(ref triedAt))) return current;
                 var f = Paths.File("settings.json");
                 try
                 {
                     current = System.IO.File.Exists(f)
-                        ? JsonSerializer.Deserialize<Settings>(Files.ReadText(f), Json) ?? new Settings()
+                        ? JsonSerializer.Deserialize<Settings>(Files.ReadText(f, current == null ? 6 : 1), Json) ?? new Settings()
                         : new Settings();
                 }
                 catch (JsonException)
@@ -205,13 +208,14 @@ public sealed class Settings
                 catch
                 {
                     // The file is there but couldn't be read (locked, no permission…): run on defaults for now and never save over it.
-                    current = new Settings { unread = true };
+                    if (current == null) { current = new Settings { unread = true }; triedAt = Environment.TickCount64; }
                 }
                 return current;
             }
         }
     }
 
+    /** These are stand-in defaults: settings.json couldn't be read yet. */
     private bool unread;
 
     public void Save()

@@ -127,7 +127,16 @@ public sealed partial class MainWindow : Window
             foreach (var g in ResizeGrips()) { grips.Add(g); frame.Children.Add(g); }
         Content = frame;
 
-        onHistory = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Home) FillHistory(); });
+        // One dictation changes history a few times in a row; the list is redrawn once for all of them.
+        onHistory = () =>
+        {
+            if (System.Threading.Interlocked.Exchange(ref historyRedrawQueued, 1) == 1) return;
+            Dispatcher.UIThread.Post(() =>
+            {
+                historyRedrawQueued = 0;
+                if (CurrentPage == Page.Home) FillHistory();
+            }, DispatcherPriority.Background);
+        };
         onPlayer = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Home) FillHistory(); });
         History.Changed += onHistory;
         Player.Changed += onPlayer;
@@ -135,6 +144,9 @@ public sealed partial class MainWindow : Window
         Activated += (_, _) => Sync.Queue();
         // Coming back from System Settings on a Mac: redraw if a permission changed meanwhile.
         Activated += (_, _) => PlatformActivated();
+        // The indicator previews in Settings redraw 60 times a second; they hold still while nobody is looking.
+        Activated += (_, _) => FreezePreviews();
+        Deactivated += (_, _) => FreezePreviews();
         onSync = changed => Dispatcher.UIThread.Post(() => { if (changed || CurrentPage == Page.Settings) Render(); });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
@@ -154,6 +166,38 @@ public sealed partial class MainWindow : Window
         Render();
     }
 
+    private int historyRedrawQueued;
+    private readonly List<IndicatorView> previews = new();
+
+    private bool PreviewsStill => !IsActive || WindowState == WindowState.Minimized;
+
+    private void FreezePreviews()
+    {
+        previews.RemoveAll(v => TopLevel.GetTopLevel(v) == null); // pages drawn since
+        foreach (var v in previews) v.Frozen = PreviewsStill;
+    }
+
+    /**
+     * Saves what is typed into a box once typing pauses (or the box loses focus or goes away), rather
+     * than on every keystroke: each save rewrites settings.json, and a key also goes to the keyring.
+     */
+    private static void SaveWhenIdle(TextBox input, Action<string> save)
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(600) };
+        var dirty = false;
+        void Commit()
+        {
+            timer.Stop();
+            if (!dirty) return;
+            dirty = false;
+            save(input.Text ?? "");
+        }
+        timer.Tick += (_, _) => Commit();
+        input.TextChanged += (_, _) => { dirty = true; timer.Stop(); timer.Start(); };
+        input.LostFocus += (_, _) => Commit();
+        input.DetachedFromVisualTree += (_, _) => Commit();
+    }
+
     /** The platform's part may react to the window coming to the front (only the Mac's does). */
     partial void PlatformActivated();
 
@@ -162,7 +206,10 @@ public sealed partial class MainWindow : Window
         base.OnPropertyChanged(change);
         // A maximized window has no edges to drag.
         if (change.Property == WindowStateProperty)
+        {
             foreach (var g in grips) g.IsVisible = WindowState == WindowState.Normal;
+            FreezePreviews();
+        }
     }
 
     // ---------- frame ----------
@@ -869,7 +916,7 @@ public sealed partial class MainWindow : Window
         col.Children.Add(Spaced(Ui.Heading("Your instructions", 28), 0, 28, 0, 4));
         col.Children.Add(Spaced(Ui.Text("Applies everywhere. E.g. \"Use US spelling\", \"Write numbers as digits\", \"Never use exclamation points\".", 14, C.Sub), 0, 0, 0, 12));
         var (box, input) = Ui.Field(S.CustomInstructions, "Optional", multiLine: true);
-        input.TextChanged += (_, _) => { S.CustomInstructions = input.Text ?? ""; S.Save(); };
+        SaveWhenIdle(input, v => { S.CustomInstructions = v; S.Save(); });
         col.Children.Add(box);
     }
 
@@ -1030,7 +1077,7 @@ public sealed partial class MainWindow : Window
         foreach (var (id, name, page) in Catalog.Services)
         {
             var (box, input) = Ui.Secret(S.Key(id), "Paste key");
-            input.TextChanged += (_, _) => { S.SetKey(id, input.Text ?? ""); S.Save(); };
+            SaveWhenIdle(input, v => { S.SetKey(id, v); S.Save(); });
             var pageLink = Link("Get one at " + page, () => Open("https://" + page));
             pageLink.FontSize = 13;
             keys.Children.Add(Spaced(Ui.Text(name, 15.5, bold: true), 0, keys.Children.Count == 0 ? 0 : 16, 0, 0));
@@ -1222,7 +1269,7 @@ public sealed partial class MainWindow : Window
         var start = DateTime.UtcNow;
         var view = new IndicatorView
         {
-            Look = id, Dock = "bottom", Scale = 0.85, CurrentMode = IndicatorView.Mode.Listening,
+            Look = id, Dock = "bottom", Scale = 0.85, CurrentMode = IndicatorView.Mode.Listening, Frozen = PreviewsStill,
             VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
             Level = () =>
             {
@@ -1234,6 +1281,7 @@ public sealed partial class MainWindow : Window
                 return (float)(v * v / 8);
             },
         };
+        previews.Add(view);
         var screen = new Grid { Width = 150, Height = 66, ClipToBounds = true };
         screen.Children.Add(new Border { Background = C.Hex("#1F2023"), CornerRadius = new CornerRadius(10) });
         screen.Children.Add(new Border { Background = C.Hex("#141416"), Height = 8, VerticalAlignment = VerticalAlignment.Bottom, CornerRadius = new CornerRadius(0, 0, 10, 10) });
@@ -1278,7 +1326,7 @@ public sealed partial class MainWindow : Window
     private static Control ModelField(string value, Action<string> save)
     {
         var (box, input) = Ui.Field(value, "Model");
-        input.TextChanged += (_, _) => save(input.Text ?? ""); // empty = the provider's default model
+        SaveWhenIdle(input, save); // empty = the provider's default model
         return Spaced(Ui.Stack(Spaced(Ui.Text("Model name (change only if the provider renames it)", 13, C.Sub), 4, 10, 0, 4), box), 0, 0, 0, 0);
     }
 

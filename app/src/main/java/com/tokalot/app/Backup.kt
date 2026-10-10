@@ -66,6 +66,7 @@ object Backup {
             zip.write(manifest.toString().toByteArray())
             zip.closeEntry()
 
+            History.flush() // the latest changes are written in the background
             val history = File(app.filesDir, "history.json")
             if (history.exists()) {
                 zip.putNextEntry(ZipEntry("history.json"))
@@ -190,13 +191,7 @@ object Backup {
             // If this phone syncs, the next sync starts over as a first one: the restored settings
             // are combined with the sync file's, instead of counting as deletions for every device.
             Prefs(app).let { p -> if (p.syncUri != null) p.syncBase = null }
-            if (history != null) {
-                val target = File(app.filesDir, "history.json")
-                val tmp = File(app.filesDir, "history.restore")
-                tmp.writeText(history)
-                if (!tmp.renameTo(target)) { tmp.copyTo(target, overwrite = true); tmp.delete() }
-            }
-            History.reload()
+            if (history != null) History.restore(app, history) else History.reload()
             if (notes != null) {
                 val target = File(app.filesDir, Notes.FILE)
                 val tmp = File(app.filesDir, "notes.restore")

@@ -80,6 +80,8 @@ internal static class Shots
         Check("9e changed note wins", Sync.Merge(N((1, "a")), N((1, "a2")), N((1, "a"))).Notes![0].Text == "a2");
         var roundNotes = Sync.Parse(System.Text.Json.Nodes.JsonNode.Parse(Sync.ToJson(N((5, "x")), null).ToJsonString())!.AsObject(), "d");
         Check("9f notes json round trip", Ns(roundNotes) == "5" && roundNotes.Notes![0].Text == "x");
+        Check("11a empty file after sharing is refused", Sync.RemoteLost(null, D(new[] { "Alpha" })) && Sync.RemoteLost(null, N((1, "a"))));
+        Check("11b empty file on a first sync is a fresh start", !Sync.RemoteLost(null, D()) && !Sync.RemoteLost(D(), D(new[] { "Alpha" })));
         Check("10a stray thank you dropped", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.8}]}") == "");
         Check("10b said thank you kept", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.05}]}") == " Thank you.");
         Check("10c other words kept", CloudStt.Text("{\"text\":\"Call me\",\"segments\":[{\"no_speech_prob\":0.9}]}") == "Call me");

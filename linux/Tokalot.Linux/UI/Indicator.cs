@@ -62,9 +62,13 @@ public sealed class IndicatorView : Control
     /** Keeps animating even when idle (Settings previews). */
     public bool AlwaysAnimate { get; set; }
 
+    /** Holds still (a Settings preview while its window is minimized or in the background). */
+    public bool Frozen { get => frozen; set { if (frozen == value) return; frozen = value; Refresh(); } }
+    private bool frozen;
+
     private void Refresh()
     {
-        bool animate = mode != Mode.Idle || AlwaysAnimate;
+        bool animate = (mode != Mode.Idle || AlwaysAnimate) && !frozen;
         if (animate && !hooked && attached) { frames.Start(); hooked = true; }
         if (!animate && hooked) { frames.Stop(); hooked = false; }
         InvalidateVisual();
@@ -371,6 +375,8 @@ public sealed class IndicatorWindow : Window
     {
         if (dragging) return;
         var s = Settings.Current;
+        // Idle with the idle bar switched off: nothing to show or follow, so the window isn't asked about every tick.
+        if (!force && !IsVisible && view.CurrentMode == IndicatorView.Mode.Idle && !s.ShowIdleIndicator) return;
         var (fullScreen, center) = Overlay.ActiveWindowState();
         bool show = view.CurrentMode != IndicatorView.Mode.Idle || (s.ShowIdleIndicator && !fullScreen);
         // Placed even when hidden, so messages still know where to appear.

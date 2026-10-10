@@ -25,6 +25,7 @@ public static unsafe class KeyStore
 {
     public const string Keyring = "keyring", FileStore = "file";
     private const string ServiceName = "Tokalot";
+    private const int ErrItemNotFound = -25300; // errSecItemNotFound
 
     private static readonly Dictionary<string, string> Cache = new();
     private static readonly object Gate = new();
@@ -90,11 +91,12 @@ public static unsafe class KeyStore
         if (where != FileStore && UseKeychain)
         {
             var t = Task.Run(() => Keychain.Find(ServiceName, service));
-            if (t.Wait(20000)) value = t.Result.Value;
+            // Anything but "found" or "not there" (Cancel on the password prompt, a locked Keychain) is unknown, not "no key".
+            if (t.Wait(20000) && t.Result.Status is 0 or ErrItemNotFound) value = t.Result.Value;
             else
             {
                 timedOut = true;
-                Notice = "The Keychain didn't answer, so keys kept there aren't loaded yet. Allow it if macOS asks; Tokalot asks again at the next dictation.";
+                Notice = "The Keychain didn't answer or wasn't allowed, so keys kept there aren't loaded yet. Allow it if macOS asks; Tokalot asks again at the next dictation.";
             }
         }
         value ??= ReadFile().GetValueOrDefault(service);
@@ -111,7 +113,8 @@ public static unsafe class KeyStore
         if (where != FileStore && UseKeychain)
         {
             // A finished fetch that gave up waiting (an unlock prompt left open at start-up) is run again.
-            var loading = preload == null || (preload.IsCompleted && unanswered) ? Preload(Settings.Current) : preload;
+            // So is one that finished before this key was noted (settings.json was read late) or that left it unknown.
+            var loading = preload == null || preload.IsCompleted ? Preload(Settings.Current) : preload;
             if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) return "";
             try { loading.Wait(25000); } catch { }
             lock (Gate) return Cache.GetValueOrDefault(service, "");
