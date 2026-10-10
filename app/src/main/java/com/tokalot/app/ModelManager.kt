@@ -30,6 +30,22 @@ object ModelManager {
 
     fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
+    /** Blocking (reads the whole file). True if the model on disk is still byte for byte the pinned one. */
+    fun verify(ctx: Context): Boolean = runCatching {
+        val f = modelFile(ctx)
+        if (!f.exists() || f.length() != SIZE) return false
+        val digest = MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                digest.update(buf, 0, n)
+            }
+        }
+        hex(digest.digest()) == SHA256
+    }.getOrDefault(true) // couldn't read it right now: not a reason to throw 60 MB away
+
     /** Blocking. Returns null on success, or an error message. Safe to call again after a failure. */
     fun download(ctx: Context, onProgress: (Int) -> Unit): String? {
         val target = modelFile(ctx)
