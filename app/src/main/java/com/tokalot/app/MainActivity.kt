@@ -69,6 +69,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         prefs = Prefs(this)
+        History.preload(this) // a long history is read in the background while the screen is built
         // Pick light or dark before any views exist (dialogs and switches follow the theme too).
         applyColors()
         super.onCreate(savedInstanceState)
@@ -431,6 +432,7 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         History.onChange = null
+        Notes.onChange = null // it holds this screen, which must not outlive being left
         Sync.onDone = null
         stopPlayback(redraw = false)
     }

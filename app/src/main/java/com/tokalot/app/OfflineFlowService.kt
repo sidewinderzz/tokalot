@@ -97,6 +97,8 @@ class OfflineFlowService : AccessibilityService() {
     private var pendingCancel = false
     private var autoStopped = false
     private var workingSince = 0L         // when transcribing began, to ignore a double-tap on "stop"
+    private var preparing = false         // WORKING, but a long recording is still being put together (stopAndTranscribe)
+    private var prepCancelled = false     // and a cancel came in meanwhile
 
     private val silenceCheck = object : Runnable {
         override fun run() {
@@ -134,6 +136,7 @@ class OfflineFlowService : AccessibilityService() {
         instance = this
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         dictation = Dictation(applicationContext)
+        History.preload(this)
         buildButton()
         Sync.request(this) // picks up dictionary and snippet changes made on another device
         // The keyboard may already be up (the switch was just turned on, or the service restarted):
@@ -761,6 +764,7 @@ class OfflineFlowService : AccessibilityService() {
             }
             return
         }
+        if (id == null) { toast("Couldn't save to Notes · copied"); return }
         showBubble("Saved to Notes · copied") {
             startActivity(
                 Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.Tab.NOTES.name)
@@ -890,7 +894,7 @@ class OfflineFlowService : AccessibilityService() {
             State.RECORDING -> stopAndTranscribe()
             // A tap cancels once the X is showing (the callback in stopAndTranscribe() does the rest).
             // Before that it does nothing, so a double-tap on "stop" can't cancel. A long press cancels at any time.
-            State.WORKING -> if (SystemClock.elapsedRealtime() - workingSince > CANCEL_SHOW_MS) dictation.cancel()
+            State.WORKING -> if (SystemClock.elapsedRealtime() - workingSince > CANCEL_SHOW_MS) cancel()
             State.STARTING -> {}
         }
     }
@@ -1059,7 +1063,7 @@ class OfflineFlowService : AccessibilityService() {
 
     private fun cancel() {
         if (state == State.STARTING) { pendingCancel = true; return }
-        if (state == State.WORKING) { dictation.cancel(); return }
+        if (state == State.WORKING) { if (preparing) prepCancelled = true else dictation.cancel(); return }
         if (state != State.RECORDING) return
         takeLive()?.cancel()
         handler.removeCallbacks(silenceCheck)
@@ -1078,15 +1082,33 @@ class OfflineFlowService : AccessibilityService() {
         Haptics.play(this, Haptics.Kind.STOP)
         val voiceEnd = recorder.lastVoiceSample
         val speech = recorder.speechSamples
-        var samples = recorder.stop()
+        val taken = recorder.stopMic()
         early?.lastVoice = voiceEnd
+        RecordingService.stop(this)
         // After an auto-stop, drop the trailing 30 s of silence: less to upload, and Whisper
         // tends to invent words ("Thank you.") in long silences.
-        if (autoStopped && voiceEnd > 0) {
-            val keep = (voiceEnd + Recorder.SAMPLE_RATE).coerceAtMost(samples.size)
-            samples = samples.copyOf(keep)
-        }
-        RecordingService.stop(this)
+        val keep = if (autoStopped && voiceEnd > 0) (voiceEnd + Recorder.SAMPLE_RATE).coerceAtMost(taken.size) else taken.size
+        if (keep < Recorder.SAMPLE_RATE * 10) { transcribe(taken.audio(keep), speech, early, mode); return }
+        // A long recording is put together off the main thread (up to ~19 MB), so the button doesn't freeze meanwhile.
+        setState(State.WORKING)
+        workingSince = SystemClock.elapsedRealtime()
+        preparing = true
+        prepCancelled = false
+        Thread {
+            val audio = taken.audio(keep)
+            handler.post {
+                preparing = false
+                if (state != State.WORKING) { early?.cancel(); return@post }
+                transcribe(audio, speech, early, mode)
+                // Cancelled while it was being put together: cancelled like any other, so it's kept in history.
+                if (prepCancelled && state == State.WORKING) dictation.cancel()
+            }
+        }.start()
+    }
+
+    /** Main thread. Sends a finished recording off for transcription, unless it's too short or silent. */
+    private fun transcribe(audio: Recorder.Audio, speech: Int, early: LiveStt?, mode: Manual?) {
+        val samples = audio.samples
         if (samples.size < MIN_SAMPLES) {
             early?.cancel()
             setState(State.IDLE)
@@ -1094,8 +1116,7 @@ class OfflineFlowService : AccessibilityService() {
             return
         }
         // Android feeds silence (not an error) when it blocks background mic access.
-        val peak = samples.maxOf { abs(it) }
-        if (peak < 0.0005f) {
+        if (audio.peak < 0.0005f) {
             early?.cancel()
             setState(State.IDLE)
             Haptics.play(this, Haptics.Kind.ERROR)
@@ -1271,7 +1292,8 @@ class OfflineFlowService : AccessibilityService() {
         val li = lastInsert
         lastInsert = null
         stopWatching(learn = false)
-        entryId?.let { History.useOwnWording(this, it, plain) }
+        // Never let the history (a long one to load, or a full disk) hold up or crash the service.
+        entryId?.let { id -> val app = applicationContext; Thread { runCatching { History.useOwnWording(app, id, plain) } }.start() }
         fitCaps = true
         val ok = when (li) {
             is LastInsert.Typed -> swapTyped(li, plain)

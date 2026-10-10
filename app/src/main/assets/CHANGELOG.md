@@ -6,6 +6,16 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.30 · 2026-10-10
+- When the on-device speech model hits an error (the phone short of memory, say), the recording is kept in history with a Transcribe button, instead of "Didn't catch anything" and the words lost.
+- Cancelling a retry in the app no longer also cancels a dictation running on the floating button at the same time.
+- A failed load of the on-device model no longer deletes it. It's only removed if the file itself is damaged; otherwise you're told the phone is short of memory.
+- A notes file that can't be read is set aside (kept for recovery) instead of being overwritten with just the newest note.
+- History is saved in the background, so Home doesn't stutter with a long history and "My wording" can't crash the floating button when storage is full.
+- Stopping a long dictation no longer freezes the floating button for a moment.
+- Tapping the mic no longer downloads every provider's model list (tens of KB) just to open the connection.
+- Emoji and unusual characters from the on-device model come through intact.
+
 ## 1.29 · 2026-10-09
 - Cleanup can no longer type a reply of its own. When a dictation was itself a request to an AI ("give me three designs"), the cleanup could answer it, and its answer was typed along with your words. The instructions are firmer, and a result with clearly more words than you said is thrown away in favour of the backup or basic cleanup.
 

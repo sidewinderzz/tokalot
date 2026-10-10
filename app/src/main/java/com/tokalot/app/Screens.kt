@@ -324,7 +324,10 @@ class NotesScreen(private val a: MainActivity) {
                     },
                     spacer(wDp = 4),
                     iconButton(R.drawable.ic_close, "Delete note", 20, C.SUB) {
-                        confirm("Delete this note? It stays in history.", "Delete") { Notes.delete(this, n.id); render() }
+                        confirm("Delete this note? It stays in history.", "Delete") {
+                            if (runCatching { Notes.delete(this, n.id) }.isFailure) toast("Couldn't delete the note")
+                            render()
+                        }
                     },
                 ))
                 c.addView(box)
