@@ -321,8 +321,9 @@ public sealed class App : Application
  */
 public sealed class Controller : IDisposable
 {
-    private enum State { Idle, Recording, Processing }
+    private enum State { Idle, Recording, Stopping, Processing } // Stopping: the last moment of audio is still coming in
 
+    private const int TailMs = 200;          // audio kept after the keys are released
     private const int TapMs = 350;          // shorter press = hands-free
     private const int ShortcutWindowMs = 600; // another key this soon = a Windows shortcut, not dictation
     private const int AutoStopSeconds = 30;
@@ -592,7 +593,7 @@ public sealed class Controller : IDisposable
         state = State.Processing; // no new recording while keys are being sent
         try
         {
-            await TextInjector.Replace(text);
+            var failed = await TextInjector.Replace(text) == TextInjector.Result.Failed;
             var entry = id == null ? null : History.All().FirstOrDefault(e => e.Id == id);
             if (entry != null)
                 History.Replace(new Entry
@@ -600,7 +601,12 @@ public sealed class Controller : IDisposable
                     Id = entry.Id, Time = entry.Time, Text = text, Raw = entry.Raw, DurationMs = entry.DurationMs,
                     Cleaned = false, AppKey = entry.AppKey, AppLabel = entry.AppLabel,
                 });
-            Say("Your own wording is back", 1800);
+            if (failed)
+            {
+                Sounds.Play(Sounds.Kind.Error);
+                Say("Couldn't paste · your own wording is in history", 3500);
+            }
+            else Say("Your own wording is back", 1800);
         }
         catch (Exception e) { App.Log("Revert failed: " + e.Message); }
         finally
@@ -678,7 +684,7 @@ public sealed class Controller : IDisposable
         {
             float[]? samples = null;
             var target = heldApp;
-            if (state == State.Recording) { samples = recorder.Stop(); target = app; }
+            if (state is State.Recording or State.Stopping) { samples = recorder.Stop(); target = app; state = State.Idle; }
             else if (state == State.Processing) samples = held;
             held = null;
             if (samples == null || samples.Length < Recorder.SampleRate) return;
@@ -760,11 +766,19 @@ public sealed class Controller : IDisposable
     private async void Finish(bool trimSilence = false)
     {
         if (state != State.Recording) return;
-        var lastVoice = recorder.LastVoiceSample;
-        int speech = recorder.SpeechChunks, lateSpeech = recorder.LateSpeechChunks;
-        var samples = recorder.Stop();
         hook.Listening = false;
         tick.Stop();
+        float[] samples;
+        if (trimSilence) samples = recorder.Stop(); // auto-stop: the silent tail is cut anyway
+        else
+        {
+            // Keys let go right on the last word: keep listening a moment so its end isn't clipped.
+            state = State.Stopping;
+            samples = await recorder.Stop(TailMs);
+            if (state != State.Stopping) return; // Tokalot is closing; SaveBeforeExit took the recording
+        }
+        var lastVoice = recorder.LastVoiceSample;
+        int speech = recorder.SpeechChunks, lateSpeech = recorder.LateSpeechChunks;
         handsFree = false;
         var asNote = note;
         note = false;
@@ -820,7 +834,8 @@ public sealed class Controller : IDisposable
         StartRing(early is { Pieces: > 0 } ? Math.Min(spoken, 10) : spoken);
         try
         {
-            var landed = true; // false: no text box had the focus, so the text was left on the clipboard
+            var landed = TextInjector.Result.Pasted; // Copied: no text box had the focus, so the text was left on the clipboard
+            var copied = true;
             var noteSaved = false;
             var outcome = await Task.Run(() => dictation.Process(samples, target, sparse: speech < 6, ct: ct, live: early, user: userCt));
             if (Dictation.LastTiming.Length > 0) App.Log("Dictation: " + Dictation.LastTiming);
@@ -831,25 +846,26 @@ public sealed class Controller : IDisposable
                 // A voice note goes to Notes and the clipboard. Nothing is pasted, so nothing to watch or put back.
                 try { Notes.Add(outcome.Text); noteSaved = true; }
                 catch (Exception e) { App.Log("Saving a note failed: " + e.Message); }
-                await TextInjector.Copy(outcome.Text);
+                copied = await TextInjector.Copy(outcome.Text);
                 Sounds.Play(Sounds.Kind.Done);
             }
             else if (outcome.Text.Length > 0)
             {
                 landed = await TextInjector.Paste(outcome.Text);
-                Sounds.Play(Sounds.Kind.Done);
-                if (landed) learner.Watch(outcome.Text);
+                Sounds.Play(landed == TextInjector.Result.Failed ? Sounds.Kind.Error : Sounds.Kind.Done);
+                if (landed == TextInjector.Result.Pasted) learner.Watch(outcome.Text);
             }
             indicator.SetMode(IndicatorView.Mode.Idle);
-            plainText = asNote ? null : outcome.Plain;
+            plainText = asNote || landed == TextInjector.Result.Failed ? null : outcome.Plain;
             plainEntry = outcome.EntryId;
             revertUntil = DateTime.UtcNow.AddSeconds(RevertSeconds);
             hook.OwnKeyUntil = revertUntil;
             hook.OwnKey = plainText != null ? 0x5A : 0; // Z
-            if (outcome.Warning != null) Say(noteSaved ? outcome.Warning + " · saved to Notes" : outcome.Warning, 3500);
+            if (landed == TextInjector.Result.Failed) Say("Couldn't paste · it's in history", 4500);
+            else if (outcome.Warning != null) Say(noteSaved ? outcome.Warning + " · saved to Notes" : outcome.Warning, 3500);
             else if (outcome.Text.Length == 0) Say("Didn't catch anything", 1800);
-            else if (asNote) Say(noteSaved ? "Saved to Notes · copied" : "Couldn't save the note · copied", 2600);
-            else if (!landed) Say("No text box selected · copied, paste it with Ctrl+V", 4000);
+            else if (asNote) Say((noteSaved ? "Saved to Notes" : "Couldn't save the note") + (copied ? " · copied" : " · couldn't copy it"), 2600);
+            else if (landed == TextInjector.Result.Copied) Say("No text box selected · copied, paste it with Ctrl+V", 4000);
             else if (outcome.Plain != null) Say("Polished · Ctrl+Win+Z for your own wording", RevertSeconds * 1000);
             dictation.KeepAudio(samples, outcome.EntryId, null, target);
         }

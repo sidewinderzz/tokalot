@@ -13,6 +13,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
+using System.Windows.Threading;
 using Tokalot.Desktop.Core;
 using Tokalot.Desktop.Platform;
 
@@ -47,6 +48,27 @@ public sealed class MainWindow : Window
     private readonly Action<bool> onSync;
 
     private static Settings S => Settings.Current;
+
+    /**
+     * Saves settings once typing in a box pauses, rather than on every keystroke (each save rewrites the file
+     * and nudges sync). Leaving or closing the window saves at once.
+     */
+    private static DispatcherTimer? saveTimer;
+    private static void SaveSoon()
+    {
+        saveTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(700), DispatcherPriority.Background, (_, _) => SaveNow(), Dispatcher.CurrentDispatcher);
+        saveTimer.Stop();
+        saveTimer.Start();
+    }
+    private static void SaveNow()
+    {
+        if (saveTimer is not { IsEnabled: true }) return;
+        saveTimer.Stop();
+        S.Save();
+    }
+
+    /** History often changes a few times in a row for one dictation; Home is rebuilt once for the lot. */
+    private readonly DispatcherTimer historyTimer;
 
     /** The strip at the top you drag the window by; the minimize and close buttons sit in its right end. */
     private const double CaptionHeight = 32;
@@ -102,11 +124,18 @@ public sealed class MainWindow : Window
         // A maximized window hangs a few pixels past the screen edge; pull the content back in.
         StateChanged += (_, _) => root.Margin = new Thickness(WindowState == WindowState.Maximized ? 7 : 0);
 
-        onHistory = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Home) FillHistory(); });
+        historyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(120), DispatcherPriority.Background, (_, _) =>
+        {
+            historyTimer!.Stop();
+            if (CurrentPage == Page.Home) FillHistory();
+        }, Dispatcher);
+        historyTimer.Stop();
+        onHistory = () => Dispatcher.BeginInvoke(() => { historyTimer.Stop(); historyTimer.Start(); });
         onPlayer = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Home) FillHistory(); });
         History.Changed += onHistory;
         Player.Changed += onPlayer;
-        Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); };
+        Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); historyTimer.Stop(); SaveNow(); };
+        Deactivated += (_, _) => SaveNow();
         SourceInitialized += (_, _) => DarkTitleBar();
         Activated += (_, _) => Sync.Queue();
         // A sync that changed nothing only updates the status line on Settings: not worth taking the cursor out of a box being typed in.
@@ -936,7 +965,7 @@ public sealed class MainWindow : Window
         col.Children.Add(Spaced(Ui.Heading("Your instructions", 28), 0, 28, 0, 4));
         col.Children.Add(Spaced(Ui.Text("Applies everywhere. E.g. \"Use US spelling\", \"Write numbers as digits\", \"Never use exclamation points\".", 14, C.Sub), 0, 0, 0, 12));
         var (box, input) = Ui.Field(S.CustomInstructions, "Optional", multiLine: true);
-        input.TextChanged += (_, _) => { S.CustomInstructions = input.Text; S.Save(); };
+        input.TextChanged += (_, _) => { S.CustomInstructions = input.Text; SaveSoon(); };
         col.Children.Add(box);
     }
 
@@ -1191,7 +1220,7 @@ public sealed class MainWindow : Window
             var needsKey = o.Service != null && S.Key(o.Service).Length == 0;
             return (UIElement)Ui.Choice(o.Label, o.Note + (needsKey ? " Needs a key." : ""), S.Stt == o.Id, () => { S.Stt = o.Id; S.Save(); Render(); });
         }).ToArray()));
-        if (S.Stt != "LOCAL") col.Children.Add(ModelField(S.SttModel(S.SttOption), v => { S.SttModels[S.Stt] = v.Trim(); S.Save(); }));
+        if (S.Stt != "LOCAL") col.Children.Add(ModelField(S.SttModel(S.SttOption), v => { S.SttModels[S.Stt] = v.Trim(); SaveSoon(); }));
 
         // --- Cleanup
         Section(col, "AI cleanup");
@@ -1202,7 +1231,7 @@ public sealed class MainWindow : Window
         }).ToArray()));
         if (S.Cleanup != "OFF")
         {
-            col.Children.Add(ModelField(S.CleanupModel(S.CleanupOption), v => { S.CleanupModels[S.Cleanup] = v.Trim(); S.Save(); }));
+            col.Children.Add(ModelField(S.CleanupModel(S.CleanupOption), v => { S.CleanupModels[S.Cleanup] = v.Trim(); SaveSoon(); }));
             var result = Ui.Text("", 14.5, C.Sub);
             col.Children.Add(Spaced(Ui.Button("Test cleanup", () => TestCleanup(result)), 0, 12, 0, 0));
             col.Children.Add(Spaced(result, 0, 8, 0, 0));
@@ -1215,7 +1244,7 @@ public sealed class MainWindow : Window
         foreach (var (id, name, page) in Catalog.Services)
         {
             var (box, input) = Ui.Secret(S.Key(id), "Paste key");
-            input.PasswordChanged += (_, _) => { S.SetKey(id, input.Password); S.Save(); };
+            input.PasswordChanged += (_, _) => { S.SetKey(id, input.Password); SaveSoon(); };
             var pageLink = Link("Get one at " + page, () => Open("https://" + page));
             pageLink.FontSize = 13;
             keys.Children.Add(Spaced(Ui.Text(name, 15.5, bold: true), 0, keys.Children.Count == 0 ? 0 : 16, 0, 0));
@@ -1333,7 +1362,7 @@ public sealed class MainWindow : Window
         var start = DateTime.UtcNow;
         var view = new IndicatorView
         {
-            Look = id, Dock = "bottom", Scale = 0.85, CurrentMode = IndicatorView.Mode.Listening,
+            Look = id, Dock = "bottom", Scale = 0.85, CurrentMode = IndicatorView.Mode.Listening, PauseWhenInactive = true,
             VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
             Level = () =>
             {
