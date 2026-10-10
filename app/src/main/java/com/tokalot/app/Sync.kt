@@ -53,13 +53,17 @@ object Sync {
         if (!busy.compareAndSet(false, true)) { again = true; return }
         Thread {
             var changed = false
-            try {
-                do {
-                    again = false
-                    changed = attempt(app) || changed
-                } while (again)
-            } finally {
-                busy.set(false)
+            while (true) {
+                try {
+                    do {
+                        again = false
+                        changed = attempt(app) || changed
+                    } while (again)
+                } finally {
+                    busy.set(false)
+                }
+                // A request that came in as the loop ended saw it still busy and only left [again] behind: run it.
+                if (!again || !busy.compareAndSet(false, true)) break
             }
             main.post { onDone?.invoke(changed) }
         }.start()
@@ -152,11 +156,19 @@ object Sync {
         val local = prefs.syncState().copy(notes = localNotes)
         val localKeys = SyncFormat.SERVICES.associateWith { prefs.key(it) }
         val base = SyncFormat.parseBase(if (firstSync) null else prefs.syncBase, DEFAULT_INSTRUCTIONS)
+        if (SyncMerge.remoteLost(remote, base)) throw IOException(SyncMerge.EMPTY_FILE)
         val known = prefs.knownKeys
         val result = SyncMerge.merge(local, remote, base, localKeys, prefs.syncKeys, known)
         val nowKnown = known + result.localKeys.filterValues { it.isNotEmpty() }.keys
         if (nowKnown != known) prefs.knownKeys = nowKnown
 
+        // A word, snippet, style or key changed while the file was being read: applying now would undo it.
+        // Leave everything as it is and run again, which picks it up.
+        if (prefs.syncState().copy(notes = localNotes) != local || SyncFormat.SERVICES.associateWith { prefs.key(it) } != localKeys) {
+            if (firstSync) throw IOException("A setting changed while syncing. Choose the file again.")
+            again = true
+            return
+        }
         if (result.state.copy(notes = localNotes) != local || result.localKeys != localKeys) {
             prefs.applySynced(result.state, result.localKeys)
             changed[0] = true
