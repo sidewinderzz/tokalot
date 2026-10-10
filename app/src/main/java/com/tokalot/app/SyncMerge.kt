@@ -149,6 +149,16 @@ object SyncFormat {
 }
 
 object SyncMerge {
+    const val EMPTY_FILE = "The sync file is empty right now. Will try again. To start it over, choose the file again."
+
+    /**
+     * True when the file has no state but this device already shared something through it. That is a
+     * cloud placeholder or another device mid-write far more often than a real fresh start, and treating
+     * it as one would write only this device's settings and make every other device delete the rest.
+     */
+    fun remoteLost(remote: SyncRemote?, base: SyncState): Boolean =
+        remote == null && (base.words.isNotEmpty() || base.snippets.isNotEmpty() || base.styles.isNotEmpty() || base.notes.isNotEmpty())
+
     /** How words and snippet triggers are compared: ignoring case and surrounding spaces. */
     fun id(s: String) = s.trim().lowercase()
 
