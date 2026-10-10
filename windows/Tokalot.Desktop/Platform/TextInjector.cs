@@ -9,7 +9,10 @@ using NAudio.Wave;
 
 namespace Tokalot.Desktop.Platform;
 
-/** Puts text into whatever app has focus: clipboard + Ctrl+V, then puts your old clipboard back. */
+/**
+ * Puts text into whatever app has focus: clipboard + Ctrl+V, then puts your old clipboard back. The dictation is
+ * only left on the clipboard as a fallback, when no text box had the focus to take it.
+ */
 public static class TextInjector
 {
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
@@ -32,7 +35,7 @@ public static class TextInjector
 
     public enum Result
     {
-        Pasted, // into a text box; the old clipboard is put back
+        Pasted, // into a text box; the old clipboard is put back, and the dictation never stays on it
         Copied, // no text box seemed to have the focus: the paste was still sent, and the text stays on the clipboard
         Failed, // the clipboard couldn't be used, so nothing was pasted (the text is still in history)
     }
@@ -53,7 +56,7 @@ public static class TextInjector
             await Task.Delay(50);
 
         var box = await FocusIsTextBox();
-        var previous = box ? Snapshot() : null;
+        var previous = box ? Snapshot() : null; // null: empty, or nothing that can be put back
 
         // No text box: the dictation stays on the clipboard as an ordinary copy (in Win+V history too).
         if (!await SetClipboard(text, transient: box)) return Result.Failed;
@@ -69,7 +72,7 @@ public static class TextInjector
         // A slow app, a remote desktop or a virtual machine can take over a second to read the clipboard, and
         // would paste the old contents if they were put back sooner. The wait happens in the background.
         await Task.Delay(150);
-        restoring = Restore(previous!, ours);
+        restoring = Restore(previous, ours);
         return Result.Pasted;
     }
 
@@ -100,20 +103,20 @@ public static class TextInjector
         return await Task.WhenAny(look, Task.Delay(800)) != look || look.Result;
     }
 
-    private static async Task Restore(Saved previous, uint ours)
+    private static async Task Restore(DataObject? previous, uint ours)
     {
         await Task.Delay(1300);
         // Only put the old clipboard back if nothing else (text, an image, files…) replaced ours in the meantime.
         if (GetClipboardSequenceNumber() != ours) return;
-        // The old clipboard couldn't be read: leave the dictation there rather than wipe what was on it.
-        if (previous.Unreadable) return;
         for (int i = 0; i < 8; i++)
         {
             try
             {
                 if (GetClipboardSequenceNumber() != ours) return;
-                if (previous.Data != null) Clipboard.SetDataObject(previous.Data, true);
-                else Clipboard.Clear(); // it was empty before, so leave it empty
+                if (previous != null) Clipboard.SetDataObject(previous, true);
+                // It was empty, or held something that couldn't be read back: the dictation landed, so it doesn't stay
+                // on the clipboard either (it's in history). Whatever was there was already replaced by the paste.
+                else Clipboard.Clear();
                 return;
             }
             catch { await Task.Delay(40); }
@@ -135,9 +138,6 @@ public static class TextInjector
         return await Paste(text);
     }
 
-    /** What was on the clipboard before a paste. Unreadable: it couldn't be looked at, so it can't be put back. */
-    private sealed record Saved(DataObject? Data, bool Unreadable);
-
     /**
      * The formats worth putting back: text, rich text, web content, copied files and how they were copied
      * (copy or cut), and the marks that keep a password out of clipboard history. Not "every format": an app
@@ -151,15 +151,18 @@ public static class TextInjector
         "Clipboard Viewer Ignore",
     };
 
-    /** Copies what's on the clipboard (see Kept, plus a copied picture) so it can be restored. */
-    private static Saved Snapshot()
+    /**
+     * Copies what's on the clipboard (see Kept, plus a copied picture) so it can be restored. Null when it was empty
+     * or held only things that can't be put back; the clipboard is emptied after the paste then.
+     */
+    private static DataObject? Snapshot()
     {
         try
         {
             var cur = Clipboard.GetDataObject();
-            if (cur == null) return new Saved(null, false);
+            if (cur == null) return null;
             var formats = cur.GetFormats(false);
-            if (formats.Length == 0) return new Saved(null, false);
+            if (formats.Length == 0) return null;
             var copy = new DataObject();
             var any = false;
             void Take(string f)
@@ -173,18 +176,23 @@ public static class TextInjector
             }
             foreach (var f in Kept)
                 if (Array.IndexOf(formats, f) >= 0) Take(f);
-            // A picture, but only when it's the point of the copy: a spreadsheet range also offers itself as a
-            // picture, drawn on request, which is slow for a big range and not what anyone pastes back.
-            if (!any && Array.IndexOf(formats, DataFormats.Bitmap) >= 0) Take(DataFormats.Bitmap);
-            // Something was there that can't be put back (only formats outside Kept): better to leave the dictation
-            // on the clipboard than to replace it with nothing.
-            if (!any) return new Saved(null, true);
+            // A picture (a screenshot, say), but only when it's the point of the copy: a spreadsheet range also
+            // offers itself as a picture, drawn on request, which is slow for a big range and not what anyone pastes
+            // back. PNG keeps transparency for the apps that read it; the bitmap (or the raw DIB) is for the rest.
+            if (!any)
+            {
+                if (Array.IndexOf(formats, "PNG") >= 0) Take("PNG");
+                if (Array.IndexOf(formats, DataFormats.Bitmap) >= 0) Take(DataFormats.Bitmap);
+                else if (Array.IndexOf(formats, DataFormats.Dib) >= 0) Take(DataFormats.Dib);
+            }
+            // Something was there that can't be put back (only formats outside Kept and pictures).
+            if (!any) return null;
             // The original is already in Win+V history; the copy put back shouldn't be added a second time.
             copy.SetData("CanIncludeInClipboardHistory", new MemoryStream(new byte[4]));
             copy.SetData("CanUploadToCloudClipboard", new MemoryStream(new byte[4]));
-            return new Saved(copy, false);
+            return copy;
         }
-        catch { return new Saved(null, true); }
+        catch { return null; }
     }
 
     public static Task<bool> Copy(string text) => SetClipboard(text);

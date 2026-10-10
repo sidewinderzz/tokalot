@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -7,7 +8,8 @@ using Tokalot.Desktop.Core;
 namespace Tokalot.Desktop.Platform;
 
 /**
- * Puts text into whatever app has focus: clipboard + ⌘V, then puts your old clipboard text back.
+ * Puts text into whatever app has focus: clipboard + ⌘V, then puts your old clipboard back (text, a picture or
+ * files). The dictation is only left on the clipboard as a fallback, when Tokalot can't press ⌘V itself.
  * The clipboard is the system pasteboard (NSPasteboard); the dictation is marked as passing through
  * (org.nspasteboard.TransientType / ConcealedType), which clipboard-history apps such as Maccy, Alfred
  * and Raycast leave out. ⌘V is a synthetic key press (CGEventPost), which macOS only allows once
@@ -67,9 +69,11 @@ public static class TextInjector
         {
             // Only put the old clipboard back if nothing else replaced ours in the meantime.
             if (ChangeCount() != mine) return 0;
-            if (before.Text != null && before.Text != text) Set(before.Text, transient: false);
-            else if (before.Empty) Clear();
-            // It held a picture, files or something else that can't be put back: the dictation stays there rather than nothing.
+            if (before.Items != null) { if (!Write(before.Items)) Clear(); }
+            else if (before.Text != null) { if (before.Text != text) Set(before.Text, transient: false); }
+            // It was empty, or held a password or something that couldn't be read back: the dictation landed, so
+            // it doesn't stay on the clipboard either (it's in history).
+            else Clear();
             return 0;
         });
         return Result.Pasted;
@@ -185,46 +189,128 @@ public static class TextInjector
         Native.Send(Board, "clearContents");
     }
 
-    private readonly record struct Held(string? Text, bool Empty);
+    /** One pasteboard item, as each of its types and the bytes it holds for that type. */
+    private sealed record Item((string Type, byte[] Data)[] Types);
+
+    /** Text: plain text to put back. Items: a picture or files, copied as they were. Neither: empty it after the paste. */
+    private readonly record struct Held(string? Text, Item[]? Items = null);
+
+    /** Bigger copies than this (a huge picture, say) aren't held on to; the clipboard is emptied after the paste instead. */
+    private const long MaxHeld = 64L << 20;
 
     /**
-     * What the clipboard holds before a paste: text (which can be put back), nothing, or something else.
-     * Only the plain text could be put back, so a copied file (which would come back as just its name),
-     * a picture, or a password from a password manager (which would come back without its "concealed"
-     * mark, so clipboard-history apps would keep it and the manager's auto-clear would stop working) count
-     * as something else: the dictation is left on the clipboard instead. Formatted text comes back plain.
+     * What the clipboard holds before a paste. A picture (a screenshot) or copied files are kept exactly, every
+     * type of every item, so they come back as they were. A password from a password manager is not kept: it
+     * would come back as a new copy, which the manager's auto-clear wouldn't recognise, and clipboard-history apps
+     * would keep it. Anything else comes back as plain text, so formatted text comes back plain.
      */
     private static Held Snapshot()
     {
-        if (!OperatingSystem.IsMacOS()) return new Held(null, false);
+        if (!OperatingSystem.IsMacOS()) return new Held(null);
         try
         {
             using var pool = Native.AutoreleasePool();
             var board = Board;
             var types = Native.Send(board, "types");
+            bool files = false, picture = false, text = false;
             if (types != IntPtr.Zero)
                 for (nint i = 0, n = Native.CFArrayGetCount(types); i < n; i++)
-                    if (Native.Text(Native.CFArrayGetValueAtIndex(types, i)) is { } type && CantPutBack(type))
-                        return new Held(null, false);
-            var text = Native.Text(Native.Send(board, "stringForType:", Native.NSString(TextType)));
-            if (!string.IsNullOrEmpty(text)) return new Held(text, false);
-            var items = Native.Send(board, "pasteboardItems");
-            return new Held(null, items == IntPtr.Zero || Native.SendRL(items, "count") == 0);
+                    if (Native.Text(Native.CFArrayGetValueAtIndex(types, i)) is { } type)
+                    {
+                        if (IsSecret(type)) return new Held(null);
+                        files |= type is "public.file-url" or "NSFilenamesPboardType";
+                        picture |= type is "public.tiff" or "public.png" or "public.jpeg" or "public.heic" or "com.adobe.pdf" or "NSTIFFPboardType";
+                        text |= type == TextType;
+                    }
+            // A picture only when it's the point of the copy: a spreadsheet range or a web page also offers itself as
+            // a picture, drawn on request, which is slow for a big copy. Those come back as their text.
+            if (files || (picture && !text)) return Copy(board) is { } items ? new Held(null, items) : new Held(null);
+            var plain = Native.Text(Native.Send(board, "stringForType:", Native.NSString(TextType)));
+            if (!string.IsNullOrEmpty(plain)) return new Held(plain);
+            return new Held(null);
         }
-        catch { return new Held(null, false); }
+        catch { return new Held(null); }
     }
 
-    /** Pasteboard types a plain-text copy would lose: files, pictures, and the marks password managers put on what they copy. */
-    private static bool CantPutBack(string type) =>
-        type is "public.file-url" or "NSFilenamesPboardType" or "org.nspasteboard.ConcealedType"
-            or "public.tiff" or "public.png" or "public.jpeg" or "public.heic" or "com.adobe.pdf" or "NSTIFFPboardType"
-        || type.StartsWith("com.agilebits.", StringComparison.Ordinal); // 1Password's own marks
+    /** Every item on the pasteboard with all its data, or null when it can't all be read (or is too big to hold). */
+    private static Item[]? Copy(IntPtr board)
+    {
+        var items = Native.Send(board, "pasteboardItems");
+        if (items == IntPtr.Zero) return null;
+        var list = new List<Item>();
+        long size = 0;
+        for (nint i = 0, n = Native.CFArrayGetCount(items); i < n; i++)
+        {
+            var item = Native.CFArrayGetValueAtIndex(items, i);
+            var types = Native.Send(item, "types");
+            if (types == IntPtr.Zero) continue;
+            var kept = new List<(string, byte[])>();
+            for (nint j = 0, m = Native.CFArrayGetCount(types); j < m; j++)
+            {
+                if (Native.Text(Native.CFArrayGetValueAtIndex(types, j)) is not { } type) continue;
+                var data = Native.Send(item, "dataForType:", Native.NSString(type));
+                if (data == IntPtr.Zero) continue; // offered but not given (a promise that wasn't kept): leave that type out
+                var bytes = Native.Bytes(data);
+                if ((size += bytes.Length) > MaxHeld) return null;
+                kept.Add((type, bytes));
+            }
+            if (kept.Count > 0) list.Add(new Item(kept.ToArray()));
+        }
+        return list.Count > 0 ? list.ToArray() : null;
+    }
+
+    /** Puts copied items back on the clipboard. False: they couldn't be written. */
+    private static bool Write(Item[] items)
+    {
+        try
+        {
+            using var pool = Native.AutoreleasePool();
+            var board = Board;
+            Native.Send(board, "clearContents");
+            var made = new IntPtr[items.Length];
+            for (int i = 0; i < items.Length; i++)
+            {
+                made[i] = Native.Send(Native.Send(Native.Class("NSPasteboardItem"), "alloc"), "init");
+                foreach (var (type, bytes) in items[i].Types)
+                {
+                    var data = Native.Data(bytes);
+                    Native.SendRB(made[i], "setData:forType:", data, Native.NSString(type));
+                    Native.CFRelease(data);
+                }
+            }
+            var array = MakeArray(made);
+            var ok = Native.SendRB(board, "writeObjects:", array);
+            Native.CFRelease(array);
+            foreach (var m in made) Native.CFRelease(m);
+            return ok;
+        }
+        catch (Exception e)
+        {
+            App.Log("Clipboard restore failed: " + e.Message);
+            return false;
+        }
+    }
+
+    /** The marks password managers put on what they copy. */
+    private static bool IsSecret(string type) =>
+        type == "org.nspasteboard.ConcealedType" || type.StartsWith("com.agilebits.", StringComparison.Ordinal); // 1Password's own marks
 
     /** The text on the clipboard, or null (used by --selftest). */
     internal static string? Read()
     {
         using var pool = Native.AutoreleasePool();
         return Native.Text(Native.Send(Board, "stringForType:", Native.NSString(TextType)));
+    }
+
+    /** Puts a PNG picture on the clipboard, as a screenshot would (for --paste-test). */
+    internal static bool SetPicture(byte[] png) => Write(new[] { new Item(new[] { ("public.png", png) }) });
+
+    /** The PNG picture on the clipboard, or null (for --paste-test). */
+    internal static byte[]? ReadPicture()
+    {
+        using var pool = Native.AutoreleasePool();
+        var data = Native.Send(Board, "dataForType:", Native.NSString("public.png"));
+        return data == IntPtr.Zero ? null : Native.Bytes(data);
     }
 
     /** Writes, reads back and restores the clipboard; for --selftest. */
@@ -234,7 +320,7 @@ public static class TextInjector
         var probe = "Tokalot clipboard test " + Guid.NewGuid().ToString("N")[..8];
         var count = Set(probe, transient: true);
         var back = Read();
-        if (before.Text != null) Set(before.Text, false); else if (before.Empty) Clear();
+        if (before.Items != null) Write(before.Items); else if (before.Text != null) Set(before.Text, false); else Clear();
         return count >= 0 && back == probe ? "OK (wrote, read back and restored)" : $"FAILED (wrote {count >= 0}, read back {(back == null ? "nothing" : back == probe ? "the same" : "something else")})";
     }
 }

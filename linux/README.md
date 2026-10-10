@@ -109,8 +109,11 @@ All desktops
   app that treats that as undo too will have undone one step too many. Redo once in that app
   (usually Ctrl+Shift+Z or Ctrl+Y) to fix it. In apps where Ctrl+Z isn't undo (terminals) the swap
   doesn't work.
-- If the clipboard held a picture or files before a dictation, the dictated text is left on the
-  clipboard afterwards (only text can be put back).
+- After a dictation is pasted, what you had copied goes back on the clipboard: text, a picture or
+  files (with `wl-clipboard` or `xclip` only the picture itself, or the list of files, comes back).
+  Formatted text comes back plain. A password copied from a password manager isn't put back; the
+  clipboard is left empty instead. The dictation only stays on the clipboard when Tokalot couldn't
+  press the paste keys itself.
 - Recordings are saved as WAV (about 2 MB a minute); the Windows app compresses them.
 - No self-update yet: download the newer tar.gz and unpack it over the old folder.
 - "Hidden while an app is full screen" and following the monitor you're working on only know about
@@ -123,8 +126,9 @@ Wayland (GNOME, KDE and others)
 - A Wayland desktop doesn't tell apps which window is in front, so per-app styles can't be chosen
   automatically: every dictation uses the "Everything else" style.
 - For the same reason Tokalot can't tell it is in a terminal, where paste is Ctrl+Shift+V. In a
-  Wayland terminal, paste by hand, or start Tokalot with `TOKALOT_PASTE=ctrl+shift+v` if you mostly
-  dictate into terminals.
+  Wayland terminal the paste does nothing, and the dictation isn't left on the clipboard (Tokalot
+  puts back what you had copied): copy it from History, or start Tokalot with
+  `TOKALOT_PASTE=ctrl+shift+v` if you mostly dictate into terminals.
 
 GNOME
 

@@ -1517,7 +1517,7 @@ class OfflineFlowService : AccessibilityService() {
     /**
      * Pastes [piece] at the cursor, then gives the clipboard back what it held. Android only
      * lets a background service read the clipboard in some situations; when it can't be read
-     * there is nothing to restore and the dictated text stays on it.
+     * (or was empty) the clipboard is emptied instead, so the dictation doesn't stay on it.
      */
     private fun paste(node: AccessibilityNodeInfo, piece: String): Boolean {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -1525,7 +1525,15 @@ class OfflineFlowService : AccessibilityService() {
         copyToClipboard(piece)
         if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return false
         // The paste is handled by the other app a moment later, so don't swap it back too soon.
-        if (previous != null) handler.postDelayed({ runCatching { cm.setPrimaryClip(previous) } }, 800)
+        handler.postDelayed({
+            runCatching {
+                when {
+                    previous != null -> cm.setPrimaryClip(previous)
+                    Build.VERSION.SDK_INT >= 28 -> cm.clearPrimaryClip()
+                    else -> cm.setPrimaryClip(ClipData.newPlainText("", ""))
+                }
+            }
+        }, 800)
         return true
     }
 
