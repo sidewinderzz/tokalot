@@ -124,6 +124,14 @@ public static class Sync
         return d;
     }
 
+    /**
+     * True when the file has no state (missing or empty) but this device already shared something through
+     * it. That is a cloud placeholder or another device mid-write far more often than a real fresh start,
+     * and treating it as one would write only this device's settings and make every other device delete the rest.
+     */
+    public static bool RemoteLost(Data? remote, Data basis) =>
+        remote == null && (basis.Words.Count > 0 || basis.Snippets.Count > 0 || basis.Styles.Count > 0 || (basis.Notes?.Count ?? 0) > 0);
+
     public static bool Same(Data a, Data b) =>
         a.Words.SequenceEqual(b.Words) && a.Snippets.SequenceEqual(b.Snippets) && a.Instructions == b.Instructions &&
         a.Styles.Count == b.Styles.Count && a.Styles.All(kv => b.Styles.TryGetValue(kv.Key, out var v) && v == kv.Value) &&
@@ -170,9 +178,35 @@ public static class Sync
 
     // ---------- running a sync ----------
 
-    private static Data Local(Settings s, List<SyncNote> notes) => new(
-        new List<string>(s.Words), new List<Snippet>(s.Snippets), new Dictionary<string, string>(s.CategoryStyles), s.CustomInstructions)
-    { Notes = notes };
+    private static Data Local(Settings s, List<SyncNote> notes)
+    {
+        // The window may be editing these lists right now; a copy that catches it mid-change is simply taken again.
+        for (int i = 0; ; i++)
+        {
+            try
+            {
+                return new(new List<string>(s.Words), new List<Snippet>(s.Snippets), new Dictionary<string, string>(s.CategoryStyles), s.CustomInstructions)
+                { Notes = notes };
+            }
+            catch (InvalidOperationException) when (i < 5) { Thread.Sleep(20); }
+        }
+    }
+
+    /** Writes a temporary file next to path and swaps it in, so a crash or a full disk never leaves half a file. */
+    private static void WriteSafely(string path, string text)
+    {
+        var tmp = path + ".tmp";
+        try
+        {
+            File.WriteAllText(tmp, text);
+            File.Move(tmp, path, true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); } catch { }
+            throw;
+        }
+    }
 
     private static Data LoadBasis()
     {
@@ -188,7 +222,7 @@ public static class Sync
     private static void SaveState(Data basis)
     {
         var o = new JsonObject { ["lastSynced"] = DateTimeOffset.Now.ToUnixTimeMilliseconds(), ["basis"] = ToJson(basis, null) };
-        File.WriteAllText(StatePath, o.ToJsonString(Settings.Json));
+        WriteSafely(StatePath, o.ToJsonString(Settings.Json));
     }
 
     /** Status line for Settings: the last error, or how long ago it synced. */
@@ -237,7 +271,10 @@ public static class Sync
             var remote = file == null ? null : Parse(file, Catalog.DefaultInstructions);
             var localNotes = Notes.ForSync() ?? throw new InvalidDataException("Couldn't read your voice notes. Will try again.");
             var local = Local(s, localNotes);
-            var merged = Merge(local, remote, LoadBasis());
+            var basis = LoadBasis();
+            if (RemoteLost(remote, basis))
+                throw new InvalidDataException("The sync file is missing or empty right now. Will try again. To start it over, stop syncing and choose it again.");
+            var merged = Merge(local, remote, basis);
 
             // Keys have no basis: take one this device lacks; hand ours over only if the user asked.
             var keys = (file?["keys"] as JsonObject)?.DeepClone().AsObject() ?? new JsonObject();
@@ -253,6 +290,9 @@ public static class Sync
                 if (mine.Length > 0 && !s.KnownKeys.Contains(id)) { s.KnownKeys.Add(id); noted = true; }
             }
 
+            // A word, snippet, style or the instructions changed while the file was being read: applying now
+            // would undo it. Leave it all and sync again, which picks the change up.
+            if (!Same(Local(s, localNotes), local)) { Queue(); return; }
             var notesChanged = !(merged.Notes ?? new()).SequenceEqual(localNotes);
             // A note made or deleted mid-sync: leave it all for the sync that change queued.
             if (notesChanged && !Notes.ApplySynced(localNotes, merged.Notes ?? new())) return;
@@ -269,7 +309,7 @@ public static class Sync
             if (remote == null || !Same(merged, remote) || keysChanged)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-                File.WriteAllText(path, ToJson(merged, keys).ToJsonString(Settings.Json));
+                WriteSafely(path, ToJson(merged, keys).ToJsonString(Settings.Json));
             }
             SaveState(merged);
             LastSynced = DateTime.Now;

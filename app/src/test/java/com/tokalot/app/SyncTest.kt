@@ -156,6 +156,13 @@ class SyncTest {
         assertTrue(r.write)
     }
 
+    @Test fun emptyFileAfterSharingIsRefusedNotTreatedAsAFreshStart() { // 11
+        assertTrue(SyncMerge.remoteLost(null, SyncState(words = listOf("Alpha"))))
+        assertTrue(SyncMerge.remoteLost(null, SyncState(notes = listOf(SyncNote(1, 1, "a")))))
+        assertFalse(SyncMerge.remoteLost(null, SyncFormat.firstBase("default")))
+        assertFalse(SyncMerge.remoteLost(remote(), SyncState(words = listOf("Alpha"))))
+    }
+
     // ---------- the file ----------
 
     @Test fun jsonRoundTripKeepsEveryField() { // 8
