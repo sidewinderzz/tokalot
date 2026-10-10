@@ -89,6 +89,9 @@ public static class Backup
             restored.EncryptedKeys = new Dictionary<string, string>(old.EncryptedKeys);
         restored.SyncFile = old.SyncFile;
         restored.SyncKeys = old.SyncKeys;
+        // A backup from before usage synced has no device id: keep this one's, or the sync file would count the
+        // restored words twice (under the old id and a new one).
+        if (restored.UsageDevice.Length == 0) restored.UsageDevice = old.UsageDevice;
         Settings.Replace(restored);
 
         var recordings = 0;

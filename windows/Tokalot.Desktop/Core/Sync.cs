@@ -14,8 +14,9 @@ namespace Tokalot.Desktop.Core;
  * folder they already sync (OneDrive, Google Drive, Dropbox, Syncthing…). Every Tokalot pointed at
  * the file reads it and adds its own changes. The Android app uses the same file and the same rules.
  *
- * Synced: dictionary, snippets, per-category styles, custom instructions, voice notes, and API keys only if asked.
- * Never synced: history, recordings, usage, per-app overrides, appearance.
+ * Synced: dictionary, snippets, per-category styles, custom instructions, voice notes, each device's word and
+ * dictation counts, and API keys only if asked.
+ * Never synced: history, recordings, cost and token usage, per-app overrides, appearance.
  */
 public static class Sync
 {
@@ -31,6 +32,21 @@ public static class Sync
 
     /** One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one. */
     public sealed record SyncNote(long Id, long Time, string Text);
+
+    /** One month of one device's counts, as the sync file holds them. */
+    public sealed record UsageMonth(long Words, long Dictations);
+
+    /**
+     * One device's usage in the sync file, under that device's own id. Only that device ever changes its
+     * entry, and nothing is added up in the file, so a count can't be counted twice or lost to another device.
+     */
+    public sealed record DeviceUsage(string Name, long Updated, Dictionary<string, UsageMonth> Months)
+    {
+        public long Words => Months.Values.Sum(m => m.Words);
+        public long Dictations => Months.Values.Sum(m => m.Dictations);
+        public bool SameCounts(DeviceUsage o) =>
+            Name == o.Name && Months.Count == o.Months.Count && Months.All(kv => o.Months.TryGetValue(kv.Key, out var m) && m == kv.Value);
+    }
 
     /** When this device last synced, and what went wrong the last time (null = fine). */
     public static DateTime? LastSynced { get; private set; }
@@ -117,6 +133,27 @@ public static class Sync
         return output.OrderByDescending(n => n.Time).ThenByDescending(n => n.Id).ToList();
     }
 
+    /**
+     * The usage the file should have: every other device's entry exactly as the file has it, and this
+     * device's (mine, under id) in place of its own. There is nothing to merge, because each entry has
+     * one writer. An entry whose counts haven't changed is kept as it was, so it doesn't make a write.
+     */
+    public static Dictionary<string, DeviceUsage> MergeUsage(Dictionary<string, DeviceUsage>? remote, string id, DeviceUsage mine)
+    {
+        var output = remote == null ? new Dictionary<string, DeviceUsage>() : new Dictionary<string, DeviceUsage>(remote);
+        output.TryGetValue(id, out var had);
+        if (had != null && had.SameCounts(mine)) { }
+        else if (had == null && mine.Months.Count == 0) { } // nothing counted here yet: no entry to add
+        else output[id] = mine;
+        return output;
+    }
+
+    public static bool SameUsage(Dictionary<string, DeviceUsage>? a, Dictionary<string, DeviceUsage>? b)
+    {
+        a ??= new(); b ??= new();
+        return a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var o) && o.Updated == kv.Value.Updated && o.SameCounts(kv.Value));
+    }
+
     private static Dictionary<string, Snippet> ByTrigger(IEnumerable<Snippet> list)
     {
         var d = new Dictionary<string, Snippet>();
@@ -158,7 +195,41 @@ public static class Sync
 
     private static long? Num(JsonNode? n) => n is JsonValue v && v.TryGetValue<long>(out var x) ? x : null;
 
-    public static JsonObject ToJson(Data d, JsonObject? keys)
+    private static readonly System.Text.RegularExpressions.Regex MonthKey = new(@"^\d{4}-\d{2}$");
+
+    /** The file's "usage" object; null if it has none. Anything that doesn't fit is skipped, never an error. */
+    public static Dictionary<string, DeviceUsage>? ParseUsage(JsonNode? node)
+    {
+        if (node is not JsonObject u) return null;
+        var output = new Dictionary<string, DeviceUsage>();
+        foreach (var (id, dn) in u)
+        {
+            if (dn is not JsonObject d || id.Trim().Length == 0) continue;
+            var months = new Dictionary<string, UsageMonth>();
+            if (d["months"] is JsonObject m)
+                foreach (var (k, cn) in m)
+                    if (cn is JsonObject c && MonthKey.IsMatch(k))
+                        months[k] = new UsageMonth(Math.Max(0, Num(c["words"]) ?? 0), Math.Max(0, Num(c["dictations"]) ?? 0));
+            output[id] = new DeviceUsage(d["name"] is JsonValue nv && nv.TryGetValue<string>(out var name) ? name : "", Num(d["updated"]) ?? 0, months);
+        }
+        return output;
+    }
+
+    public static JsonObject UsageJson(Dictionary<string, DeviceUsage> usage)
+    {
+        var u = new JsonObject();
+        foreach (var (id, d) in usage.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+        {
+            var months = new JsonObject();
+            foreach (var (k, m) in d.Months.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+                months[k] = new JsonObject { ["words"] = m.Words, ["dictations"] = m.Dictations };
+            u[id] = new JsonObject { ["name"] = d.Name, ["updated"] = d.Updated, ["months"] = months };
+        }
+        return u;
+    }
+
+    /** usage null or empty leaves "usage" out of the file. */
+    public static JsonObject ToJson(Data d, JsonObject? keys, Dictionary<string, DeviceUsage>? usage = null)
     {
         var o = new JsonObject
         {
@@ -172,6 +243,7 @@ public static class Sync
             ["instructions"] = d.Instructions,
             ["notes"] = new JsonArray((d.Notes ?? new()).Select(n => (JsonNode?)new JsonObject { ["id"] = n.Id, ["time"] = n.Time, ["text"] = n.Text }).ToArray()),
         };
+        if (usage is { Count: > 0 }) o["usage"] = UsageJson(usage);
         if (keys is { Count: > 0 }) o["keys"] = keys;
         return o;
     }
@@ -219,10 +291,49 @@ public static class Sync
         return new Data(new(), new(), new(), Catalog.DefaultInstructions);
     }
 
-    private static void SaveState(Data basis)
+    /** Every device's usage as the file had it after the last sync, kept so the totals show between syncs. */
+    private static Dictionary<string, DeviceUsage>? lastUsage;
+
+    private static void SaveState(Data basis, Dictionary<string, DeviceUsage> usage)
     {
-        var o = new JsonObject { ["lastSynced"] = DateTimeOffset.Now.ToUnixTimeMilliseconds(), ["basis"] = ToJson(basis, null) };
+        var o = new JsonObject
+        {
+            ["lastSynced"] = DateTimeOffset.Now.ToUnixTimeMilliseconds(), ["basis"] = ToJson(basis, null), ["usage"] = UsageJson(usage),
+        };
         WriteSafely(StatePath, o.ToJsonString(Settings.Json));
+        lastUsage = usage;
+    }
+
+    /** This device's id in the sync file's usage, made the first time it's needed. Kept in the settings, so a backup carries it. */
+    private static string DeviceId(Settings s)
+    {
+        if (s.UsageDevice.Length == 0) { s.UsageDevice = Guid.NewGuid().ToString(); s.Save(); }
+        return s.UsageDevice;
+    }
+
+    private static DeviceUsage MyUsage() => new(
+        (OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "Mac" : "Linux") + " · " + Environment.MachineName,
+        DateTimeOffset.Now.ToUnixTimeMilliseconds(), Usage.ForSync());
+
+    /** Words on every device that shares the sync file. Null when sync is off. */
+    public sealed record Everywhere(long Month, long Total, List<DeviceUsage> Each);
+
+    public static Everywhere? AllDevices()
+    {
+        var s = Settings.Current;
+        if (s.SyncFile.Length == 0) return null;
+        var cached = lastUsage;
+        if (cached == null)
+        {
+            try { if (File.Exists(StatePath)) cached = ParseUsage(JsonNode.Parse(Files.ReadText(StatePath))?["usage"]); }
+            catch { }
+            lastUsage = cached ??= new();
+        }
+        // The file's entries as of the last sync, with this device's own counts as they are right now.
+        var all = s.UsageDevice.Length == 0 ? cached : MergeUsage(cached, s.UsageDevice, MyUsage());
+        var key = DateTime.Now.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture);
+        var each = all.Values.OrderByDescending(d => d.Words).ToList();
+        return new Everywhere(each.Sum(d => d.Months.GetValueOrDefault(key)?.Words ?? 0), each.Sum(d => d.Words), each);
     }
 
     /** Status line for Settings: the last error, or how long ago it synced. */
@@ -306,12 +417,15 @@ public static class Sync
             }
             if (localChanged || noted) s.Save();
             if (notesChanged) localChanged = true;
-            if (remote == null || !Same(merged, remote) || keysChanged)
+            // Usage isn't merged: this device only ever replaces its own entry (see MergeUsage).
+            var remoteUsage = ParseUsage(file?["usage"]);
+            var usage = MergeUsage(remoteUsage, DeviceId(s), MyUsage());
+            if (remote == null || !Same(merged, remote) || keysChanged || !SameUsage(usage, remoteUsage))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-                WriteSafely(path, ToJson(merged, keys).ToJsonString(Settings.Json));
+                WriteSafely(path, ToJson(merged, keys, usage).ToJsonString(Settings.Json));
             }
-            SaveState(merged);
+            SaveState(merged, usage);
             LastSynced = DateTime.Now;
             LastError = null;
         }
@@ -331,6 +445,7 @@ public static class Sync
     {
         debounce?.Change(Timeout.Infinite, Timeout.Infinite);
         try { File.Delete(StatePath); } catch { }
+        lastUsage = null;
         LastSynced = null;
         LastError = null;
     }

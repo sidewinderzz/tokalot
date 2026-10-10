@@ -173,7 +173,11 @@ object Backup {
                 val ed = sp.edit()
                 // Clear everything except existing keys when the backup didn't include keys.
                 sp.all.keys.forEach { k ->
-                    if (!(name == "settings" && k.startsWith(KEY_PREFIX) && !m.hasKeys)) ed.remove(k)
+                    if (name == "settings" && k.startsWith(KEY_PREFIX) && !m.hasKeys) return@forEach
+                    // A backup from before usage synced has no device id: keep this phone's, or the sync
+                    // file would count the restored words twice (under the old id and a new one).
+                    if (name == Usage.PREFS && k == Usage.DEVICE_KEY && Usage.DEVICE_KEY !in values) return@forEach
+                    ed.remove(k)
                 }
                 values.forEach { (k, v) ->
                     when (v) {

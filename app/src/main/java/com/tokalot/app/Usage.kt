@@ -1,10 +1,12 @@
 package com.tokalot.app
 
 import android.content.Context
+import android.os.Build
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 /**
  * Per-month usage and estimated cost, counted on the phone from what each API call reports.
@@ -42,7 +44,12 @@ object Usage {
         val total get() = SttChoice.values().sumOf { sttCost(it) } + CleanupChoice.values().sumOf { llmCost(it) }
     }
 
-    private fun sp(ctx: Context) = ctx.applicationContext.getSharedPreferences("usage", Context.MODE_PRIVATE)
+    const val PREFS = "usage"
+    /** This phone's id in the sync file's usage. It lives with the counts, so a backup carries both together. */
+    const val DEVICE_KEY = "device"
+    private val MONTH = Regex("""\d{4}-\d{2}""")
+
+    private fun sp(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private fun monthKey(t: Long = System.currentTimeMillis()) = SimpleDateFormat("yyyy-MM", Locale.US).format(Date(t))
 
     /** A month's counters; anything unreadable (wrong type, bad JSON) counts as empty rather than crashing. */
@@ -97,6 +104,33 @@ object Usage {
 
     /** Most recent months first, up to [n]. */
     fun recentMonths(ctx: Context, n: Int = 6): List<Month> =
-        sp(ctx).all.keys.filter { it.matches(Regex("""\d{4}-\d{2}""")) }
+        sp(ctx).all.keys.filter { it.matches(MONTH) }
             .sortedDescending().take(n).map { month(ctx, it) }
+
+    @Synchronized
+    fun deviceId(ctx: Context): String =
+        sp(ctx).safeString(DEVICE_KEY, null)?.takeIf { it.isNotBlank() }
+            ?: UUID.randomUUID().toString().also { sp(ctx).edit().putString(DEVICE_KEY, it).commit() }
+
+    /** This phone's words and dictations per month, as the sync file holds them. */
+    fun forSync(ctx: Context): DeviceUsage {
+        val months = sp(ctx).all.keys.filter { it.matches(MONTH) }.sorted().associateWith { k ->
+            val o = read(ctx, k)
+            UsageMonth(o.optDouble("words", 0.0).toLong(), o.optDouble("n", 0.0).toLong())
+        }.filterValues { it.words > 0 || it.dictations > 0 }
+        return DeviceUsage("Android · ${Build.MODEL}", System.currentTimeMillis(), months)
+    }
+
+    /** Words on every device that syncs: (this month, all time, how many devices). Null when sync is off. */
+    data class Everywhere(val month: Long, val total: Long, val devices: Int, val each: List<DeviceUsage>)
+
+    fun everywhere(ctx: Context): Everywhere? {
+        val prefs = Prefs(ctx)
+        if (prefs.syncUri == null) return null
+        // The file's entries as of the last sync, with this phone's own counts as they are right now.
+        val all = SyncMerge.usage(SyncFormat.parseUsage(prefs.syncUsage), deviceId(ctx), forSync(ctx))
+        val key = monthKey()
+        val each = all.values.sortedByDescending { it.words }
+        return Everywhere(each.sumOf { it.months[key]?.words ?: 0L }, each.sumOf { it.words }, each.size, each)
+    }
 }

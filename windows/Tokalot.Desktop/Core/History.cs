@@ -308,5 +308,15 @@ public static class Usage
         }
     }
 
+    /** This device's words and dictations per month, as the sync file holds them. */
+    public static Dictionary<string, Sync.UsageMonth> ForSync()
+    {
+        lock (Gate)
+        {
+            return Load().Where(kv => kv.Value.Words > 0 || kv.Value.Dictations > 0)
+                .ToDictionary(kv => kv.Key, kv => new Sync.UsageMonth(kv.Value.Words, kv.Value.Dictations));
+        }
+    }
+
     internal static void Reload() { lock (Gate) { data = null; dirty = false; unread = false; } }
 }

@@ -81,6 +81,21 @@ internal static class Shots
         Check("9e changed note wins", Sync.Merge(N((1, "a")), N((1, "a2")), N((1, "a"))).Notes![0].Text == "a2");
         var roundNotes = Sync.Parse(System.Text.Json.Nodes.JsonNode.Parse(Sync.ToJson(N((5, "x")), null).ToJsonString())!.AsObject(), "d");
         Check("9f notes json round trip", Ns(roundNotes) == "5" && roundNotes.Notes![0].Text == "x");
+        static Sync.DeviceUsage U(string name, long updated, params (string Month, long Words, long Dictations)[] months) =>
+            new(name, updated, months.ToDictionary(m => m.Month, m => new Sync.UsageMonth(m.Words, m.Dictations)));
+        var pc = U("Windows · FARM-PC", 2, ("2026-09", 1200, 40), ("2026-10", 300, 9));
+        var phone = U("Android · Pixel 8", 1, ("2026-10", 500, 20));
+        var both = Sync.MergeUsage(new() { ["pc"] = pc }, "phone", phone);
+        Check("12a usage: a device adds its own entry", both.Count == 2 && both["pc"] == pc && both["phone"] == phone);
+        var more = Sync.MergeUsage(both, "phone", U("Android · Pixel 8", 9, ("2026-10", 800, 31)));
+        Check("12b usage: only its own entry changes", more["pc"] == pc && more["phone"].Words == 800 && more.Values.Sum(d => d.Words) == 2300);
+        Check("12c usage: same counts make no write", Sync.SameUsage(Sync.MergeUsage(both, "phone", U("Android · Pixel 8", 99, ("2026-10", 500, 20))), both));
+        Check("12d usage: nothing counted adds no entry", Sync.MergeUsage(new() { ["pc"] = pc }, "new", U("Linux", 5)).Count == 1);
+        var roundUsage = Sync.ParseUsage(System.Text.Json.Nodes.JsonNode.Parse(Sync.ToJson(D(), null, both).ToJsonString())!["usage"]);
+        Check("12e usage json round trip", Sync.SameUsage(roundUsage, both) && Sync.ToJson(D(), null)["usage"] == null);
+        var bad = Sync.ParseUsage(System.Text.Json.Nodes.JsonNode.Parse(
+            "{\"a\":{\"name\":\"Mac\",\"months\":{\"2026-10\":{\"words\":12,\"dictations\":-3},\"oops\":{\"words\":5},\"2026-11\":\"x\"}},\"b\":\"not a device\"}"));
+        Check("12f bad usage is skipped", bad!.Count == 1 && bad["a"].Words == 12 && bad["a"].Dictations == 0 && bad["a"].Months.Count == 1);
         Check("10a stray thank you dropped", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.8}]}") == "");
         Check("10b said thank you kept", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.05}]}") == " Thank you.");
         Check("10c other words kept", CloudStt.Text("{\"text\":\"Call me\",\"segments\":[{\"no_speech_prob\":0.9}]}") == "Call me");

@@ -182,9 +182,12 @@ object Sync {
             }
             changed[0] = true
         }
-        if (result.write) {
-            write(app, uri, SyncFormat.encode(result.state, result.fileKeys, System.currentTimeMillis(), BY), bytes.size)
+        // Usage isn't merged: this phone only ever replaces its own entry (see [SyncMerge.usage]).
+        val usage = SyncMerge.usage(remote?.usage, Usage.deviceId(app), Usage.forSync(app))
+        if (result.write || usage != remote?.usage.orEmpty()) {
+            write(app, uri, SyncFormat.encode(result.state, result.fileKeys, System.currentTimeMillis(), BY, usage), bytes.size)
         }
+        prefs.syncUsage = SyncFormat.encodeUsage(usage)
         prefs.syncBase = SyncFormat.encodeBase(result.state)
         prefs.syncLast = System.currentTimeMillis()
     }

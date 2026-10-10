@@ -12,6 +12,18 @@ import org.json.JSONObject
 /** One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one. */
 data class SyncNote(val id: Long, val time: Long, val text: String)
 
+/** One month of one device's counts, as the sync file holds them. */
+data class UsageMonth(val words: Long = 0, val dictations: Long = 0)
+
+/**
+ * One device's usage in the sync file, under that device's own id. Only that device ever changes its
+ * entry, and nothing is added up in the file, so a count can't be counted twice or lost to another device.
+ */
+data class DeviceUsage(val name: String, val updated: Long, val months: Map<String, UsageMonth>) {
+    val words get() = months.values.sumOf { it.words }
+    val dictations get() = months.values.sumOf { it.dictations }
+}
+
 /** What syncs: dictionary, snippets, explicitly chosen styles, the custom instructions and voice notes. */
 data class SyncState(
     val words: List<String> = emptyList(),
@@ -35,6 +47,8 @@ class SyncRemote(
     val by: String = "",
     /** Null in a file last written by a version from before notes synced: this device's notes are then kept as they are. */
     val notes: List<SyncNote>? = null,
+    /** Device id -> that device's usage; null in a file last written by a version from before usage synced. */
+    val usage: Map<String, DeviceUsage>? = null,
 )
 
 class SyncResult(
@@ -113,11 +127,57 @@ object SyncFormat {
         return SyncRemote(
             words, snippets, styles, o.opt("instructions") as? String, keys,
             (o.opt("updated") as? Number)?.toLong() ?: 0, o.opt("by") as? String ?: "", notes,
+            o.optJSONObject("usage")?.let { parseUsage(it) },
         )
     }
 
-    /** The file's text: pretty-printed JSON. [keys] null leaves the "keys" object out. */
-    fun encode(state: SyncState, keys: Map<String, String>?, updated: Long, by: String): String {
+    private val MONTH = Regex("""\d{4}-\d{2}""")
+
+    /** A "usage" object. Anything that doesn't fit is skipped, never an error: it only feeds a number on screen. */
+    private fun parseUsage(u: JSONObject): Map<String, DeviceUsage> {
+        fun count(v: Any?): Long = (v as? Number)?.toLong()?.coerceAtLeast(0L) ?: 0L
+        val out = LinkedHashMap<String, DeviceUsage>()
+        for (id in u.keys()) {
+            val d = u.optJSONObject(id) ?: continue
+            if (id.isBlank()) continue
+            val months = LinkedHashMap<String, UsageMonth>()
+            d.optJSONObject("months")?.let { m ->
+                for (k in m.keys()) {
+                    val c = m.optJSONObject(k) ?: continue
+                    if (MONTH.matches(k)) months[k] = UsageMonth(count(c.opt("words")), count(c.opt("dictations")))
+                }
+            }
+            out[id] = DeviceUsage(d.opt("name") as? String ?: "", (d.opt("updated") as? Number)?.toLong() ?: 0, months)
+        }
+        return out
+    }
+
+    private fun usageJson(usage: Map<String, DeviceUsage>) = JSONObject().also { u ->
+        for (id in usage.keys.sorted()) {
+            val d = usage.getValue(id)
+            val months = JSONObject()
+            for (k in d.months.keys.sorted()) {
+                val m = d.months.getValue(k)
+                months.put(k, JSONObject().put("words", m.words).put("dictations", m.dictations))
+            }
+            u.put(id, JSONObject().put("name", d.name).put("updated", d.updated).put("months", months))
+        }
+    }
+
+    /** The app's private copy of the file's usage, for showing the totals between syncs. */
+    fun encodeUsage(usage: Map<String, DeviceUsage>): String = usageJson(usage).toString()
+
+    fun parseUsage(text: String?): Map<String, DeviceUsage> =
+        text?.let { runCatching { parseUsage(JSONObject(it)) }.getOrNull() } ?: emptyMap()
+
+    /**
+     * The file's text: pretty-printed JSON. [keys] null leaves the "keys" object out, and [usage] null or
+     * empty leaves "usage" out.
+     */
+    fun encode(
+        state: SyncState, keys: Map<String, String>?, updated: Long, by: String,
+        usage: Map<String, DeviceUsage>? = null,
+    ): String {
         val o = JSONObject()
         o.put("app", APP)
         o.put("format", FORMAT)
@@ -132,6 +192,7 @@ object SyncFormat {
         o.put("notes", JSONArray().also { arr ->
             state.notes.forEach { arr.put(JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)) }
         })
+        if (!usage.isNullOrEmpty()) o.put("usage", usageJson(usage))
         if (!keys.isNullOrEmpty()) o.put("keys", JSONObject().also { k -> keys.forEach { (name, v) -> k.put(name, v) } })
         return o.toString(2)
     }
@@ -281,6 +342,22 @@ object SyncMerge {
             // Untouched here ("not set" counts): follow the file, which may also be "not set".
             val v = if (l[c] == b[c]) r[c] else l[c]
             if (v != null) out[c] = v
+        }
+        return out
+    }
+
+    /**
+     * The usage the file should have: every other device's entry exactly as the file has it, and this
+     * device's ([mine], under [id]) in place of its own. There is nothing to merge, because each entry has
+     * one writer. An entry whose counts haven't changed is kept as it was, so it doesn't make a write.
+     */
+    fun usage(remote: Map<String, DeviceUsage>?, id: String, mine: DeviceUsage): Map<String, DeviceUsage> {
+        val out = LinkedHashMap(remote.orEmpty())
+        val had = out[id]
+        when {
+            had != null && had.name == mine.name && had.months == mine.months -> {}
+            had == null && mine.months.isEmpty() -> {} // nothing counted here yet: no entry to add
+            else -> out[id] = mine
         }
         return out
     }

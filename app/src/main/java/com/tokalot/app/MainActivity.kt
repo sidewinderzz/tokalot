@@ -794,6 +794,12 @@ class MainActivity : Activity() {
                 setPadding(0, dp(10), 0, 0)
             })
         }
+        // Every device that syncs, once there's more than this one in the sync file.
+        Usage.everywhere(this)?.takeIf { it.devices > 1 }?.let { e ->
+            stats.addView(text("On all ${e.devices} devices: ${compact(e.month.toInt())} words this month · ${compact(e.total.toInt())} all time", 13f, C.SUB).apply {
+                setPadding(0, dp(10), 0, 0)
+            })
+        }
         stats.setOnClickListener { openSettings(SettingsScreen.DATA) }
         col.addView(stats, lp().margins(this, b = 16))
 
