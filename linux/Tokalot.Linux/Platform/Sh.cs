@@ -56,7 +56,7 @@ public static class Sh
 
     public static bool IsGnome => Desktop.Contains("GNOME", StringComparison.OrdinalIgnoreCase);
 
-    public sealed record Result(int Exit, string Out);
+    public sealed record Result(int Exit, string Out, string Err = "");
 
     /**
      * Runs a program and returns its exit code and output. Exit is -1 if it couldn't start or
@@ -77,12 +77,12 @@ public static class Sh
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi);
             if (p == null) return new Result(-1, "");
-            string outp = "";
-            System.Threading.Tasks.Task<string>? reader = null;
+            string outp = "", errp = "";
+            System.Threading.Tasks.Task<string>? reader = null, errors = null;
             if (capture)
             {
                 reader = p.StandardOutput.ReadToEndAsync();
-                _ = p.StandardError.ReadToEndAsync();
+                errors = p.StandardError.ReadToEndAsync();
             }
             if (stdin != null)
             {
@@ -95,7 +95,8 @@ public static class Sh
                 return new Result(-1, "");
             }
             if (reader != null && reader.Wait(500)) outp = reader.Result;
-            return new Result(p.ExitCode, outp);
+            if (errors != null && errors.Wait(100)) errp = errors.Result;
+            return new Result(p.ExitCode, outp, errp);
         }
         catch { return new Result(-1, ""); }
     }

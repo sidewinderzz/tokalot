@@ -43,10 +43,14 @@ public sealed partial class App : Application
         if (args.Length >= 2 && args[0] == "--transcribe") return SelfTest.Transcribe(args[1]);
 
         // Build-machine checks that drive other apps: paste into TextEdit, hold the shortcut, press ⌘S.
-        if (args.Contains("--paste-test")) return SelfTest.PasteTest();
-        if (args.Length >= 2 && args[0] == "--hold-shortcut") return SelfTest.HoldShortcut(args[1]);
-        if (args.Length >= 2 && args[0] == "--mic-check") return SelfTest.MicCheck(args[1]);
-        if (args.Contains("--save-front")) { TextInjector.Chord(1 /* S */); return 0; }
+        // They press keys with Tokalot's Accessibility permission, so they only run on a build machine (CI=true).
+        if (Environment.GetEnvironmentVariable("CI") == "true")
+        {
+            if (args.Contains("--paste-test")) return SelfTest.PasteTest();
+            if (args.Length >= 2 && args[0] == "--hold-shortcut") return SelfTest.HoldShortcut(args[1]);
+            if (args.Length >= 2 && args[0] == "--mic-check") return SelfTest.MicCheck(args[1]);
+            if (args.Contains("--save-front")) { TextInjector.Chord(1 /* S */); return 0; }
+        }
 
         // Developer tool: "Tokalot --screenshots <folder>" renders every page to PNGs with sample data. Needs no display.
         if (args.Length >= 2 && args[0] == "--screenshots")

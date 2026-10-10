@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 
 namespace Tokalot.Desktop.Core;
 
@@ -22,14 +23,26 @@ public sealed class Entry
 
 internal static class Files
 {
-    /** Reads a file, waiting out a brief lock (antivirus, a backup in progress). */
-    public static string ReadText(string path)
+    /** Reads a file, waiting out a brief lock (antivirus, a backup in progress). tries: 1 reads once without waiting. */
+    public static string ReadText(string path, int tries = 6)
     {
-        for (int i = 0; ; i++)
+        for (int i = 1; ; i++)
         {
             try { return File.ReadAllText(path); }
-            catch (IOException) when (i < 5) { System.Threading.Thread.Sleep(100); }
+            catch (IOException) when (i < tries) { Thread.Sleep(100); }
         }
+    }
+
+    /**
+     * For a file that couldn't be read: true when it is time to try again (at most every two seconds),
+     * so one lock at start-up doesn't leave the file unread, and unsaved, for the whole session.
+     */
+    public static bool RetryDue(ref long lastTry)
+    {
+        var now = Environment.TickCount64;
+        if (now - lastTry < 2000) return false;
+        lastTry = now;
+        return true;
     }
 }
 
@@ -45,27 +58,52 @@ public static class History
 
     private static string FilePath => Paths.File("history.json");
 
-    /** The file exists but couldn't be read (not corrupt, just unavailable): never save over it. */
+    /**
+     * The file exists but couldn't be read (not corrupt, just unavailable): never save over it. It is
+     * read again on later use, and what was added meanwhile is kept and joined to it once it reads.
+     */
     private static bool unread;
+    private static long triedAt;
 
     private static List<Entry> Load()
     {
-        if (cache != null) return cache;
+        if (cache != null && !(unread && Files.RetryDue(ref triedAt))) return cache;
+        List<Entry> read;
         try
         {
-            cache = File.Exists(FilePath)
-                ? JsonSerializer.Deserialize<List<Entry>>(Files.ReadText(FilePath), Settings.Json) ?? new()
+            read = File.Exists(FilePath)
+                ? JsonSerializer.Deserialize<List<Entry>>(Files.ReadText(FilePath, unread ? 1 : 6), Settings.Json) ?? new()
                 : new();
         }
         catch (JsonException)
         {
             try { File.Copy(FilePath, Paths.File("history.corrupt.json"), true); } catch { }
-            cache = new();
+            read = new();
         }
         catch
         {
-            unread = true;
-            cache = new();
+            if (cache == null) { unread = true; triedAt = Environment.TickCount64; cache = new(); }
+            return cache;
+        }
+        if (unread && cache is { Count: > 0 })
+        {
+            // Dictations made while the file was out of reach: a retried one takes its old place, new ones go in front.
+            var fresh = new List<Entry>();
+            foreach (var e in cache)
+            {
+                var i = read.FindIndex(x => x.Id == e.Id);
+                if (i >= 0) read[i] = e; else fresh.Add(e);
+            }
+            read.InsertRange(0, fresh);
+            while (read.Count > Max) read.RemoveAt(read.Count - 1);
+            cache = read;
+            unread = false;
+            try { Save(); } catch { }
+        }
+        else
+        {
+            cache = read;
+            unread = false;
         }
         return cache;
     }
@@ -114,7 +152,7 @@ public static class History
     /** Drops the in-memory copy so the next read comes from disk (after a restore). */
     public static void Reload()
     {
-        lock (Gate) cache = null;
+        lock (Gate) { cache = null; unread = false; }
         Changed?.Invoke();
     }
 
@@ -154,6 +192,15 @@ public static class Usage
             return TokensIn.GetValueOrDefault(id) / 1e6 * pi + TokensOut.GetValueOrDefault(id) / 1e6 * po;
         }
         public double Total => SttSeconds.Keys.Sum(SttCost) + TokensIn.Keys.Union(TokensOut.Keys).Sum(LlmCost);
+
+        /** Adds another month's counts to this one. */
+        public void Add(Month o)
+        {
+            Dictations += o.Dictations; Words += o.Words; Local += o.Local; Fillers += o.Fillers; Corrections += o.Corrections;
+            foreach (var (k, v) in o.SttSeconds) SttSeconds[k] = SttSeconds.GetValueOrDefault(k) + v;
+            foreach (var (k, v) in o.TokensIn) TokensIn[k] = TokensIn.GetValueOrDefault(k) + v;
+            foreach (var (k, v) in o.TokensOut) TokensOut[k] = TokensOut.GetValueOrDefault(k) + v;
+        }
     }
 
     private static Dictionary<string, Month>? data;
@@ -161,19 +208,43 @@ public static class Usage
     private static string FilePath => Paths.File("usage.json");
     private static string Key(DateTime t) => t.ToString("yyyy-MM", CultureInfo.InvariantCulture);
 
+    /** As in History: a file that couldn't be read is tried again later, and what was counted meanwhile is added to it. */
     private static bool unread;
+    private static long triedAt;
+    private static bool dirty;
+    private static Timer? saveTimer;
+
+    static Usage()
+    {
+        // Saves are put off for a moment (one dictation counts several things); quitting writes what is waiting.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Flush();
+    }
 
     private static Dictionary<string, Month> Load()
     {
-        if (data != null) return data;
+        if (data != null && !(unread && Files.RetryDue(ref triedAt))) return data;
+        Dictionary<string, Month> read;
         try
         {
-            data = File.Exists(FilePath)
-                ? JsonSerializer.Deserialize<Dictionary<string, Month>>(Files.ReadText(FilePath), Settings.Json) ?? new()
+            read = File.Exists(FilePath)
+                ? JsonSerializer.Deserialize<Dictionary<string, Month>>(Files.ReadText(FilePath, unread ? 1 : 6), Settings.Json) ?? new()
                 : new();
         }
-        catch (JsonException) { data = new(); }
-        catch { unread = true; data = new(); }
+        catch (JsonException) { read = new(); }
+        catch
+        {
+            if (data == null) { unread = true; triedAt = Environment.TickCount64; data = new(); }
+            return data;
+        }
+        if (unread && data != null)
+        {
+            foreach (var (k, m) in data)
+                if (read.TryGetValue(k, out var had)) had.Add(m); else read[k] = m;
+            dirty = data.Count > 0;
+        }
+        data = read;
+        unread = false;
+        if (dirty) SaveSoon();
         return data;
     }
 
@@ -185,12 +256,29 @@ public static class Usage
             var k = Key(DateTime.Now);
             if (!d.TryGetValue(k, out var m)) d[k] = m = new Month();
             f(m);
-            if (unread) return;
+            dirty = true;
+            SaveSoon();
+        }
+    }
+
+    private static void SaveSoon()
+    {
+        saveTimer ??= new Timer(_ => Flush());
+        saveTimer.Change(1000, Timeout.Infinite);
+    }
+
+    /** Writes counts still waiting to be saved (before a backup, and when quitting). */
+    public static void Flush()
+    {
+        lock (Gate)
+        {
+            if (!dirty || unread || data == null) return;
+            dirty = false;
             // Counting usage must never fail a dictation, and a crash mid-write must not empty the file.
             try
             {
                 var tmp = FilePath + ".tmp";
-                File.WriteAllText(tmp, JsonSerializer.Serialize(d, Settings.Json));
+                File.WriteAllText(tmp, JsonSerializer.Serialize(data, Settings.Json));
                 File.Move(tmp, FilePath, true);
             }
             catch { }
@@ -220,5 +308,5 @@ public static class Usage
         }
     }
 
-    internal static void Reload() { lock (Gate) data = null; }
+    internal static void Reload() { lock (Gate) { data = null; dirty = false; unread = false; } }
 }

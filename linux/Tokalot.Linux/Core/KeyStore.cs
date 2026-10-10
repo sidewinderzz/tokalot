@@ -78,7 +78,7 @@ public static class KeyStore
         });
     }
 
-    /** Blocking: asks the keyring (up to 20 s, in case an unlock prompt is showing), then the file. A failure is remembered as "no key". */
+    /** Blocking: asks the keyring (up to 20 s, in case an unlock prompt is showing), then the file. Null when the keyring couldn't say (asked again later). */
     private static string? Fetch(string service, string where)
     {
         string? value = null;
@@ -87,10 +87,12 @@ public static class KeyStore
         {
             var r = Sh.Run(tool, new[] { "lookup", "application", "tokalot", "service", service }, timeoutMs: 20000);
             if (r.Exit == 0) { value = r.Out.TrimEnd('\n', '\r'); Notice = null; }
-            else if (r.Exit == -1)
+            // No answer, or an error (the unlock prompt was cancelled): unknown, not "no key". A key that just
+            // isn't there makes secret-tool quit with nothing to say.
+            else if (r.Exit == -1 || r.Err.Trim().Length > 0)
             {
                 timedOut = true;
-                Notice = "The login keyring didn't answer, so keys kept there aren't loaded yet. Unlock it; Tokalot asks again at the next dictation.";
+                Notice = "The login keyring didn't answer or stayed locked, so keys kept there aren't loaded yet. Unlock it; Tokalot asks again at the next dictation.";
             }
         }
         value ??= ReadFile().GetValueOrDefault(service);
@@ -108,7 +110,8 @@ public static class KeyStore
         {
             // Not fetched yet: make sure the background fetch is on its way.
             // A finished fetch that gave up waiting (an unlock prompt left open at start-up) is run again.
-            var loading = preload == null || (preload.IsCompleted && unanswered) ? Preload(Settings.Current) : preload;
+            // So is one that finished before this key was noted (settings.json was read late) or that left it unknown.
+            var loading = preload == null || preload.IsCompleted ? Preload(Settings.Current) : preload;
             // The window's thread never waits (it shows "no key" for a moment). Background work does: a dictation
             // would otherwise fail for want of a key, and sync would take a key from the file over the one in the keyring.
             if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess()) return "";
