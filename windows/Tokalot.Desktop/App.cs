@@ -291,13 +291,20 @@ public sealed class App : Application
             {
                 UpdateProgress = p;
                 window?.SetBannerProgress(p);
-            }));
+            }), beforeRestart: () =>
+            {
+                // The app exits without running Quit, so save now and take the tray icon down
+                // (otherwise a dead icon stays in the tray until the pointer passes over it).
+                Controller?.SaveBeforeExit();
+                if (tray != null) tray.Visible = false;
+            });
             // Still here: there was nothing to install after all.
             UpdateProgress = null;
             Refresh();
         }
         catch (Exception e)
         {
+            if (tray != null) tray.Visible = true;
             UpdateProgress = null;
             Log("Update failed: " + e.Message);
             if (window is { IsVisible: true }) Ui.Dialog(window, "The update couldn't be downloaded just now. A new version may still be publishing; try again in a few minutes.\n\n(" + e.Message + ")", cancel: null);

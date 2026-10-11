@@ -50,11 +50,12 @@ public static class Updater
         }
     }
 
-    /** Downloads the pending update, then restarts into it. */
-    public static async Task DownloadAndRestart(Action<int> progress)
+    /** Downloads the pending update, then restarts into it. [beforeRestart] runs just before the app exits. */
+    public static async Task DownloadAndRestart(Action<int> progress, Action? beforeRestart = null)
     {
         if (pending == null) return;
         await Manager.DownloadUpdatesAsync(pending, progress);
+        beforeRestart?.Invoke();
         Manager.ApplyUpdatesAndRestart(pending);
     }
 }
