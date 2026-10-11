@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/readme/hero-dark.png">
-    <img src="docs/readme/hero-light.png" alt="Tokalot: voice typing for Android and Windows. Talk, and it types what you meant." width="100%">
+    <img src="docs/readme/hero-light.png" alt="Tokalot: voice typing for Android, Windows, Linux and Mac. Talk, and it types what you meant." width="100%">
   </picture>
 </p>
 
@@ -14,13 +14,15 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Android-8.0%2B-3A3A3C?logo=android&logoColor=white" alt="Android 8.0+">
   <img src="https://img.shields.io/badge/Windows-10%20%26%2011-3A3A3C" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/Linux-beta-3A3A3C?logo=linux&logoColor=white" alt="Linux beta">
+  <img src="https://img.shields.io/badge/macOS-15%2B%20experimental-3A3A3C?logo=apple&logoColor=white" alt="macOS 15+, experimental">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/sidewinderzz/tokalot?color=3A3A3C" alt="MIT license"></a>
   <a href="https://github.com/sidewinderzz/tokalot/releases"><img src="https://img.shields.io/github/downloads/sidewinderzz/tokalot/total?color=3A3A3C&label=downloads" alt="Downloads"></a>
 </p>
 
 <br>
 
-**Tokalot** *(talk-a-lot)* is voice typing for your phone and your PC. Talk, and Tokalot types what you meant: filler words gone, self-corrections applied, formatted for the app you're in. On Android a small button floats above the keyboard you already use. On Windows you hold **Ctrl+Win** in any app. You bring your own API keys, so there's no subscription, account or Tokalot server.
+**Tokalot** *(talk-a-lot)* is voice typing for your phone and your PC. Talk, and Tokalot types what you meant: filler words gone, self-corrections applied, formatted for the app you're in. On Android a small button floats above the keyboard you already use. On Windows you hold **Ctrl+Win** in any app, and there are early Linux (**Ctrl+Super**) and Mac (**Ctrl+Cmd**) builds that work the same way. You bring your own API keys, so there's no subscription, account or Tokalot server.
 
 <sub>Inspired by <a href="https://wisprflow.ai">Wispr Flow</a>, which is excellent and worth paying for if you want a polished product. Tokalot is an independent, open-source take for people who'd rather bring their own keys. Not affiliated with Wispr.</sub>
 
@@ -45,7 +47,7 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
     </td>
     <td width="33%" valign="top">
       <b>Talk your way</b><br>
-      Hold to talk or tap for hands-free. Auto-stop after 30&nbsp;s of silence, and Esc cancels on Windows.
+      Hold to talk or tap for hands-free. Auto-stop after 30&nbsp;s of silence, and Esc cancels on the computer.
     </td>
     <td width="33%" valign="top">
       <b>Cleans up after you</b><br>
@@ -63,7 +65,7 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
     </td>
     <td valign="top">
       <b>Fast and cheap</b><br>
-      Groq Whisper and GPT-OSS by default. Groq's free tier covers most people; heavy use costs cents.
+      Groq Whisper and GPT-OSS by default. Groq's free tier covers most people; heavy use costs cents. Long dictations are sent in pieces while you talk, so they come back quickly.
     </td>
   </tr>
   <tr>
@@ -77,7 +79,21 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
     </td>
     <td valign="top">
       <b>Yours to keep</b><br>
-      One-file backup and restore, in-app updates, light and dark themes, a usage and cost tracker, and optional sync of your dictionary, snippets, styles and voice notes between devices, with a combined count of the words you've dictated on all of them.
+      One-file backup and restore, in-app updates with a changelog, light and dark themes, a usage and cost tracker, and optional sync of your dictionary, snippets, styles and voice notes between devices, with a combined count of the words you've dictated on all of them.
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <b>Fits the sentence</b><br>
+      Spell a name out ("K-O-W-A-L-S-K-I") and it's written once, then offered for your dictionary. On Android, dictating into the middle of a sentence skips the capital and the period.
+    </td>
+    <td valign="top">
+      <b>No text box needed</b><br>
+      Voice notes (beta) save each dictation as a note and copy it to the clipboard. On Android, a Quick Settings tile or both volume keys (Android 11+) start a dictation from anywhere.
+    </td>
+    <td valign="top">
+      <b>Leaves your clipboard alone</b><br>
+      Once your words are pasted, the clipboard goes back to what it held before, pictures and files included. Dictation only stays on it when it couldn't be pasted.
     </td>
   </tr>
 </table>
@@ -90,6 +106,8 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it in Tokalot's ☰ Settings.
 3. **Allow the mic and turn on the accessibility switch.** The app explains exactly what that permission is used for before it takes you there.
 4. **Talk.** Tap any text box, then tap the floating button.
+
+No text box? Add the **Dictate** tile to Quick Settings: your words go into the text box if there is one, or onto the clipboard if not. Turn on **Voice notes (beta)** under Settings › Recording & look to keep each dictation as a note instead.
 
 > [!NOTE]
 > Android and Play Protect show strong warnings for any app installed outside the Play Store that uses the accessibility permission, because that permission is powerful. That's expected. Everything Tokalot does is in this repo for you to read, and every release is built and signed by GitHub Actions from this code.
@@ -141,7 +159,7 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 ## Privacy
 
 - **Android:** the accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to put your words into that text box. Tokalot doesn't read your messages or notifications, and it skips password fields.
-- **Windows:** the Ctrl+Win listener only watches for that shortcut; it never records your typing. API keys are encrypted with your Windows account, and dictated text is kept out of Windows clipboard history.
+- **Windows:** the Ctrl+Win listener only watches for that shortcut; it never records your typing. API keys are encrypted with your Windows account. Dictated text is kept out of Windows clipboard history, and whatever you had copied before is put back after the paste.
 - History, recordings, settings and keys live only on your device. Backups leave out your API keys unless you choose to include them.
 - Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into, your dictionary words and, on Android, whether the cursor is in the middle of a sentence (never the text around it), so the model can match the style, spelling and capitals. With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
 - Sync is optional and off by default. It works through one small file that you keep in a folder you already sync (Google Drive, OneDrive, Dropbox, Syncthing); there is no Tokalot account or server. History and recordings are never put in it, and API keys only if you turn that on. Each device adds its own word and dictation counts per month (under a random id and the device's name), so every app can show the total across all your devices.
