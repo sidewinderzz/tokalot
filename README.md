@@ -85,7 +85,7 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
   <tr>
     <td valign="top">
       <b>Fits the sentence</b><br>
-      Dictating into the middle of a sentence skips the capital and the period. Spell a name out ("K-O-W-A-L-S-K-I") and it's written once, then offered for your dictionary.
+      Spell a name out ("K-O-W-A-L-S-K-I") and it's written once, then offered for your dictionary. On Android, dictating into the middle of a sentence skips the capital and the period.
     </td>
     <td valign="top">
       <b>No text box needed</b><br>
