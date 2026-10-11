@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -59,7 +62,22 @@ public static class Backup
         // On Linux and macOS a new file is readable by other users by default; a backup holding keys must not be.
         if (includeKeys && !OperatingSystem.IsWindows())
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        // On Windows a file saved outside the user's profile (another drive, a shared folder) can be readable
+        // by other accounts on the PC. A backup holding keys gets access for this user only.
+        if (includeKeys && OperatingSystem.IsWindows())
+            try { OwnerOnly(path); } catch { } // a drive without permissions (FAT32, some network shares) has nothing to lock
         return new Summary(History.All().Count, recordings, includeKeys);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void OwnerOnly(string path)
+    {
+        var me = WindowsIdentity.GetCurrent().User;
+        if (me == null) return;
+        var acl = new FileSecurity();
+        acl.SetAccessRuleProtection(true, false); // drop the permissions inherited from the folder
+        acl.AddAccessRule(new FileSystemAccessRule(me, FileSystemRights.FullControl, AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(acl);
     }
 
     /** Replaces current data with the backup's. Keys already on this PC are kept if the backup has none. */
