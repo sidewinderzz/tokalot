@@ -42,7 +42,7 @@ public sealed class MainWindow : Window
     private readonly HashSet<long> expanded = new(), showOriginal = new();
     private static string styleTab = "MESSAGING";
     private static int? downloadPct;
-    private static LocalModel? downloading; // one at a time
+    private static LocalModel? modelDownloading; // one at a time
     private static string? downloadError;
     private Snippet? editing;
     private bool editingNew;
@@ -1232,9 +1232,9 @@ public sealed class MainWindow : Window
         Section(col, "Offline model");
         col.Children.Add(Ui.List(ModelManager.All.Select(m =>
         {
-            var state = downloading == m ? "Downloading…"
+            var state = modelDownloading == m ? "Downloading…"
                 : ModelManager.IsDownloaded(m) ? "Downloaded"
-                : downloading == null && downloadError != null && S.LocalModel == m.Id ? "Download failed: " + downloadError
+                : modelDownloading == null && downloadError != null && S.LocalModel == m.Id ? "Download failed: " + downloadError
                 : "Click to download";
             return (UIElement)Ui.Choice(m.Label, m.Note + "\n" + state, S.LocalModel == m.Id, () =>
             {
@@ -1242,9 +1242,9 @@ public sealed class MainWindow : Window
                 if (!ModelManager.IsDownloaded(m)) StartDownload(m); else Render();
             });
         }).ToArray()));
-        modelProgress = Ui.Text(downloading != null ? $"Downloading {downloading.Label}: {downloadPct ?? 0}%" : "", 13, C.Sub);
-        if (downloading != null) col.Children.Add(Spaced(modelProgress, 4, 8, 0, 0));
-        var others = ModelManager.All.Where(m => m.Id != S.LocalModel && m != downloading && ModelManager.IsDownloaded(m)).ToArray();
+        modelProgress = Ui.Text(modelDownloading != null ? $"Downloading {modelDownloading.Label}: {downloadPct ?? 0}%" : "", 13, C.Sub);
+        if (modelDownloading != null) col.Children.Add(Spaced(modelProgress, 4, 8, 0, 0));
+        var others = ModelManager.All.Where(m => m.Id != S.LocalModel && m != modelDownloading && ModelManager.IsDownloaded(m)).ToArray();
         if (others.Length > 0)
             col.Children.Add(Spaced(Ui.Button($"Remove the others ({others.Sum(m => m.Size) / 1_000_000} MB)", () =>
             {
@@ -1485,8 +1485,8 @@ public sealed class MainWindow : Window
 
     private void StartDownload(LocalModel m)
     {
-        if (downloading != null) { Toast($"Wait for the {downloading.Label} download to finish"); Render(); return; }
-        downloading = m;
+        if (modelDownloading != null) { Toast($"Wait for the {modelDownloading.Label} download to finish"); Render(); return; }
+        modelDownloading = m;
         downloadPct = 0;
         downloadError = null;
         Render();
@@ -1498,7 +1498,7 @@ public sealed class MainWindow : Window
         });
         Task.Run(() => ModelManager.Download(m, progress)).ContinueWith(t => Dispatcher.BeginInvoke(() =>
         {
-            downloading = null;
+            modelDownloading = null;
             downloadPct = null;
             downloadError = t.Result;
             Render();
