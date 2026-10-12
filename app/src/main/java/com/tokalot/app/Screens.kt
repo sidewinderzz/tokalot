@@ -421,14 +421,14 @@ class SettingsScreen(private val a: MainActivity) {
         }
         setupRow("Accessibility switch", serviceEnabled(), "On", "Set up") { openAccessibilitySetup() }
         val pct = downloadPct
-        val ready = ModelManager.active(this)
+        val haveModel = ModelManager.active(this)
         val modelStatus = when {
-            ready != null -> "${ready.label} downloaded"
+            haveModel != null -> "${haveModel.label} downloaded"
             pct != null -> "Downloading $pct%"
             downloadError != null -> "Failed: $downloadError"
             else -> ""
         }
-        modelStatusView = setupRow("Offline backup model", ready != null || pct != null, modelStatus, "Download") {
+        modelStatusView = setupRow("Offline backup model", haveModel != null || pct != null, modelStatus, "Download") {
             startDownload(prefs.localModel)
         }
         col.addView(setup)
