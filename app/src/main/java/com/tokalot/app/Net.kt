@@ -49,8 +49,23 @@ class Call {
         }
     }
 
+    private val children = ArrayList<Call>()
+
+    /**
+     * A Call for one attempt that can be given up on (a time limit) without stopping the whole dictation.
+     * Cancelling this one cancels the child too.
+     */
+    fun child(): Call {
+        val c = Call()
+        synchronized(open) {
+            if (cancelled) c.cancel() else children.add(c)
+        }
+        return c
+    }
+
     fun cancel() {
-        val conns = synchronized(open) { cancelled = true; open.toList() }
+        val (conns, kids) = synchronized(open) { cancelled = true; open.toList() to children.toList() }
+        kids.forEach { it.cancel() }
         // Closing a TLS socket writes to the network, which Android forbids on the main thread.
         if (conns.isNotEmpty()) Thread { conns.forEach { c -> runCatching { c.disconnect() } } }.start()
     }
@@ -70,6 +85,17 @@ object Link {
         if (caps != null && caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR)) "cell" else "wifi"
     }.getOrDefault("wifi")
 
+    /**
+     * False when Android says there's no usable internet right now: no network at all, or one it couldn't
+     * reach the internet through (no service, a sign-in page). Unknown counts as online.
+     */
+    fun online(ctx: android.content.Context): Boolean = runCatching {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork ?: return false) ?: return false
+        caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(true)
+
     fun slow(ctx: android.content.Context): Boolean = runCatching {
         val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
         val caps = cm.getNetworkCapabilities(cm.activeNetwork)
@@ -85,6 +111,15 @@ object Timeouts {
 
     /** Waiting for the transcript once the audio is uploaded: 20 s plus half the audio length, capped at 2 minutes. */
     fun sttReadMs(audioMs: Long): Int = (20_000L + audioMs.coerceAtLeast(0) / 2).coerceAtMost(120_000L).toInt()
+
+    /**
+     * Weak-signal mode: how long the cloud gets for the whole speech step before the on-device model takes over.
+     * 5 s plus a tenth of the audio length (a bigger upload), capped at 20 s.
+     */
+    fun weakCloudMs(audioMs: Long): Long = (5_000L + audioMs.coerceAtLeast(0) / 10).coerceAtMost(20_000L)
+
+    /** Weak-signal mode: a quick timing of the service slower than this means the link is too poor to wait on. */
+    const val WEAK_PING_MS = 1500
 }
 
 /** Small HTTP helpers. No libraries needed: HttpURLConnection + org.json are built into Android. */

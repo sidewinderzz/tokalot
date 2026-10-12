@@ -55,6 +55,7 @@ class OfflineFlowService : AccessibilityService() {
         private val BUBBLE_TEXT = Color.parseColor("#E2E2E6") // undo / copied hint text, a touch softer than white
         private const val PAD_DP = 8        // margin inside the window around the square, for its shadow
         private const val MIN_SAMPLES = Recorder.SAMPLE_RATE / 2 // half a second
+        private const val SIDE_ARM_DP = 64 // how far sideways the button is slid to switch a recording to on-device
         private const val AUTO_STOP_MS = 30_000L
         private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
         private const val LEARN_WATCH_MS = 120_000L // how long a dictation's text box is looked at again for corrections
@@ -94,6 +95,7 @@ class OfflineFlowService : AccessibilityService() {
     private var state = State.IDLE
     private var targetApp: String? = null // app you were in when you tapped the mic
     private var pendingStop = false       // released (hold mode) before the mic finished starting
+    private var onDevice = false          // slid sideways while recording: this one is done on the phone
     private var pendingCancel = false
     private var autoStopped = false
     private var workingSince = 0L         // when transcribing began, to ignore a double-tap on "stop"
@@ -327,6 +329,7 @@ class OfflineFlowService : AccessibilityService() {
      * Tap mode:  tap = start/stop, long-press = cancel, drag = move; while recording, slide up to the X = cancel.
      * Hold mode: hold = talk, release = finish, slide up to the X then release = cancel,
      *            move right away (before the hold kicks in) = drag.
+     * Either mode, while recording: slide sideways = do this one on the phone (the button springs back).
      */
     private inner class DragTouch : View.OnTouchListener {
         private val slop = ViewConfiguration.get(this@OfflineFlowService).scaledTouchSlop
@@ -340,6 +343,7 @@ class OfflineFlowService : AccessibilityService() {
         private var inCancelZone = false
         private var sliding = false   // square style, recording: sliding toward the cancel X
         private var slideP = 0f
+        private var sideways = false  // recording: sliding left or right, to switch this one to on-device
         private val longPress = Runnable {
             if (!dragging) {
                 longPressed = true
@@ -362,7 +366,7 @@ class OfflineFlowService : AccessibilityService() {
                     downX = e.rawX; downY = e.rawY
                     startX = p.x; startY = p.y
                     dragging = false; longPressed = false; holding = false; inCancelZone = false
-                    sliding = false; slideP = 0f
+                    sliding = false; slideP = 0f; sideways = false; sideNoted = false
                     inDropZone = false
                     v.animate().scaleX(0.92f).scaleY(0.92f).setDuration(90).start() // a small press-in
                     if (holdMode && state == State.IDLE) handler.postDelayed(holdStart, 220)
@@ -372,7 +376,15 @@ class OfflineFlowService : AccessibilityService() {
                     val dx = e.rawX - downX
                     val dy = e.rawY - downY
                     val canSlide = holding || state == State.RECORDING
-                    if (canSlide && (sliding || abs(dx) > slop || abs(dy) > slop)) {
+                    // The first move past the slop picks the direction: mostly sideways = on-device, else the cancel guide.
+                    if (canSlide && !sliding && (sideways || (abs(dx) > slop && abs(dx) > abs(dy) * 1.2f))) {
+                        if (!sideways) { sideways = true; handler.removeCallbacks(longPress) }
+                        val reach = dp(SIDE_ARM_DP).toFloat()
+                        p.x = startX + dx.coerceIn(-reach * 1.25f, reach * 1.25f).toInt()
+                        p.y = startY
+                        try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                        if (abs(dx) >= reach && !onDevice) armOnDevice()
+                    } else if (canSlide && (sliding || abs(dx) > slop || abs(dy) > slop)) {
                         // Square style while recording: the button only moves along the guide toward
                         // the X. Most of the way there and a release cancels.
                         if (!sliding) {
@@ -422,6 +434,11 @@ class OfflineFlowService : AccessibilityService() {
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(holdStart)
                     when {
+                        sideways -> {
+                            p.x = startX; p.y = startY
+                            try { wm.updateViewLayout(v, p) } catch (_: Exception) {}
+                            if (holding) finishRecording()
+                        }
                         sliding -> {
                             // Back to where it started, then cancel or carry on.
                             val armed = slideP >= CancelTrackView.ARM
@@ -456,7 +473,7 @@ class OfflineFlowService : AccessibilityService() {
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(holdStart)
                     if (dragging) showDropZone(false)
-                    if (sliding) { p.x = startX; p.y = startY; try { wm.updateViewLayout(v, p) } catch (_: Exception) {}; track?.progress = 0f }
+                    if (sliding || sideways) { p.x = startX; p.y = startY; try { wm.updateViewLayout(v, p) } catch (_: Exception) {}; track?.progress = 0f }
                     if (holding) finishRecording()
                     holding = false
                     releasePress(v)
@@ -464,6 +481,19 @@ class OfflineFlowService : AccessibilityService() {
             }
             return true
         }
+
+        /** Slid far enough sideways: this dictation skips the cloud speech service. */
+        private fun armOnDevice() {
+            if (!ModelManager.isReady(this@OfflineFlowService)) {
+                if (!sideNoted) { sideNoted = true; toast("Download an on-device model in Tokalot's settings first") }
+                return
+            }
+            onDevice = true
+            takeLive()?.cancel() // stop sending pieces to the cloud while the rest is said
+            Haptics.play(this@OfflineFlowService, Haptics.Kind.TICK)
+            toast("On-device for this one")
+        }
+        private var sideNoted = false
 
         private fun releasePress(v: View) {
             v.animate().scaleX(1f).scaleY(1f).setDuration(180)
@@ -926,7 +956,7 @@ class OfflineFlowService : AccessibilityService() {
         stopWatching(learn = true) // a correction made before this dictation still counts (its note stays up)
         lastInsert = null
         targetApp = rootInActiveWindow?.packageName?.toString()?.takeIf { it != packageName }
-        pendingStop = false; pendingCancel = false; autoStopped = false
+        pendingStop = false; pendingCancel = false; autoStopped = false; onDevice = false
         dictation.warmUp() // open connections to the providers while you talk
         setState(State.STARTING)
         // Start the mic foreground service first, then open the mic once Android confirms it.
@@ -1088,7 +1118,8 @@ class OfflineFlowService : AccessibilityService() {
         // After an auto-stop, drop the trailing 30 s of silence: less to upload, and Whisper
         // tends to invent words ("Thank you.") in long silences.
         val keep = if (autoStopped && voiceEnd > 0) (voiceEnd + Recorder.SAMPLE_RATE).coerceAtMost(taken.size) else taken.size
-        if (keep < Recorder.SAMPLE_RATE * 10) { transcribe(taken.audio(keep), speech, early, mode); return }
+        val local = onDevice
+        if (keep < Recorder.SAMPLE_RATE * 10) { transcribe(taken.audio(keep), speech, early, mode, local); return }
         // A long recording is put together off the main thread (up to ~19 MB), so the button doesn't freeze meanwhile.
         setState(State.WORKING)
         workingSince = SystemClock.elapsedRealtime()
@@ -1099,7 +1130,7 @@ class OfflineFlowService : AccessibilityService() {
             handler.post {
                 preparing = false
                 if (state != State.WORKING) { early?.cancel(); return@post }
-                transcribe(audio, speech, early, mode)
+                transcribe(audio, speech, early, mode, local)
                 // Cancelled while it was being put together: cancelled like any other, so it's kept in history.
                 if (prepCancelled && state == State.WORKING) dictation.cancel()
             }
@@ -1107,7 +1138,7 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     /** Main thread. Sends a finished recording off for transcription, unless it's too short or silent. */
-    private fun transcribe(audio: Recorder.Audio, speech: Int, early: LiveStt?, mode: Manual?) {
+    private fun transcribe(audio: Recorder.Audio, speech: Int, early: LiveStt?, mode: Manual?, local: Boolean = false) {
         val samples = audio.samples
         if (samples.size < MIN_SAMPLES) {
             early?.cancel()
@@ -1138,7 +1169,7 @@ class OfflineFlowService : AccessibilityService() {
         val seconds = samples.size / Recorder.SAMPLE_RATE.toFloat()
         startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds, early?.lastRate ?: 0f)
         val spot = if (mode == Manual.NOTE) null else cursorSpot()
-        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = spot) { outcome, err ->
+        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = spot, onDevice = local) { outcome, err ->
             setState(State.IDLE)
             when {
                 // Nothing is typed; the recording is in the app's history with a Transcribe button.

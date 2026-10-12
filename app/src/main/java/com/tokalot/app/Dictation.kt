@@ -21,6 +21,7 @@ class Dictation(context: Context) {
     private val exec = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private var whisperCtx = 0L
+    private var whisperModel: LocalModel? = null // which file whisperCtx was loaded from
     @Volatile private var localRunning = false
     /** This instance's own cancel flag for on-device Whisper (a retry in the app and the button can run at once). */
     private val abortFlag by lazy { WhisperBridge.newAbort() }
@@ -30,6 +31,9 @@ class Dictation(context: Context) {
     /** How quick the connection was when this dictation started ([Net.rtt], milliseconds), or -1 if not measured. */
     @Volatile var pingMs = -1
         private set
+    /** Whether that timing has finished (a -1 then means it failed), and when the warm-up began. */
+    @Volatile private var pingDone = false
+    @Volatile private var warmedAt = 0L
 
     /** For the progress ring: 0 while the speech is being recognised, 1 during cleanup, 2 when the text is ready. */
     @Volatile var stage = 0
@@ -61,7 +65,7 @@ class Dictation(context: Context) {
     }
 
     /** One process() call: what cancel() and the deadline act on. */
-    private inner class Job(val live: LiveStt?, val spot: TextTools.Spot?, val onDone: (Outcome?, String?) -> Unit) {
+    private inner class Job(val live: LiveStt?, val spot: TextTools.Spot?, val onDevice: Boolean, val onDone: (Outcome?, String?) -> Unit) {
         val call = Call()
         /** CANCELLED or TIMED_OUT once the job was stopped from outside. */
         @Volatile var halted: String? = null
@@ -93,12 +97,15 @@ class Dictation(context: Context) {
     fun warmUp() {
         val prefs = Prefs(app)
         pingMs = -1
+        pingDone = false
+        warmedAt = if (prefs.cloudSttReady) System.nanoTime() else 0L
         Thread {
             if (prefs.cloudSttReady) {
                 val c = prefs.stt
                 val h = mapOf("Authorization" to "Bearer ${prefs.key(c.service)}")
                 Net.warm("${c.baseUrl}/models", h)
                 pingMs = Net.rtt("${c.baseUrl}/models", h) // on the connection just opened: the link as it is right now
+                pingDone = true
             }
             if (prefs.cleanupReady) {
                 val c = prefs.cleanup
@@ -144,14 +151,15 @@ class Dictation(context: Context) {
      * retry: the failed or cancelled history entry these samples belong to; the result replaces it.
      * live: the pieces of this recording already sent off while the user was talking, if any.
      * spot: where the cursor was in the text box when the user stopped talking, for the cleanup.
+     * onDevice: the user asked for this one to be done on the phone (slid the button sideways).
      */
     fun process(
         samples: FloatArray, appPkg: String?, sparse: Boolean = false, retry: Entry? = null, live: LiveStt? = null,
-        spot: TextTools.Spot? = null, onDone: (Outcome?, String?) -> Unit,
+        spot: TextTools.Spot? = null, onDevice: Boolean = false, onDone: (Outcome?, String?) -> Unit,
     ) {
         main.removeCallbacks(unload)
         stage = 0
-        val job = Job(live, spot, onDone)
+        val job = Job(live, spot, onDevice, onDone)
         current = job
         val audioMs = samples.size * 1000L / Recorder.SAMPLE_RATE
         main.postDelayed(job.deadline, Timeouts.deadlineMs(audioMs))
@@ -219,15 +227,19 @@ class Dictation(context: Context) {
 
         // 1. Speech to text: the pieces sent while talking, if there are any; otherwise the chosen cloud
         // provider, then any other cloud provider with a key, then on-device.
+        // Asked for on-device (or, in weak-signal mode, the link looks too poor to wait on): straight to the phone.
+        val weak = prefs.weakSignal && ModelManager.isReady(app)
+        val skipCloud = ModelManager.isReady(app) && sttOrder(prefs).isNotEmpty() && (job.onDevice || (weak && poorLink()))
         var raw: String? = null
         val live = job.live
-        if (live != null) {
+        if (skipCloud) live?.cancel()
+        else if (live != null) {
             raw = live.finish(samples)
             call.check()
             if (raw != null) Usage.recordStt(app, prefs.stt, seconds)
         }
         val inPieces = raw != null
-        val order = if (inPieces) emptyList() else sttOrder(prefs)
+        val order = if (inPieces || skipCloud) emptyList() else sttOrder(prefs)
         // Long recordings go up as the small AAC file (about a tenth of the WAV) so a slow
         // connection doesn't time out. Short ones stay WAV: encoding first would only add delay.
         var m4a = AudioStore.file(app, id).takeIf { it.exists() }
@@ -238,28 +250,38 @@ class Dictation(context: Context) {
         }
         call.prepMs += (System.nanoTime() - prepFrom) / 1_000_000
         var usedLocal = false
-        var offline = false // the speech service couldn't be reached at all
+        var offline = skipCloud // the speech service couldn't be reached at all (or wasn't tried)
+        var weakSwitch = skipCloud && !job.onDevice // weak-signal mode moved this one to the phone
         for (c in order) {
             call.check()
+            // Weak-signal mode: the cloud gets a few seconds in all, then the phone's own model takes over.
+            val attempt = if (weak) call.child() else call
+            val outOfTime = java.util.concurrent.atomic.AtomicBoolean(false)
+            val giveUp = Runnable { outOfTime.set(true); attempt.cancel() }
+            if (weak) main.postDelayed(giveUp, Timeouts.weakCloudMs(audioMs))
             try {
                 raw = try {
                     val from = System.nanoTime()
                     try {
-                        transcribeCloud(prefs, c, samples, m4a, hint, audioMs, call)
+                        transcribeCloud(prefs, c, samples, m4a, hint, audioMs, attempt)
                     } catch (e: java.io.IOException) {
                         // A failure within a couple of seconds is usually a connection the network had quietly
                         // dropped while it sat idle, not a dead link: one fresh try is far quicker than giving up.
                         val quick = (System.nanoTime() - from) / 1_000_000 < 2500
-                        if (e is HttpException || e is CancelledException || call.cancelled || !quick) throw e
-                        transcribeCloud(prefs, c, samples, m4a, hint, audioMs, call)
+                        if (e is HttpException || e is CancelledException || attempt.cancelled || !quick) throw e
+                        transcribeCloud(prefs, c, samples, m4a, hint, audioMs, attempt)
                     }
-                } catch (e: Exception) { throw e }
+                } finally {
+                    main.removeCallbacks(giveUp)
+                    if (attempt !== call) { call.prepMs += attempt.prepMs; call.sendMs += attempt.sendMs; call.waitMs += attempt.waitMs }
+                }
                 Usage.recordStt(app, c, seconds)
                 if (c != prefs.stt) warnings += "${prefs.stt.label} unavailable, used ${c.label}"
                 break
             } catch (e: Exception) {
                 call.check()
-                if (warnings.isEmpty()) warnings += "${c.label} failed: ${e.message?.take(80)}"
+                if (outOfTime.get()) weakSwitch = true
+                else if (warnings.isEmpty()) warnings += "${c.label} failed: ${e.message?.take(80)}"
                 // No answer at all (rather than an error from the service): the connection is the problem, and the
                 // next provider would only wait out the same timeout. Use the phone's own model if it's there.
                 if (e !is HttpException && ModelManager.isReady(app)) { offline = true; break }
@@ -272,6 +294,7 @@ class Dictation(context: Context) {
                     else warnings.first() + ", but the on-device model isn't downloaded"
                 )
             }
+            if (weakSwitch && warnings.isEmpty()) warnings += "Weak signal, transcribed on the phone"
             raw = transcribeLocal(job, samples, hint)
             usedLocal = true
         }
@@ -337,7 +360,8 @@ class Dictation(context: Context) {
             val parts = if (usedLocal || inPieces) "" else
                 " (prepare %.2f, send %.2f, wait %.2f)".format(us, call.prepMs / 1000.0, call.sendMs / 1000.0, call.waitMs / 1000.0)
             val line = "%.1f s spoken · speech %.2f s".format(us, seconds, sttMs / 1000.0) +
-                (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device)" else parts) +
+                (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device, ${whisperModel?.id}" +
+                    (if (job.onDevice) ", asked for" else if (weakSwitch) ", weak signal" else "") + ")" else parts) +
                 when {
                     quick -> " · cleanup skipped, nothing to fix"
                     cleaned -> " · cleanup %.2f s".format(us, (allMs - sttMs) / 1000.0)
@@ -355,6 +379,20 @@ class Dictation(context: Context) {
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
         Usage.recordEdits(app, AppContext.fillerCount(base), if (cleaned) AppContext.correctionCount(base) else 0)
         return Outcome(finalText, warnings.firstOrNull(), id, plain, fitted = cleaned && spot?.mid == true, note = asNote != null)
+    }
+
+    /**
+     * Weak-signal mode, before anything is sent: true when there's no usable internet, or the quick timing taken
+     * while the user talked failed, was slow, or still hadn't come back a couple of seconds in.
+     */
+    private fun poorLink(): Boolean {
+        if (!Link.online(app)) return true
+        val since = (System.nanoTime() - warmedAt) / 1_000_000
+        // Nothing measured for this recording (a retry from the app): only the check above to go by.
+        if (warmedAt == 0L || since > 120_000) return false
+        val ping = pingMs
+        if (pingDone) return ping < 0 || ping > Timeouts.WEAK_PING_MS
+        return since > 2500
     }
 
     /** Sends the compressed file when there is one; if the provider rejects the format, sends WAV instead. */
@@ -443,19 +481,25 @@ class Dictation(context: Context) {
     // ---------- on-device Whisper (only touched from the exec thread) ----------
 
     private fun transcribeLocal(job: Job, samples: FloatArray, hint: String): String {
+        val model = ModelManager.active(app) ?: throw IllegalStateException("The on-device model isn't downloaded")
+        if (whisperModel != model) releaseLocal() // a different model was picked in Settings since the last one
         if (whisperCtx == 0L) {
-            whisperCtx = WhisperBridge.init(ModelManager.modelFile(app).absolutePath)
+            whisperCtx = WhisperBridge.init(ModelManager.modelFile(app, model).absolutePath)
             if (whisperCtx == 0L) {
                 // The file was checked when it was downloaded, so a failed load is usually the phone being short of
                 // memory. Only a file that no longer matches is removed (so Settings offers the download again).
-                if (!ModelManager.verify(app)) {
-                    ModelManager.modelFile(app).delete()
+                if (!ModelManager.verify(app, model)) {
+                    ModelManager.delete(app, model)
                     throw IllegalStateException("The on-device model was damaged. Download it again in Settings.")
                 }
-                throw IllegalStateException("Not enough memory for the on-device model. Close some apps and try again.")
+                throw IllegalStateException(
+                    if (model == LocalModel.BASE) "Not enough memory for the on-device model. Close some apps and try again."
+                    else "Not enough memory for the ${model.label} on-device model. Close some apps, or pick a smaller one in Settings."
+                )
             }
+            whisperModel = model
         }
-        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        val threads = model.threads(Runtime.getRuntime().availableProcessors())
         // Order matters: halt() sets the cancel flag first and the abort flag second, so a
         // cancel that lands anywhere around these lines is caught by one of the two checks.
         localRunning = true
@@ -480,6 +524,7 @@ class Dictation(context: Context) {
             WhisperBridge.free(whisperCtx)
             whisperCtx = 0L
         }
+        whisperModel = null
     }
 
     fun shutdown() {

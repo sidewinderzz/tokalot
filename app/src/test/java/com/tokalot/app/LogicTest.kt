@@ -233,9 +233,33 @@ class LogicTest {
 
     // ---------- model ----------
 
-    @Test fun pinnedModelHashIsAWellFormedSha256() {
-        assertEquals(64, ModelManager.SHA256.length)
-        assertTrue(ModelManager.SHA256.all { it in "0123456789abcdef" })
+    @Test fun pinnedModelHashesAreWellFormedSha256() {
+        for (m in LocalModel.values()) {
+            assertEquals(m.name, 64, m.sha256.length)
+            assertTrue(m.name, m.sha256.all { it in "0123456789abcdef" })
+        }
+        // The original model keeps its file name, so phones that already have it don't download it again.
+        assertEquals("ggml-base.en-q5_1.bin", LocalModel.BASE.file)
+        assertEquals(LocalModel.values().size, LocalModel.values().map { it.file }.toSet().size)
         assertEquals("00ff10", ModelManager.hex(byteArrayOf(0, -1, 16)))
+    }
+
+    @Test fun unknownModelIdFallsBackToTheStandardOne() {
+        assertEquals(LocalModel.BASE, LocalModel.of(null))
+        assertEquals(LocalModel.BASE, LocalModel.of("huge"))
+        assertEquals(LocalModel.TURBO, LocalModel.of("turbo"))
+    }
+
+    @Test fun biggerModelsUseMoreCoresButNeverAllOfThem() {
+        assertEquals(4, LocalModel.BASE.threads(8))
+        assertEquals(6, LocalModel.TURBO.threads(8))
+        assertEquals(2, LocalModel.SMALL.threads(2))
+        assertEquals(6, LocalModel.SMALL.threads(12))
+    }
+
+    @Test fun weakSignalCloudBudgetGrowsWithTheAudioButStaysShort() {
+        assertEquals(5_000L, Timeouts.weakCloudMs(0))
+        assertEquals(6_000L, Timeouts.weakCloudMs(10_000))
+        assertEquals(20_000L, Timeouts.weakCloudMs(300_000))
     }
 }
