@@ -1,5 +1,10 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.6.0
+
+- Choose a bigger offline model in Settings › Offline model: Standard (60 MB, as before), Better (190 MB) or Best (574 MB, the same model as Groq Whisper, compressed). Bigger ones make fewer mistakes, most of all with background noise. Your choice is used once it's downloaded; until then the one you have keeps working.
+- New: Prefer offline in weak signal (Settings › Offline model). With no connection, or a speech service that was slow to answer while you talked, the dictation goes straight to the offline model, and the cloud only gets a few seconds before the offline model takes over.
+
 ## New in 0.5.3
 
 - Cleanup can no longer type a reply of its own. When a dictation was itself a request to an AI ("give me three designs"), the cleanup model could answer it and its answer was pasted along with your words. The instructions are firmer, and a result with clearly more words than you said is now thrown away in favour of the backup or basic cleanup.
