@@ -19,6 +19,7 @@ Java_com_tokalot_app_WhisperBridge_init(JNIEnv *env, jobject /*thiz*/, jstring p
     const char *p = env->GetStringUTFChars(path, nullptr);
     whisper_context_params cp = whisper_context_default_params();
     cp.use_gpu = false;
+    cp.flash_attn = true;  // less memory traffic in the attention layers: faster on a phone's CPU
     whisper_context *ctx = whisper_init_from_file_with_params(p, cp);
     env->ReleaseStringUTFChars(path, p);
     return reinterpret_cast<jlong>(ctx);
@@ -49,6 +50,11 @@ Java_com_tokalot_app_WhisperBridge_transcribe(JNIEnv *env, jobject /*thiz*/, jlo
     wp.no_timestamps = true;
     wp.suppress_blank = true;
     wp.greedy.best_of = 1;  // fastest decode; accuracy is fine for dictation
+    // Whisper always works through a 30 s window, padding a short clip with silence. Most of the time goes on
+    // that window, so a dictation of a few seconds is given one sized to it (50 frames a second, with room to
+    // spare). Long recordings keep the full window.
+    int frames = static_cast<int>(static_cast<long long>(n) * 50 / WHISPER_SAMPLE_RATE);
+    if (frames + 128 < 1500) wp.audio_ctx = ((frames + 128 + 63) / 64) * 64;
     wp.abort_callback = [](void *flag) {
         return flag != nullptr && static_cast<std::atomic<bool> *>(flag)->load();
     };

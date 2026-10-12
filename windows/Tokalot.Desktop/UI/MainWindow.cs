@@ -37,10 +37,12 @@ public sealed class MainWindow : Window
     /** The update line in Settings › About, which shows the download progress too. */
     private TextBlock? settingsUpdateText;
     private TextBlock? modelStatus;
+    private TextBlock? modelProgress; // under the list in Settings › Offline model
     private int historyLimit = 100, notesLimit = 100;
     private readonly HashSet<long> expanded = new(), showOriginal = new();
     private static string styleTab = "MESSAGING";
     private static int? downloadPct;
+    private static LocalModel? modelDownloading; // one at a time
     private static string? downloadError;
     private Snippet? editing;
     private bool editingNew;
@@ -980,7 +982,7 @@ public sealed class MainWindow : Window
     private static readonly (string Name, string[] Sections)[] Categories =
     {
         (SetupCategory, new[] { "Setup" }),
-        (SpeechCategory, new[] { "Speech to text", "AI cleanup", "API keys", "Speed" }),
+        (SpeechCategory, new[] { "Speech to text", "Offline model", "AI cleanup", "API keys", "Speed" }),
         ("Recording & look", new[] { "Recording", "Recording indicator", "Appearance" }),
         (DataCategory, new[] { "Recordings", "Sync", "Backup", "Usage" }),
         ("About", new[] { "About" }),
@@ -1117,13 +1119,14 @@ public sealed class MainWindow : Window
             return Spaced(Spread(Ui.Stack(Ui.Text(title, 15.5), st), action ?? new Border()), 20, 13, 16, 13);
         }
         var hookOk = App.Current.Controller?.HotkeyWorks ?? true;
-        var modelText = ModelManager.IsReady ? "Downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
+        var active = ModelManager.Active;
+        var modelText = active != null ? active.Label + " downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
         col.Children.Add(Ui.List(
             Status("Ctrl+Win shortcut", hookOk, "Working", "Not working. Restart Tokalot."),
             Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key (free)",
                 S.CloudSttReady ? null : Ui.Button("Add key", () => OpenSettingsAt(SpeechCategory))),
-            Status("Offline backup model (60 MB)", ModelManager.IsReady || downloadPct != null, modelText, modelText,
-                ModelManager.IsReady || downloadPct != null ? null : Ui.Button("Download", StartDownload)),
+            Status("Offline backup model", active != null || downloadPct != null, modelText, modelText,
+                active != null || downloadPct != null ? null : Ui.Button("Download", () => StartDownload(ModelManager.Of(S.LocalModel)))),
             Ui.SettingRow("Start with Windows", Updater.CanUpdate ? "Runs quietly in the tray so Ctrl+Win always works." : "Available in the installed version.",
                 Ui.Switch(S.LaunchAtStartup, v => { S.LaunchAtStartup = v; S.Save(); if (Updater.CanUpdate) Startup.Apply(v); }))));
         col.Children.Add(Spaced(Ui.Text("Windows asks before any app can use the microphone. If dictation hears nothing, check Settings › Privacy & security › Microphone and allow desktop apps.", 13, C.Sub), 4, 8, 0, 0));
@@ -1224,6 +1227,33 @@ public sealed class MainWindow : Window
             return (UIElement)Ui.Choice(o.Label, o.Note + (needsKey ? " Needs a key." : ""), S.Stt == o.Id, () => { S.Stt = o.Id; S.Save(); Render(); });
         }).ToArray()));
         if (S.Stt != "LOCAL") col.Children.Add(ModelField(S.SttModel(S.SttOption), v => { S.SttModels[S.Stt] = v.Trim(); SaveSoon(); }));
+
+        // --- Offline model
+        Section(col, "Offline model");
+        col.Children.Add(Ui.List(ModelManager.All.Select(m =>
+        {
+            var state = modelDownloading == m ? "Downloading…"
+                : ModelManager.IsDownloaded(m) ? "Downloaded"
+                : modelDownloading == null && downloadError != null && S.LocalModel == m.Id ? "Download failed: " + downloadError
+                : "Click to download";
+            return (UIElement)Ui.Choice(m.Label, m.Note + "\n" + state, S.LocalModel == m.Id, () =>
+            {
+                S.LocalModel = m.Id; S.Save();
+                if (!ModelManager.IsDownloaded(m)) StartDownload(m); else Render();
+            });
+        }).ToArray()));
+        modelProgress = Ui.Text(modelDownloading != null ? $"Downloading {modelDownloading.Label}: {downloadPct ?? 0}%" : "", 13, C.Sub);
+        if (modelDownloading != null) col.Children.Add(Spaced(modelProgress, 4, 8, 0, 0));
+        var others = ModelManager.All.Where(m => m.Id != S.LocalModel && m != modelDownloading && ModelManager.IsDownloaded(m)).ToArray();
+        if (others.Length > 0)
+            col.Children.Add(Spaced(Ui.Button($"Remove the others ({others.Sum(m => m.Size) / 1_000_000} MB)", () =>
+            {
+                foreach (var m in others) ModelManager.Delete(m);
+                Render();
+            }), 0, 10, 0, 0));
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Prefer offline in weak signal",
+            "Skips the cloud when there's no connection, or the speech service was slow to answer while you talked, and gives the cloud only a few seconds before switching to the offline model. Needs an offline model.",
+            Ui.Switch(S.WeakSignal, v => { S.WeakSignal = v; S.Save(); }))), 0, 12, 0, 0));
 
         // --- Cleanup
         Section(col, "AI cleanup");
@@ -1453,9 +1483,10 @@ public sealed class MainWindow : Window
         }
     }
 
-    private void StartDownload()
+    private void StartDownload(LocalModel m)
     {
-        if (downloadPct != null) return;
+        if (modelDownloading != null) { Toast($"Wait for the {modelDownloading.Label} download to finish"); Render(); return; }
+        modelDownloading = m;
         downloadPct = 0;
         downloadError = null;
         Render();
@@ -1463,9 +1494,11 @@ public sealed class MainWindow : Window
         {
             downloadPct = p;
             if (modelStatus != null) modelStatus.Text = $"Downloading {p}%";
+            if (modelProgress != null) modelProgress.Text = $"Downloading {m.Label}: {p}%";
         });
-        Task.Run(() => ModelManager.Download(progress)).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        Task.Run(() => ModelManager.Download(m, progress)).ContinueWith(t => Dispatcher.BeginInvoke(() =>
         {
+            modelDownloading = null;
             downloadPct = null;
             downloadError = t.Result;
             Render();
