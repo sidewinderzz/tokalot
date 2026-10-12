@@ -9,6 +9,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 ## 1.31 · 2026-10-12
 - Choose a bigger on-device model in Settings › Speech & cleanup › On-device model: Standard (60 MB, as before), Better (190 MB) or Best (574 MB, the same model as Groq Whisper, compressed). Bigger ones make fewer mistakes, most of all with background noise, and use more of the phone's cores. Your choice is used once it's downloaded; until then the one you have keeps working.
 - New: Prefer on-device in weak signal. With no connection, or a speech service that was slow to answer while you talked, the dictation goes straight to the phone's model, and the cloud only gets a few seconds before the phone takes over (instead of up to half a minute).
+- The on-device model runs much faster: phones from about 2018 on get a build that uses their CPU's faster maths instructions, and a short dictation no longer pays for a full 30 seconds of audio.
 - While recording, slide the floating button sideways to do that dictation on the phone. It works in tap mode and hold-to-talk; sliding up to the X still cancels.
 
 ## 1.30 · 2026-10-10

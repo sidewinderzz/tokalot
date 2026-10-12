@@ -2,9 +2,26 @@ package com.tokalot.app
 
 /** Thin JNI wrapper around whisper.cpp. Calls on one context must all come from one background thread. */
 object WhisperBridge {
+    /** True when the fast build (ARMv8.2 dot product + half precision) was loaded, for the timings line. */
+    var fast = false
+        private set
+
     init {
-        System.loadLibrary("offlineflow")
+        fast = cpuHasFastMaths() && runCatching { System.loadLibrary("offlineflow_fast") }.isSuccess
+        if (!fast) System.loadLibrary("offlineflow")
     }
+
+    /**
+     * Whether every core has the dot-product and half-precision instructions the fast build uses ("asimddp" and
+     * "asimdhp" in /proc/cpuinfo). Nearly every phone from 2018 on does; without them the fast build would crash.
+     */
+    private fun cpuHasFastMaths(): Boolean = runCatching {
+        val features = java.io.File("/proc/cpuinfo").readLines().filter { it.startsWith("Features") }
+        features.isNotEmpty() && features.all { line ->
+            val f = line.substringAfter(':').trim().split(Regex("\\s+")).toSet()
+            "asimddp" in f && "asimdhp" in f
+        }
+    }.getOrDefault(false)
 
     external fun init(modelPath: String): Long
 

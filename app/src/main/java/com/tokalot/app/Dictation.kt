@@ -361,7 +361,8 @@ class Dictation(context: Context) {
                 " (prepare %.2f, send %.2f, wait %.2f)".format(us, call.prepMs / 1000.0, call.sendMs / 1000.0, call.waitMs / 1000.0)
             val line = "%.1f s spoken · speech %.2f s".format(us, seconds, sttMs / 1000.0) +
                 (if (inPieces) " (${live?.pieceCount} pieces)" else if (usedLocal) " (on device, ${whisperModel?.id}" +
-                    (if (job.onDevice) ", asked for" else if (weakSwitch) ", weak signal" else "") + ")" else parts) +
+                    (if (job.onDevice) ", asked for" else if (weakSwitch) ", weak signal" else "") +
+                    (if (WhisperBridge.fast) "" else ", basic CPU build") + ")" else parts) +
                 when {
                     quick -> " · cleanup skipped, nothing to fix"
                     cleaned -> " · cleanup %.2f s".format(us, (allMs - sttMs) / 1000.0)
