@@ -22,7 +22,7 @@ namespace Tokalot.Desktop.UI;
 /** The settings and history window. Closing it leaves Tokalot running in the tray. */
 public sealed class MainWindow : Window
 {
-    public enum Page { Home, Dictionary, Style, Snippets, Notes, Settings }
+    public enum Page { Home, Dictionary, Style, Snippets, Notes, Settings, Stats }
 
     public Page CurrentPage { get; private set; } = Page.Home;
 
@@ -235,7 +235,7 @@ public sealed class MainWindow : Window
         nav.Children.Clear();
         void Item(Page p, string icon, string label)
         {
-            var active = p == CurrentPage;
+            var active = p == CurrentPage || (p == Page.Home && CurrentPage == Page.Stats); // word stats open from Home
             var row = Ui.Row(
                 Spaced(Icons.Get(icon, 22, C.Text), 0, 0, 12, 0),
                 Ui.Text(label, 15, C.Text, bold: active));
@@ -309,6 +309,7 @@ public sealed class MainWindow : Window
             case Page.Snippets: BuildSnippets(col); break;
             case Page.Notes: BuildNotes(col); break;
             case Page.Settings: BuildSettings(col); break;
+            case Page.Stats: BuildStats(col); break;
         }
         wideLayout = IsWide;
         scroller.Content = wideLayout ? TwoColumns(col) : StripMarkers(col);
@@ -513,9 +514,11 @@ public sealed class MainWindow : Window
         // Every device that syncs, once there's more than this one in the sync file.
         if (Sync.AllDevices() is { Each.Count: > 1 } everywhere)
             statCard.Children.Add(Spaced(Ui.Text($"On all {everywhere.Each.Count} devices: {Ui.Compact(everywhere.Month)} words this month · {Ui.Compact(everywhere.Total)} all time", 13, C.Sub), 0, 10, 0, 0));
+        statCard.Children.Add(Spaced(Ui.Text("See all your word stats ›", 13, C.Link), 0, 10, 0, 0));
         var sc = Ui.Card(statCard, 22);
         sc.Cursor = Cursors.Hand;
-        sc.MouseLeftButtonUp += (_, _) => OpenSettingsAt(DataCategory);
+        sc.MouseLeftButtonUp += (_, _) => Go(Page.Stats);
+        Ui.Keys(sc, () => Go(Page.Stats), "Word stats");
         col.Children.Add(Spaced(sc, 0, 0, 0, 16));
 
         (searchBox.Parent as Panel)?.Children.Remove(searchBox);
@@ -660,6 +663,108 @@ public sealed class MainWindow : Window
     }
 
     // ---------- Dictionary ----------
+
+    // ---------- Word stats (opened from the card on Home) ----------
+
+    private void BuildStats(StackPanel col)
+    {
+        var b = WordStats.Build();
+        col.Children.Add(Spaced(Link("‹ Home", () => Go(Page.Home)), 0, 0, 0, 10));
+        var where = b.Devices.Count > 1 ? $" on all {b.Devices.Count} of your devices" : "";
+        Intro(col, "Your words", b.Months.Count == 0
+            ? "Nothing counted yet. Dictate something and it shows up here."
+            : $"Since {b.Since}{where}.");
+
+        FrameworkElement Stat(string value, string label) => Ui.Stack(Ui.Heading(value, 32), Ui.Text(label, 13, C.Sub));
+        var cells = new[]
+        {
+            Stat(Ui.Compact(b.Words), "words"),
+            Stat(Ui.Compact(b.Dictations), "dictations"),
+            Stat(b.Dictations > 0 ? (b.Words / b.Dictations).ToString(CultureInfo.InvariantCulture) : "\u2013", "words each"),
+        };
+        var grid = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        for (int i = 0; i < 3; i++) { grid.ColumnDefinitions.Add(new ColumnDefinition()); Grid.SetColumn(cells[i], i); grid.Children.Add(cells[i]); }
+        col.Children.Add(Spaced(Ui.Card(Ui.Stack(Ui.Text("ALL TIME", 12, C.Sub, bold: true), grid), 22), 0, 0, 0, 4));
+
+        if (b.Months.Count > 0)
+        {
+            Section(col, "Words per month");
+            var max = Math.Max(1, b.Months.Max(m => m.Words));
+            col.Children.Add(Ui.List(b.Months.AsEnumerable().Reverse().Select(m => StatBar(m.Short, m.Words, max, $"{m.Dictations} dictations")).ToArray()));
+        }
+
+        col.Children.Add(new ColBreak());
+        Section(col, "Highlights");
+        var rows = new List<UIElement>();
+        void Fact(string label, string value, string? sub = null)
+        {
+            if (value.Length == 0) return;
+            var texts = Ui.Stack(Ui.Text(label, 15));
+            if (sub != null) texts.Children.Add(Ui.Text(sub, 13, C.Sub));
+            rows.Add(Spaced(Spread(texts, Ui.Text(value, 15, bold: true)), 20, 13, 20, 13));
+        }
+        if (b.Best is { } best) Fact("Best month", Ui.Compact(best.Words) + " words", best.Label);
+        if (b.Months.Count > 1) Fact("Average month", Ui.Compact(b.Average) + " words");
+        if (b.Words > 0) Fact("Typing it would have taken", WordStats.TypingTime(b.Words), "At 40 words a minute");
+        Fact("That's about", WordStats.Equivalent(b.Words));
+        if (b.Pace is { } pace) Fact("Speaking pace", $"{Math.Round(pace)} words a minute");
+        if (b.Longest > 0)
+            Fact("Longest dictation", Plural(b.Longest, "word"), DateTimeOffset.FromUnixTimeMilliseconds(b.LongestAt).LocalDateTime.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture));
+        if (b.Days.Days > 0) Fact("Days you dictated", b.Days.Days.ToString(CultureInfo.InvariantCulture),
+            $"Longest streak {Plural(b.Days.Best, "day")}" + (b.Days.Current > 1 ? $" \u00b7 {b.Days.Current} days running now" : ""));
+        if (b.BusiestDay is { } day) Fact("Busiest day of the week", day.ToString());
+        if (b.Here.Fillers + b.Here.Corrections > 0)
+            Fact("Cleaned up", Plural(b.Here.Fillers, "filler word"), $"and {Plural(b.Here.Corrections, "self-correction")}");
+        if (b.Here.Local > 0) Fact("Offline dictations", b.Here.Local.ToString(CultureInfo.InvariantCulture));
+        if (rows.Count == 0) rows.Add(Spaced(Ui.Text("Highlights show up once you've dictated a few times.", 14, C.Sub), 20, 13, 20, 13));
+        col.Children.Add(Ui.List(rows.ToArray()));
+
+        if (b.Apps.Count > 0)
+        {
+            Section(col, "Where you talk the most");
+            var max = Math.Max(1, b.Apps[0].Words);
+            col.Children.Add(Ui.List(b.Apps.Select(a => StatBar(a.Label, a.Words, max)).ToArray()));
+        }
+
+        if (b.Devices.Count > 1)
+        {
+            Section(col, "By device");
+            var max = Math.Max(1, b.Devices.Max(d => d.Words));
+            col.Children.Add(Ui.List(b.Devices.Select(d => StatBar(d.Name.Length > 0 ? d.Name : "Unnamed device", d.Words, max, $"{d.Dictations} dictations")).ToArray()));
+        }
+
+        col.Children.Add(Spaced(Ui.Text(
+            (b.Devices.Count > 1 ? "Words per month count every device that syncs. " : "") +
+            "Pace, streaks, apps and clean-ups come from this PC's history.", 13, C.Sub), 4, 8, 0, 0));
+    }
+
+    /** One row of a bar list: a label, a bar as long as [value] is next to [max], and the number. */
+    private static UIElement StatBar(string label, long value, long max, string? sub = null)
+    {
+        var bar = new Grid { Height = 8, VerticalAlignment = VerticalAlignment.Center };
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(value, 0), GridUnitType.Star) });
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(max - value, 0), GridUnitType.Star) });
+        var track = new Border { Background = C.Field, CornerRadius = new CornerRadius(4) };
+        Grid.SetColumnSpan(track, 2);
+        bar.Children.Add(track);
+        if (value > 0) bar.Children.Add(new Border { Background = C.Text, CornerRadius = new CornerRadius(4), MinWidth = 8 });
+        var texts = Ui.Stack(Ui.Text(label, 15));
+        if (sub != null) texts.Children.Add(Ui.Text(sub, 12.5, C.Sub));
+        var g = new Grid { Margin = new Thickness(20, 12, 20, 12) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
+        texts.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(texts);
+        Grid.SetColumn(bar, 1);
+        g.Children.Add(bar);
+        var n = Ui.Text(Ui.Compact(value), 15, bold: true);
+        n.HorizontalAlignment = HorizontalAlignment.Right;
+        n.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(n, 2);
+        g.Children.Add(n);
+        return g;
+    }
 
     private void BuildDictionary(StackPanel col)
     {

@@ -51,6 +51,8 @@ class MainActivity : Activity() {
     private lateinit var nav: LinearLayout
     private var tab = Tab.HOME
     private var inSettings = false
+    /** The word stats page, opened from the stats card on Home. Like Settings, it has a back arrow and no tab bar. */
+    private var inStats = false
     private var historyLimit = 100
     private val expanded = HashSet<Long>()
     private val showOriginal = HashSet<Long>()
@@ -76,6 +78,7 @@ class MainActivity : Activity() {
         savedInstanceState?.let { s ->
             tab = Tab.values().getOrElse(s.getInt("tab")) { Tab.HOME }
             inSettings = s.getBoolean("settings")
+            inStats = s.getBoolean("stats")
             backupAudio = s.getBoolean("backupAudio")
             backupKeys = s.getBoolean("backupKeys")
         }
@@ -93,6 +96,7 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(outState)
         outState.putInt("tab", tab.ordinal)
         outState.putBoolean("settings", inSettings)
+        outState.putBoolean("stats", inStats)
         outState.putBoolean("backupAudio", backupAudio)
         outState.putBoolean("backupKeys", backupKeys)
     }
@@ -237,6 +241,7 @@ class MainActivity : Activity() {
         val t = intent?.getStringExtra(EXTRA_TAB)?.let { name -> Tab.values().firstOrNull { it.name == name } } ?: return false
         tab = t
         inSettings = false
+        inStats = false
         return true
     }
 
@@ -515,6 +520,7 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         when {
             inSettings -> { inSettings = false; render() }
+            inStats -> { inStats = false; render() }
             tab != Tab.HOME -> { tab = Tab.HOME; render() }
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }
@@ -532,20 +538,27 @@ class MainActivity : Activity() {
         if (tab == Tab.NOTES && !prefs.notesBeta) tab = Tab.HOME // the beta was switched off
         logoBars?.accentColor = C.visible(prefs.accent) // follows the button color picked in Settings
         headerLeft.removeAllViews()
-        val leftIcon = if (inSettings) R.drawable.ic_back else R.drawable.ic_menu
+        val back = inSettings || inStats
+        val leftIcon = if (back) R.drawable.ic_back else R.drawable.ic_menu
         headerLeft.addView(icon(leftIcon, 28).apply {
             setPadding(dp(10), dp(10), dp(10), dp(10))
             layoutParams = FrameLayout.LayoutParams(dp(48), dp(48))
-            contentDescription = if (inSettings) "Back" else "Settings"
-            setOnClickListener { if (inSettings) { inSettings = false; render() } else openSettings() }
+            contentDescription = if (back) "Back" else "Settings"
+            setOnClickListener {
+                when {
+                    inSettings -> { inSettings = false; render() }
+                    inStats -> { inStats = false; render() }
+                    else -> openSettings()
+                }
+            }
         })
         renderNav()
         // Keep the scroll position when redrawing the same screen (expanding an entry, download progress…).
-        val key = if (inSettings) "settings" else tab.name
+        val key = if (inSettings) "settings" else if (inStats) "stats" else tab.name
         val prevScroll = if (key == lastScreen) (content.getChildAt(0) as? ScrollView)?.scrollY ?: 0 else 0
         lastScreen = key
         content.removeAllViews()
-        val screen = if (inSettings) SettingsScreen(this).build() else when (tab) {
+        val screen = if (inSettings) SettingsScreen(this).build() else if (inStats) StatsScreen(this).build() else when (tab) {
             Tab.HOME -> buildHome()
             Tab.DICTIONARY -> DictionaryScreen(this).build()
             Tab.STYLE -> StyleScreen(this).build()
@@ -560,7 +573,7 @@ class MainActivity : Activity() {
 
     private fun renderNav() {
         nav.removeAllViews()
-        nav.visibility = if (inSettings) View.GONE else View.VISIBLE
+        nav.visibility = if (inSettings || inStats) View.GONE else View.VISIBLE
         for (t in Tab.values()) {
             if (t == Tab.NOTES && !prefs.notesBeta) continue
             val active = t == tab
@@ -800,7 +813,9 @@ class MainActivity : Activity() {
                 setPadding(0, dp(10), 0, 0)
             })
         }
-        stats.setOnClickListener { openSettings(SettingsScreen.DATA) }
+        stats.addView(text("See all your word stats ›", 13f, C.LINK).apply { setPadding(0, dp(10), 0, 0) })
+        stats.contentDescription = "Word stats"
+        stats.setOnClickListener { inStats = true; render() }
         col.addView(stats, lp().margins(this, b = 16))
 
         val search = searchBox()

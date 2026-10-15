@@ -297,6 +297,17 @@ public static class Usage
 
     public static Month This() { lock (Gate) return Load().GetValueOrDefault(Key(DateTime.Now)) ?? new Month(); }
 
+    /** Every month counted on this device, added together. */
+    public static Month AllTime()
+    {
+        lock (Gate)
+        {
+            var total = new Month();
+            foreach (var m in Load().Values) total.Add(m);
+            return total;
+        }
+    }
+
     /** Most recent months first: (label, month). */
     public static List<(string Label, Month Month)> Recent(int n = 6)
     {
@@ -319,4 +330,121 @@ public static class Usage
     }
 
     internal static void Reload() { lock (Gate) { data = null; dirty = false; unread = false; } }
+}
+
+/**
+ * The numbers behind the word stats page. Words per month count every device that shares the sync file
+ * (this one alone when it's the only one); pace, streaks and apps come from this device's history.
+ */
+public static class WordStats
+{
+    public sealed record MonthRow(string Key, long Words, long Dictations)
+    {
+        public string Label => DateTime.ParseExact(Key, "yyyy-MM", CultureInfo.InvariantCulture).ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+        public string Short => DateTime.ParseExact(Key, "yyyy-MM", CultureInfo.InvariantCulture).ToString("MMM yyyy", CultureInfo.InvariantCulture);
+    }
+    public sealed record AppRow(string Label, long Words);
+    public sealed record Streaks(int Days, int Best, int Current);
+
+    public sealed record Breakdown(
+        List<MonthRow> Months, long Words, long Dictations, List<Sync.DeviceUsage> Devices,
+        Usage.Month Here, double? Pace, int Longest, long LongestAt, Streaks Days, DayOfWeek? BusiestDay, List<AppRow> Apps)
+    {
+        public MonthRow? Best => Months.Where(m => m.Words > 0).OrderByDescending(m => m.Words).FirstOrDefault();
+        public long Average => Months.Count == 0 ? 0 : Words / Months.Count;
+        public string Since => Months.Count == 0 ? "" : Months[0].Label;
+    }
+
+    /** At most this many months are listed (a clock that was once set years back mustn't make a huge list). */
+    public const int MaxMonths = 120;
+
+    /** Every month from the first one with words up to [now], oldest first, the devices' counts added together. */
+    public static List<MonthRow> Months(IEnumerable<Dictionary<string, Sync.UsageMonth>> devices, string now)
+    {
+        var sum = new SortedDictionary<string, (long W, long D)>(StringComparer.Ordinal);
+        foreach (var d in devices)
+            foreach (var (k, m) in d)
+            {
+                var had = sum.GetValueOrDefault(k);
+                sum[k] = (had.W + m.Words, had.D + m.Dictations);
+            }
+        var counted = sum.Where(kv => kv.Value.W > 0 || kv.Value.D > 0).Select(kv => kv.Key).ToList();
+        if (counted.Count == 0) return new();
+        DateTime Parse(string k) => DateTime.ParseExact(k, "yyyy-MM", CultureInfo.InvariantCulture);
+        var first = Parse(counted[0]);
+        var last = Parse(string.CompareOrdinal(counted[^1], now) > 0 ? counted[^1] : now);
+        var rows = new List<MonthRow>();
+        for (var t = first; t <= last; t = t.AddMonths(1))
+        {
+            var k = t.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            var c = sum.GetValueOrDefault(k);
+            rows.Add(new MonthRow(k, c.W, c.D));
+        }
+        return rows.Count > MaxMonths ? rows.Skip(rows.Count - MaxMonths).ToList() : rows;
+    }
+
+    /** Days with a dictation, the longest run of days in a row, and the run that reaches today (or yesterday). */
+    public static Streaks DayStreaks(IEnumerable<int> dayNumbers, int today)
+    {
+        var days = dayNumbers.Distinct().OrderBy(d => d).ToList();
+        int best = 0, run = 0, prev = int.MinValue;
+        foreach (var d in days)
+        {
+            run = d == prev + 1 ? run + 1 : 1;
+            best = Math.Max(best, run);
+            prev = d;
+        }
+        var set = days.ToHashSet();
+        var from = set.Contains(today) ? today : today - 1;
+        int current = 0;
+        while (set.Contains(from - current)) current++;
+        return new Streaks(days.Count, best, current);
+    }
+
+    private static int DayNumber(long ms) => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeMilliseconds(ms).LocalDateTime).DayNumber;
+
+    public static Breakdown Build()
+    {
+        var now = DateTime.Now.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        var everywhere = Sync.AllDevices();
+        var devices = everywhere is { Each.Count: > 1 } ? everywhere.Each : new List<Sync.DeviceUsage>();
+        var perDevice = devices.Count > 1 ? devices.Select(d => d.Months).ToList() : new List<Dictionary<string, Sync.UsageMonth>> { Usage.ForSync() };
+        var months = Months(perDevice, now);
+
+        var spoken = History.All().Where(e => !e.Pending && e.Text.Length > 0).ToList();
+        var counted = spoken.Select(e => (Entry: e, Words: TextTools.WordCount(e.Text))).ToList();
+        var timed = spoken.Where(e => e.DurationMs > 0 && e.Raw.Length > 0).ToList();
+        var minutes = timed.Sum(e => e.DurationMs) / 60000.0;
+        double? pace = minutes > 0 ? timed.Sum(e => TextTools.WordCount(e.Raw)) / minutes : null;
+        var longest = counted.OrderByDescending(c => c.Words).FirstOrDefault();
+        var days = DayStreaks(spoken.Select(e => DayNumber(e.Time)), DateOnly.FromDateTime(DateTime.Now).DayNumber);
+        DayOfWeek? busiest = days.Days < 3 ? null : counted
+            .GroupBy(c => DateTimeOffset.FromUnixTimeMilliseconds(c.Entry.Time).LocalDateTime.DayOfWeek)
+            .OrderByDescending(g => g.Sum(c => c.Words)).First().Key;
+        var apps = counted.Where(c => c.Entry.AppLabel.Length > 0).GroupBy(c => c.Entry.AppLabel)
+            .Select(g => new AppRow(g.Key, g.Sum(c => (long)c.Words))).OrderByDescending(a => a.Words).Take(5).ToList();
+
+        return new Breakdown(
+            months, months.Sum(m => m.Words), months.Sum(m => m.Dictations), devices, Usage.AllTime(),
+            pace, longest.Words, longest.Entry?.Time ?? 0, days, busiest, apps);
+    }
+
+    /** How long typing the words would have taken at 40 words a minute, said the short way. */
+    public static string TypingTime(long words)
+    {
+        var minutes = words / 40.0;
+        if (minutes < 60) return Math.Round(minutes).ToString("0", CultureInfo.InvariantCulture) + " min";
+        var hours = Short(minutes / 60);
+        return hours + (hours == "1" ? " hour" : " hours");
+    }
+
+    /** What the words would fill: paperback pages (about 300 words each), or novels (about 90,000). Empty below a page. */
+    public static string Equivalent(long words)
+    {
+        if (words >= 90_000) { var n = Short(words / 90_000.0); return n + (n == "1" ? " novel" : " novels"); }
+        return words >= 300 ? (words / 300).ToString(CultureInfo.InvariantCulture) + (words < 600 ? " paperback page" : " paperback pages") : "";
+    }
+
+    /** One decimal under 10 (dropped when it's .0), whole numbers above. */
+    private static string Short(double v) => v < 10 ? v.ToString("0.#", CultureInfo.InvariantCulture) : Math.Round(v).ToString("0", CultureInfo.InvariantCulture);
 }

@@ -338,6 +338,121 @@ class NotesScreen(private val a: MainActivity) {
     }
 }
 
+// ------------------------------------------------------------------ Word stats
+
+/** Opened by tapping the stats card on Home: words per month since the start, and a few highlights. */
+class StatsScreen(private val a: MainActivity) {
+    fun build(): View = with(a) {
+        val b = WordStats.build(this)
+        val col = column()
+        val where = if (b.devices.size > 1) " on all ${b.devices.size} of your devices" else ""
+        intro(col, "Your words", if (b.months.isEmpty()) "Nothing counted yet. Dictate something and it shows up here." else "Since ${b.since}$where.")
+
+        val all = card(20)
+        all.addView(text("ALL TIME", 12f, C.SUB).apply { letterSpacing = 0.08f })
+        val cells = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
+        fun stat(value: String, label: String) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(heading(value, 30f))
+            addView(text(label, 13f, C.SUB))
+        }
+        cells.addView(stat(MainActivity.compact(b.words.toInt()), "words"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        cells.addView(stat(MainActivity.compact(b.dictations.toInt()), "dictations"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        cells.addView(stat(if (b.dictations > 0) (b.words / b.dictations).toString() else "–", "words each"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        all.addView(cells)
+        col.addView(all)
+
+        if (b.months.isNotEmpty()) {
+            section(col, "Words per month")
+            val max = maxOf(1L, b.months.maxOf { it.words })
+            col.addView(list(b.months.reversed().map { bar(it.short, it.words, max, "${it.dictations} dictations") }))
+        }
+
+        section(col, "Highlights")
+        val facts = mutableListOf<View>()
+        fun fact(label: String, value: String, sub: String? = null) {
+            if (value.isEmpty()) return
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(label, 16f))
+                if (sub != null) addView(text(sub, 13f, C.SUB))
+            }
+            facts += row(
+                texts.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+                text(value, 16f, bold = true).apply { setPadding(dp(12), 0, 0, 0) },
+            ).apply { setPadding(dp(20), dp(14), dp(20), dp(14)) }
+        }
+        fun plural(n: Int, word: String) = "$n $word${if (n == 1) "" else "s"}"
+        b.best?.let { fact("Best month", "${MainActivity.compact(it.words.toInt())} words", it.label) }
+        if (b.months.size > 1) fact("Average month", "${MainActivity.compact(b.average.toInt())} words")
+        if (b.words > 0) fact("Typing it would have taken", WordStats.typingTime(b.words), "At 40 words a minute")
+        fact("That's about", WordStats.equivalent(b.words))
+        b.pace?.let { fact("Speaking pace", "${Math.round(it)} words a minute") }
+        if (b.longest > 0) fact("Longest dictation", plural(b.longest, "word"),
+            java.text.SimpleDateFormat("MMMM d, yyyy", java.util.Locale.US).format(java.util.Date(b.longestAt)))
+        if (b.days.days > 0) fact("Days you dictated", b.days.days.toString(),
+            "Longest streak ${plural(b.days.best, "day")}" + if (b.days.current > 1) " · ${b.days.current} days running now" else "")
+        b.busiestDay?.let { fact("Busiest day of the week", it) }
+        if (b.here.fillers + b.here.corrections > 0)
+            fact("Cleaned up", plural(b.here.fillers, "filler word"), "and ${plural(b.here.corrections, "self-correction")}")
+        if (b.here.offline > 0) fact("Offline dictations", b.here.offline.toString())
+        if (facts.isEmpty()) facts += text("Highlights show up once you've dictated a few times.", 15f, C.SUB).apply { setPadding(dp(20), dp(14), dp(20), dp(14)) }
+        col.addView(list(facts))
+
+        if (b.apps.isNotEmpty()) {
+            section(col, "Where you talk the most")
+            val max = maxOf(1L, b.apps.first().words)
+            col.addView(list(b.apps.map { bar(it.label, it.words, max) }))
+        }
+
+        if (b.devices.size > 1) {
+            section(col, "By device")
+            val max = maxOf(1L, b.devices.maxOf { it.words })
+            col.addView(list(b.devices.map { bar(it.name.ifBlank { "Unnamed device" }, it.words, max, "${it.dictations} dictations") }))
+        }
+
+        col.addView(text(
+            (if (b.devices.size > 1) "Words per month count every device that syncs. " else "") +
+                "Pace, streaks, apps and clean-ups come from this phone's history.", 13f, C.SUB,
+        ), lp().margins(this, t = 8, l = 4))
+        scroll(col)
+    }
+
+    private fun section(col: LinearLayout, title: String) = with(a) {
+        col.addView(text(title.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply { letterSpacing = 0.08f },
+            lp().margins(this, t = 28, b = 8, l = 4))
+    }
+
+    /** A card of rows with thin lines between them. */
+    private fun list(rows: List<View>): View = with(a) {
+        val c = card()
+        rows.forEachIndexed { i, v -> if (i > 0) c.addView(divider()); c.addView(v) }
+        c
+    }
+
+    /** A label and its number, with a bar under them as long as [value] is next to [max]. */
+    private fun bar(label: String, value: Long, max: Long, sub: String? = null): View = with(a) {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(12), dp(20), dp(14))
+        }
+        box.addView(row(
+            text(label, 16f).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+            text(MainActivity.compact(value.toInt()), 16f, bold = true).apply { setPadding(dp(12), 0, 0, 0) },
+        ))
+        val track = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            background = rounded(C.FIELD, 4)
+        }
+        if (value > 0) track.addView(View(this).apply { background = rounded(C.TEXT, 4); minimumWidth = dp(8) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, value.toFloat()))
+        track.addView(View(this), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, (max - value).coerceAtLeast(0).toFloat()))
+        box.addView(track, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(8)).margins(this, t = 8))
+        if (sub != null) box.addView(text(sub, 13f, C.SUB), lp().margins(this, t = 6))
+        box
+    }
+}
+
 // ------------------------------------------------------------------ Settings
 
 class SettingsScreen(private val a: MainActivity) {
