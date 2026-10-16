@@ -107,6 +107,13 @@ object Usage {
         sp(ctx).all.keys.filter { it.matches(MONTH) }
             .sortedDescending().take(n).map { month(ctx, it) }
 
+    /** Filler words and self-corrections cleaned up, and offline dictations, over every month on this phone. */
+    fun here(ctx: Context): WordStats.Here {
+        val all = sp(ctx).all.keys.filter { it.matches(MONTH) }.map { read(ctx, it) }
+        fun sum(name: String) = all.sumOf { it.optDouble(name, 0.0) }.toInt()
+        return WordStats.Here(sum("fillers"), sum("corrections"), sum("local"))
+    }
+
     @Synchronized
     fun deviceId(ctx: Context): String =
         sp(ctx).safeString(DEVICE_KEY, null)?.takeIf { it.isNotBlank() }

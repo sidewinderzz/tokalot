@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.32 · 2026-10-16
+- Tap the stats card on Home to see all your word stats: words for every month since you started (every synced device added together), your best and average month, how long it would have taken to type, speaking pace, longest dictation, streaks, busiest day, top apps, and a breakdown by device.
+
 ## 1.31 · 2026-10-14
 - The floating record button shows up when you tap a text box, every time. In some apps it could stay hidden until the keyboard was closed and opened again; it now also watches where the cursor lands, and keeps looking a little longer while the keyboard slides up.
 
