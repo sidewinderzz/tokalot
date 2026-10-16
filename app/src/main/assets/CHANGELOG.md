@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.31 · 2026-10-14
+- The floating record button shows up when you tap a text box, every time. In some apps it could stay hidden until the keyboard was closed and opened again; it now also watches where the cursor lands, and keeps looking a little longer while the keyboard slides up.
+
 ## 1.30 · 2026-10-10
 - When the on-device speech model hits an error (the phone short of memory, say), the recording is kept in history with a Transcribe button, instead of "Didn't catch anything" and the words lost.
 - Cancelling a retry in the app no longer also cancels a dictation running on the floating button at the same time.
