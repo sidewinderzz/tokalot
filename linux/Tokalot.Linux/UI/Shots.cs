@@ -104,7 +104,8 @@ internal static class Shots
         var rowsWs = WordStats.Months(new[] { UM(("2026-07", 100, 4), ("2026-10", 50, 2)), UM(("2026-07", 20, 1), ("2026-09", 0, 0)) }, "2026-11");
         Check("13a stats: months add up across devices, gaps filled to now",
             string.Join(",", rowsWs.Select(r => $"{r.Key}={r.Words}/{r.Dictations}")) == "2026-07=120/5,2026-08=0/0,2026-09=0/0,2026-10=50/2,2026-11=0/0");
-        Check("13b stats: nothing counted is no months", WordStats.Months(new[] { UM(("2026-07", 0, 0)) }, "2026-11").Count == 0);
+        Check("13b stats: nothing counted, or no real month, is no months",
+            WordStats.Months(new[] { UM(("2026-07", 0, 0)) }, "2026-11").Count == 0 && WordStats.Months(new[] { UM(("2026-99", 5, 1), ("2026-00", 5, 1)) }, "2026-11").Count == 0);
         Check("13c stats: a clock set years back lists at most ten years", WordStats.Months(new[] { UM(("1990-01", 5, 1)) }, "2026-11").Count == WordStats.MaxMonths);
         var streaks = WordStats.DayStreaks(new[] { 10, 11, 12, 15, 19, 20, 20 }, 21);
         Check("13d stats: days, best streak and the run up to yesterday", streaks == new WordStats.Streaks(6, 3, 2));

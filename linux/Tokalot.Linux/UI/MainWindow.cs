@@ -147,7 +147,7 @@ public sealed partial class MainWindow : Window
         // The indicator previews in Settings redraw 60 times a second; they hold still while nobody is looking.
         Activated += (_, _) => FreezePreviews();
         Deactivated += (_, _) => FreezePreviews();
-        onSync = changed => Dispatcher.UIThread.Post(() => { if (changed || CurrentPage == Page.Settings) Render(); });
+        onSync = changed => Dispatcher.UIThread.Post(() => { if (changed || CurrentPage is Page.Settings or Page.Stats) Render(); });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
         // Seen before the focused control gets the key (WPF's PreviewKeyDown).

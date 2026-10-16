@@ -46,6 +46,8 @@ object WordStats {
     /** At most this many months are listed (a clock that was once set years back mustn't make a huge list). */
     const val MAX_MONTHS = 120
 
+    private val REAL_MONTH = Regex("""\d{4}-(0[1-9]|1[0-2])""")
+
     private fun format(key: String, pattern: String) = runCatching {
         SimpleDateFormat(pattern, Locale.US).format(SimpleDateFormat("yyyy-MM", Locale.US).parse(key)!!)
     }.getOrDefault(key)
@@ -57,7 +59,8 @@ object WordStats {
             val (w, n) = sum[k] ?: (0L to 0L)
             sum[k] = (w + m.words) to (n + m.dictations)
         }
-        val counted = sum.filterValues { it.first > 0 || it.second > 0 }.keys.toList()
+        // A key like "2026-99" gets past the sync file's pattern check, so anything that isn't a real month is skipped.
+        val counted = sum.filter { (k, v) -> (v.first > 0 || v.second > 0) && REAL_MONTH.matches(k) }.keys.toList()
         if (counted.isEmpty()) return emptyList()
         fun parse(k: String): Int = k.substring(0, 4).toInt() * 12 + k.substring(5, 7).toInt() - 1
         val first = parse(counted.first())

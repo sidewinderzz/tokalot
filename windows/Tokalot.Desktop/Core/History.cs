@@ -368,7 +368,9 @@ public static class WordStats
                 var had = sum.GetValueOrDefault(k);
                 sum[k] = (had.W + m.Words, had.D + m.Dictations);
             }
-        var counted = sum.Where(kv => kv.Value.W > 0 || kv.Value.D > 0).Select(kv => kv.Key).ToList();
+        // A key like "2026-99" gets past the sync file's pattern check, so anything that isn't a real month is skipped.
+        static bool Real(string k) => DateTime.TryParseExact(k, "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
+        var counted = sum.Where(kv => (kv.Value.W > 0 || kv.Value.D > 0) && Real(kv.Key)).Select(kv => kv.Key).ToList();
         if (counted.Count == 0) return new();
         DateTime Parse(string k) => DateTime.ParseExact(k, "yyyy-MM", CultureInfo.InvariantCulture);
         var first = Parse(counted[0]);

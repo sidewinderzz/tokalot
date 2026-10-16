@@ -141,7 +141,7 @@ public sealed class MainWindow : Window
         // A sync that changed nothing only updates the status line on Settings: not worth taking the cursor out of a box being typed in.
         onSync = changed => Dispatcher.BeginInvoke(() =>
         {
-            if (changed || (CurrentPage == Page.Settings && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase)) Render();
+            if (changed || CurrentPage == Page.Stats || (CurrentPage == Page.Settings && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase)) Render();
         });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;

@@ -380,7 +380,7 @@ class MainActivity : Activity() {
 
     /** A sync ended. Only a change to what's on screen redraws it; otherwise just the status line moves. */
     private fun syncFinished(changedLocal: Boolean) {
-        if (changedLocal || (inSettings && prefs.syncBroken != SettingsScreen.syncShownBroken)) render()
+        if (changedLocal || inStats || (inSettings && prefs.syncBroken != SettingsScreen.syncShownBroken)) render()
         else if (inSettings) SettingsScreen.showSyncStatus(prefs)
     }
 

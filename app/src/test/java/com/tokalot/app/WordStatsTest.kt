@@ -26,6 +26,7 @@ class WordStatsTest {
     @Test fun nothingCountedIsNoMonths() { // 13b
         assertTrue(WordStats.months(listOf(um(Triple("2026-07", 0, 0))), "2026-11").isEmpty())
         assertTrue(WordStats.months(emptyList(), "2026-11").isEmpty())
+        assertTrue(WordStats.months(listOf(um(Triple("2026-99", 5, 1), Triple("2026-00", 5, 1))), "2026-11").isEmpty())
     }
 
     @Test fun aClockSetYearsBackListsAtMostTenYears() { // 13c
