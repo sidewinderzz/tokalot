@@ -88,6 +88,8 @@ public sealed class Settings
     public bool LiveStt { get; set; } = true;
     public bool AutoLanguage { get; set; }
     public bool Sounds { get; set; } = true;
+    /** Which Tones set plays (soft, chime, retro, bubble). */
+    public string SoundSet { get; set; } = "soft";
     public string Theme { get; set; } = "system";
     public uint Accent { get; set; } = Catalog.Accents[0].Argb;
     public int AudioKeepDays { get; set; } = 30;

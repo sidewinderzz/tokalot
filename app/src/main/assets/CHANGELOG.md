@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.33 · 2026-10-17
+- Sounds: turn them on in Settings › Recording for a short tone when recording starts, stops, finishes or fails, alongside the buzz. Pick a style: Soft, Chime, Retro or Bubble. Off unless you turn it on.
+
 ## 1.32 · 2026-10-16
 - Tap the stats card on Home to see all your word stats: words for every month since you started (every synced device added together), your best and average month, how long it would have taken to type, speaking pace, longest dictation, streaks, busiest day, top apps, and a breakdown by device.
 

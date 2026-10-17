@@ -972,6 +972,7 @@ class OfflineFlowService : AccessibilityService() {
                         }
                     }
                 }
+                recorder.cueSamples = if (prefs.sounds) Sounds.CUE_SAMPLES else 0
                 if (recorder.start()) {
                     live = dictation.newLive()
                     if (live != null) handler.postDelayed(liveFeed, 300)

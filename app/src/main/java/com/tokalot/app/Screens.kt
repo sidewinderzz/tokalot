@@ -598,6 +598,19 @@ class SettingsScreen(private val a: MainActivity) {
             if (it) Haptics.play(this, Haptics.Kind.DONE)
         })
         rc.addView(divider())
+        rc.addView(switchRow("Sounds", "A short tone when recording starts, stops, finishes or fails. Follows your phone's system sound volume.", prefs.sounds) {
+            prefs.sounds = it
+            if (it) Sounds.play(this, Haptics.Kind.DONE)
+            render()
+        })
+        if (prefs.sounds) Sounds.styles.forEach { st ->
+            rc.addView(divider())
+            rc.addView(choiceRow(st.label, st.note, prefs.soundSet == st.id) {
+                Sounds.play(this, Haptics.Kind.START, st.id)
+                if (prefs.soundSet != st.id) { prefs.soundSet = st.id; render() }
+            })
+        }
+        rc.addView(divider())
         rc.addView(switchRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.", prefs.autoLanguage) {
             prefs.autoLanguage = it
         })

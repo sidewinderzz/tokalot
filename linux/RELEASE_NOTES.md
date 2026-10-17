@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.7.0
+
+- Pick a sound style in Settings › Recording: Soft (the original), Chime, Retro or Bubble. Click one to hear it.
+
 ## New in 0.6.0
 
 - Click the stats card on Home to see all your word stats: words for every month since you started (every synced device added together), your best and average month, how long it would have taken to type, speaking pace, longest dictation, streaks, busiest day, top apps, and a breakdown by device.

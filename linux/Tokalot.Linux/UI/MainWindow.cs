@@ -1133,9 +1133,19 @@ public sealed partial class MainWindow : Window
             Ui.SettingRow("Hands-free reminder", "A short note above the indicator when hands-free starts. Its X turns this off.",
                 Ui.Switch(!S.HideHandsFreeHint, v => { S.HideHandsFreeHint = !v; S.Save(); })),
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
-                Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); })),
+                Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); Render(); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
                 Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); }))));
+        if (S.Sounds)
+        {
+            col.Children.Add(Spaced(Ui.Text("Sound style (click one to hear it)", 14, C.Sub), 4, 16, 0, 8));
+            col.Children.Add(Ui.List(Tones.Sets.Select(t => (Control)Ui.Choice(t.Label, t.Note, Tones.Valid(S.SoundSet) == t.Id, () =>
+            {
+                Sounds.Play(Sounds.Kind.Start, t.Id);
+                if (S.SoundSet == t.Id) return;
+                S.SoundSet = t.Id; S.Save(); Render();
+            })).ToArray()));
+        }
 
         // --- Speed
         Section(col, "Speed");
