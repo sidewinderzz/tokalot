@@ -7,12 +7,14 @@ import android.os.Vibrator
 
 /**
  * Small haptic vocabulary for the floating button. Uses the vibration motor directly
- * (View.performHapticFeedback is often muted or very faint on Samsung phones).
+ * (View.performHapticFeedback is often muted or very faint on Samsung phones). Also plays the
+ * matching sound when sounds are on.
  */
 object Haptics {
     enum class Kind { START, STOP, DONE, CANCEL, ERROR, TICK }
 
     fun play(ctx: Context, kind: Kind) {
+        Sounds.play(ctx, kind)
         if (!Prefs(ctx).haptics) return
         @Suppress("DEPRECATION")
         val v = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return

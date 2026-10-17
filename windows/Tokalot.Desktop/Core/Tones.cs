@@ -20,7 +20,6 @@ public static class Tones
     {
         new("soft", "Soft", "The original gentle beeps."),
         new("chime", "Chime", "Little bells that ring out."),
-        new("marimba", "Marimba", "Warm wooden knocks."),
         new("retro", "Retro", "8-bit game blips."),
         new("bubble", "Bubble", "Pops that slide up and down."),
     };
@@ -29,7 +28,7 @@ public static class Tones
 
     public const int Rate = 44100;
 
-    private enum Voice { Sine, Bell, Wood, Square, Glide }
+    private enum Voice { Sine, Bell, Square, Glide }
 
     /** One note: start and end pitch in Hz (they differ only for a glide; 0 is a rest) and its length. */
     private record struct Note(double F, double F2, int Ms)
@@ -58,14 +57,6 @@ public static class Tones
             Kind.Done => new[] { new Note(1319, 70), new Note(1568, 70), new Note(2093, 260) },
             Kind.Cancel => new[] { new Note(1175, 90), new Note(880, 200) },
             _ => new[] { new Note(622, 160), new Note(587, 260) },
-        }),
-        "marimba" => (Voice.Wood, kind switch
-        {
-            Kind.Start => new[] { new Note(523, 80), new Note(784, 160) },
-            Kind.Stop => new[] { new Note(659, 140) },
-            Kind.Done => new[] { new Note(523, 75), new Note(659, 75), new Note(1047, 200) },
-            Kind.Cancel => new[] { new Note(587, 80), new Note(392, 180) },
-            _ => new[] { new Note(262, 150), new Note(0, 30), new Note(262, 180) },
         }),
         "retro" => (Voice.Square, kind switch
         {
@@ -108,8 +99,6 @@ public static class Tones
                 Voice.Sine => Math.Sin(phase) * Ease(i, n, 0.006, 0.03) * 0.12,
                 // Struck, then rings down; the inharmonic overtone is what makes it a bell.
                 Voice.Bell => (Math.Sin(phase) + 0.35 * Math.Sin(phase * 2.76) * Math.Exp(-t / 0.04)) * Math.Exp(-t / 0.09) * Ease(i, n, 0.002, 0.012) * 0.1,
-                // A fast-dying fourth harmonic gives the knock; the body dies quickly too.
-                Voice.Wood => (Math.Sin(phase) + 0.5 * Math.Sin(phase * 4) * Math.Exp(-t / 0.012)) * Math.Exp(-t / 0.06) * Ease(i, n, 0.002, 0.012) * 0.1,
                 // A few odd harmonics: square-ish without the harsh top end. Squares sound louder, so it's quieter.
                 Voice.Square => (Math.Sin(phase) + Math.Sin(3 * phase) / 3 + Math.Sin(5 * phase) / 5) * Ease(i, n, 0.003, 0.015) * 0.07,
                 // A sine whose pitch slides, rounded off at both ends.
