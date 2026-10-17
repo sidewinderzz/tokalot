@@ -57,6 +57,7 @@ internal static class Shots
         string W(Sync.Data d) => string.Join(",", d.Words);
         string St(Sync.Data d) => string.Join(",", d.Styles.OrderBy(kv => kv.Key).Select(kv => kv.Key + "=" + kv.Value));
 
+        Check("tones: every start sound ends inside the 600 ms cue window", Tones.Sets.All(t => Tones.Length(t.Id, Tones.Kind.Start) < 600 && Tones.Pcm(t.Id, Tones.Kind.Start).Length > 0));
         Check("1 first sync unions words", W(Sync.Merge(D(new[] { "Alpha", "Beta" }), D(new[] { "beta", "Gamma" }), D())) == "beta,Gamma,Alpha");
         Check("2 local delete wins", W(Sync.Merge(D(new[] { "Alpha", "Gamma" }), D(new[] { "Alpha", "Beta", "Gamma", "Delta" }), D(new[] { "Alpha", "Beta", "Gamma" }))) == "Alpha,Gamma,Delta");
         Check("3 remote delete applies", W(Sync.Merge(D(new[] { "Alpha", "Beta" }), D(new[] { "Alpha" }), D(new[] { "Alpha", "Beta" }))) == "Alpha");

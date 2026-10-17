@@ -47,6 +47,7 @@
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Notes.cs" Link="Core\Notes.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Sync.cs" Link="Core\Sync.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\TextTools.cs" Link="Core\TextTools.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\Tones.cs" Link="Core\Tones.cs" />
   </ItemGroup>
 
   <ItemGroup>

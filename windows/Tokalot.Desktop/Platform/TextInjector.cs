@@ -227,9 +227,12 @@ public static class Sounds
 {
     public enum Kind { Start, Stop, Done, Cancel, Error }
 
-    private static readonly System.Collections.Generic.Dictionary<Kind, byte[]> Cache = new();
+    private static readonly System.Collections.Generic.Dictionary<(string, Kind), byte[]> Cache = new();
 
-    public static void Play(Kind kind)
+    public static void Play(Kind kind) => Play(kind, Core.Settings.Current.SoundSet);
+
+    /** Plays a sound from the given set, for previewing a set before it's picked. */
+    public static void Play(Kind kind, string set)
     {
         if (!Core.Settings.Current.Sounds) return;
         Task.Run(() =>
@@ -239,9 +242,9 @@ public static class Sounds
                 byte[] pcm;
                 lock (Cache)
                 {
-                    if (!Cache.TryGetValue(kind, out pcm!)) Cache[kind] = pcm = Make(kind);
+                    if (!Cache.TryGetValue((set, kind), out pcm!)) Cache[(set, kind)] = pcm = Core.Tones.Pcm(set, (Core.Tones.Kind)kind);
                 }
-                using var stream = new RawSourceWaveStream(new MemoryStream(pcm), new WaveFormat(44100, 16, 1));
+                using var stream = new RawSourceWaveStream(new MemoryStream(pcm), new WaveFormat(Core.Tones.Rate, 16, 1));
                 using var outp = new WaveOutEvent();
                 outp.Init(stream);
                 outp.Play();
@@ -249,33 +252,6 @@ public static class Sounds
             }
             catch { }
         });
-    }
-
-    private static byte[] Make(Kind kind)
-    {
-        // (frequency Hz, duration ms) notes; gentle and quiet.
-        (double f, int ms)[] notes = kind switch
-        {
-            Kind.Start => new[] { (660.0, 55), (990.0, 70) },
-            Kind.Stop => new[] { (880.0, 45) },
-            Kind.Done => new[] { (784.0, 50), (1175.0, 80) },
-            Kind.Cancel => new[] { (520.0, 70) },
-            _ => new[] { (330.0, 90), (0.0, 40), (330.0, 90) },
-        };
-        const int rate = 44100;
-        using var ms = new MemoryStream();
-        foreach (var (f, dur) in notes)
-        {
-            int n = rate * dur / 1000;
-            for (int i = 0; i < n; i++)
-            {
-                double env = Math.Min(1, Math.Min(i / (rate * 0.006), (n - i) / (rate * 0.03))); // soft attack/release
-                double v = f == 0 ? 0 : Math.Sin(2 * Math.PI * f * i / rate) * env * 0.12;
-                short s = (short)(v * short.MaxValue);
-                ms.WriteByte((byte)s); ms.WriteByte((byte)(s >> 8));
-            }
-        }
-        return ms.ToArray();
     }
 }
 
