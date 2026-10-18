@@ -775,7 +775,14 @@ class SettingsScreen(private val a: MainActivity) {
         val keys = card(18)
         Services.all.forEachIndexed { i, (id, name) ->
             val label = text(name, 16f, bold = true)
-            val hint = text("Get one at ${Services.keyPages[id]}", 13f, C.SUB)
+            // Tap opens the key page in the browser; hold copies the address.
+            val page = Services.keyPages[id]
+            val hint = link("Get one at $page", 13f) {
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://$page"))) }
+                    .onFailure { copy("https://$page") }
+            }.apply {
+                setOnLongClickListener { copy("https://$page"); true }
+            }
             val f = field("Paste key", prefs.key(id), secret = true).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             }
@@ -805,6 +812,7 @@ class SettingsScreen(private val a: MainActivity) {
             keys.addView(warn, lp().margins(this, t = 4))
         }
         col.addView(keys)
+        col.addView(text("Tap a link to open the page where you make a key. Hold it to copy the address.", 13f, C.SUB), lp().margins(this, t = 8))
         col.addView(text(
             if (prefs.syncUri != null && prefs.syncKeys) "Keys are saved on this phone, encrypted, in Tokalot's private storage. Include API keys is on under Sync, so they are also written to your sync file."
             else "Keys are saved only on this phone, encrypted, in Tokalot's private storage. Nothing is synced anywhere. Uninstalling the app deletes them.",
