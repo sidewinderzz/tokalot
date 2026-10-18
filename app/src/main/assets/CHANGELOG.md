@@ -6,7 +6,7 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
-## 1.34 · 2026-10-18
+## 1.35 · 2026-10-18
 - Accessibility shortcut: if Android's floating accessibility button is on for Tokalot (the default on some phones, such as OnePlus), Settings › Recording & look says so and how to switch to just the volume keys, and its link opens Tokalot's own shortcut page. Removing the floating button by dragging it away can switch Tokalot off on those phones.
 
 ## 1.33 · 2026-10-17
