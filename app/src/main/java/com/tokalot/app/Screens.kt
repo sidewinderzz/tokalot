@@ -66,6 +66,27 @@ private fun MainActivity.intro(col: LinearLayout, title: String, sub: String) {
 
 // ------------------------------------------------------------------ Dictionary
 
+/**
+ * Whether Android shows its floating accessibility button for Tokalot (Android 11 and newer). These are Android's
+ * own settings, read only: "accessibility_button_targets" lists the services on the button, and
+ * "accessibility_button_mode" 1 means it floats on the screen rather than sitting in the navigation bar.
+ */
+private fun MainActivity.shortcutFloats(): Boolean = runCatching {
+    val targets = Settings.Secure.getString(contentResolver, "accessibility_button_targets").orEmpty()
+    targets.split(':').any { it.startsWith("$packageName/") } &&
+        Settings.Secure.getInt(contentResolver, "accessibility_button_mode", 0) == 1
+}.getOrDefault(false)
+
+/** Android's page for Tokalot's accessibility shortcut where the phone has one (Android 12 and newer), else the accessibility list. */
+private fun MainActivity.openShortcutSettings() {
+    val detail = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+        .putExtra(Intent.EXTRA_COMPONENT_NAME, android.content.ComponentName(this, OfflineFlowService::class.java).flattenToString())
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { startActivity(detail) }.onFailure {
+        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
 class DictionaryScreen(private val a: MainActivity) {
     fun build(): View = with(a) {
         val col = column()
@@ -706,11 +727,16 @@ class SettingsScreen(private val a: MainActivity) {
             })
         }
         if (actions.isNotEmpty()) col.addView(sc)
-        if (Build.VERSION.SDK_INT >= 30 && prefs.shortcutAction != "off") {
-            col.addView(text("Then turn the shortcut on in Android: Settings › Accessibility › Tokalot › Tokalot shortcut, and pick \"Hold volume keys\" (or the accessibility button or gesture). It starts the action above; it doesn't switch Tokalot off.", 13f, C.SUB), lp().margins(this, t = 8, l = 4))
-            col.addView(link("Open accessibility settings") {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }, lp().margins(this, l = 4))
+        if (Build.VERSION.SDK_INT >= 30 && (prefs.shortcutAction != "off" || shortcutFloats())) {
+            // Android's floating accessibility button is Android's own: it sits on every screen and can't follow the
+            // keyboard. Some phones (OnePlus and others) put the shortcut there by default; Samsung uses the
+            // navigation bar or the volume keys. Dragging it off the screen to remove it can switch Tokalot off as well.
+            val tip = if (shortcutFloats())
+                "Android's floating accessibility button is on for Tokalot, so it stays on every screen. It's Android's button, not Tokalot's, and it can't come and go with the keyboard. To use just the volume keys, open Tokalot's shortcut settings, untick the accessibility button and leave \"Hold volume keys\" ticked. Don't drag the button off the screen to get rid of it: on OnePlus, Oppo and Realme phones that switches Tokalot off too."
+            else
+                "Then turn the shortcut on in Android: Settings › Accessibility › Tokalot › Tokalot shortcut, and pick \"Hold volume keys\". It starts the action above; it doesn't switch Tokalot off. The accessibility button choice puts a button on every screen on some phones, not just with the keyboard."
+            col.addView(text(tip, 13f, C.SUB), lp().margins(this, t = 8, l = 4))
+            col.addView(link("Open Tokalot's shortcut settings") { openShortcutSettings() }, lp().margins(this, l = 4))
         }
 
         // --- Speed
