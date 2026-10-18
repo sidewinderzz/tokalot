@@ -290,10 +290,20 @@ class NotesScreen(private val a: MainActivity) {
         val col = column()
         intro(col, "Notes", "One note per dictation, saved here and copied to the clipboard. Start one from the Voice note tile in Quick Settings, or the accessibility shortcut if you set it to notes. You can also share a voice message or text to Tokalot from WhatsApp or any app.")
         // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
-        col.addView(card(18).apply {
-            addView(text("Voice notes are a beta. Worth keeping?", 16f, bold = true))
+        // Answering or closing it hides it for good.
+        if (!prefs.notesFeedbackDone) col.addView(card(18).apply {
+            addView(row(
+                text("Voice notes are a beta. Worth keeping?", 16f, bold = true).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                },
+                iconButton(R.drawable.ic_close, "Close", 20, C.SUB) { prefs.notesFeedbackDone = true; render() },
+            ).apply { gravity = Gravity.CENTER_VERTICAL })
             addView(text("Opens a short form on GitHub (a free account is needed). It's public, so your notes aren't in it.", 14f, C.SUB), lp().margins(this@with, t = 2, b = 6))
-            fun open(vote: String) = startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Notes.feedbackUrl(this@with, vote))))
+            fun open(vote: String) {
+                prefs.notesFeedbackDone = true
+                render()
+                startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(Notes.feedbackUrl(this@with, vote))))
+            }
             addView(row(pill("Useful", filled = true) { open("useful") }, spacer(wDp = 8), pill("Not for me") { open("not for me") }))
         }, lp().margins(this, b = 16))
         val notes = Notes.all(this)

@@ -479,6 +479,11 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("notes_beta", false)
         set(v) = sp.edit().putBoolean("notes_beta", v).apply()
 
+    /** The "worth keeping?" card on Notes was closed or answered, so it stays hidden. */
+    var notesFeedbackDone: Boolean
+        get() = sp.safeBoolean("notes_feedback_done", false)
+        set(v) = sp.edit().putBoolean("notes_feedback_done", v).apply()
+
     /**
      * Apps where, with no keyboard showing, dictated text goes on the clipboard instead of into the selected text
      * box. Starts out as the phone's launchers: a home screen can keep an invisible search box selected (Niagara does).
