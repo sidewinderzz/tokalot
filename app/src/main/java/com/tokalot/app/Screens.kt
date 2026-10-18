@@ -288,7 +288,7 @@ class StyleScreen(private val a: MainActivity) {
 class NotesScreen(private val a: MainActivity) {
     fun build(): View = with(a) {
         val col = column()
-        intro(col, "Notes", "One note per dictation, saved here and copied to the clipboard. Start one from the Voice note tile in Quick Settings, or the accessibility shortcut if you set it to notes.")
+        intro(col, "Notes", "One note per dictation, saved here and copied to the clipboard. Start one from the Voice note tile in Quick Settings, or the accessibility shortcut if you set it to notes. You can also share a voice message or text to Tokalot from WhatsApp or any app.")
         // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
         col.addView(card(18).apply {
             addView(text("Voice notes are a beta. Worth keeping?", 16f, bold = true))
@@ -297,9 +297,38 @@ class NotesScreen(private val a: MainActivity) {
             addView(row(pill("Useful", filled = true) { open("useful") }, spacer(wDp = 8), pill("Not for me") { open("not for me") }))
         }, lp().margins(this, b = 16))
         val notes = Notes.all(this)
-        if (notes.isEmpty()) {
+        NoteImport.prune(this, notes.map { it.id }.toSet())
+        // Shared voice notes still being transcribed, or that failed, come first.
+        val waiting = NoteImport.waiting(this)
+        if (waiting.isNotEmpty()) {
+            val c = card()
+            waiting.forEachIndexed { i, w ->
+                if (i > 0) c.addView(divider())
+                val box = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(20), dp(14), dp(12), dp(10))
+                }
+                val going = NoteImport.isRunning(w.id)
+                val length = if (w.duration > 0) " · ${NoteMedia.clock(w.duration)}" else ""
+                box.addView(text("Shared voice note$length", 16f, bold = true))
+                box.addView(text(when {
+                    going -> "Transcribing…"
+                    w.status == "failed" -> "Couldn't transcribe it: ${w.error}"
+                    else -> "Stopped before it finished."
+                }, 14f, C.SUB), lp().margins(this, t = 2))
+                if (!going) box.addView(row(
+                    weightSpacer(),
+                    pill("Remove") { confirm("Remove this voice note? Its recording is deleted.", "Remove") { NoteImport.deleteMedia(this, w.id); render() } },
+                    spacer(wDp = 8),
+                    pill("Try again", filled = true) { NoteImport.transcribe(this, w.id) },
+                ), lp().margins(this, t = 6))
+                c.addView(box)
+            }
+            col.addView(c, lp().margins(this, b = 8))
+        }
+        if (notes.isEmpty() && waiting.isEmpty()) {
             col.addView(card(22).apply {
-                addView(text("No notes yet. Swipe down twice from the top of the screen, tap Tokalot Voice note and talk. Tap the button when you're done.", 16f, C.SUB))
+                addView(text("No notes yet. Swipe down twice from the top of the screen, tap Tokalot Voice note and talk. Tap the button when you're done. Or share a voice message from WhatsApp to Tokalot.", 16f, C.SUB))
             })
             return scroll(col)
         }
@@ -314,9 +343,15 @@ class NotesScreen(private val a: MainActivity) {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(20), dp(14), dp(12), dp(6))
                 }
-                box.addView(text(java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time)), 13f, C.SUB))
-                box.addView(text(n.text, 16f).apply { setTextIsSelectable(true) }, lp().margins(this, t = 2, r = 8))
+                val media = NoteImport.info(this, n.id)
+                val voice = media?.audio != null
+                val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
+                box.addView(text(if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}" else time, 13f, C.SUB))
+                // A long voice note shows its start; the whole thing is a tap away.
+                val shown = if (voice && n.text.length > 280) n.text.take(280).trimEnd() + "…" else n.text
+                box.addView(text(shown, 16f).apply { if (!voice) setTextIsSelectable(true) }, lp().margins(this, t = 2, r = 8))
                 box.addView(row(
+                    pill(if (voice) "Play" else "Open", iconRes = if (voice) R.drawable.ic_play else null) { openNote(n.id) },
                     weightSpacer(),
                     iconButton(R.drawable.ic_copy, "Copy note", 20, C.SUB) { copy(n.text) },
                     pill("Share") {
@@ -665,7 +700,7 @@ class SettingsScreen(private val a: MainActivity) {
             }), lp().margins(this@with, t = 6))
         })
         hand.addView(divider())
-        hand.addView(switchRow("Voice notes (beta)", "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Notes are in backups, and in sync when it's set up.", prefs.notesBeta) { on ->
+        hand.addView(switchRow("Voice notes (beta)", "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Voice messages and text shared to Tokalot from WhatsApp or any app become notes too, which you can play, summarize and index. Notes are in backups, and their text is in sync when it's set up.", prefs.notesBeta) { on ->
             prefs.notesBeta = on
             StartTile.setNoteTile(this, on)
             if (!on && prefs.shortcutAction == "note") prefs.shortcutAction = "off"
