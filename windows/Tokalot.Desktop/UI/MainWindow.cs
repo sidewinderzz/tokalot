@@ -1228,7 +1228,7 @@ public sealed class MainWindow : Window
         RunNote(n.Id, "Summarizing…", () => NoteImport.Summarize(S, n.Id, n.Text, level, voice));
     }
 
-    private UIElement SummaryPanel(Note n, NoteImport.Info? info, bool voice, string? busy)
+    private Border SummaryPanel(Note n, NoteImport.Info? info, bool voice, string? busy)
     {
         var level = S.NoteSummaryLevel;
         var box = Ui.Stack(Ui.Text("Summary", 15.5, bold: true),
@@ -1251,7 +1251,7 @@ public sealed class MainWindow : Window
         return Ui.Card(box, 22);
     }
 
-    private UIElement TimelinePanel(long id, NoteImport.Info? info, List<NoteMedia.Segment> segments, string? busy)
+    private Border TimelinePanel(long id, NoteImport.Info? info, List<NoteMedia.Segment> segments, string? busy)
     {
         var box = Ui.Stack(Ui.Text("Timeline", 15.5, bold: true),
             Spaced(Ui.Text("Every point in the order it was said. Click one to hear it.", 13, C.Sub), 0, 2, 0, 8));
