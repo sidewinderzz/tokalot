@@ -97,6 +97,7 @@ public sealed partial class App
     /** After a restore: the theme, indicator and start-up setting all follow the restored settings. */
     public void AfterRestore(string message)
     {
+        Notes.Reload();
         ApplyTheme();
         Controller?.RefreshIndicator();
         if (Startup.Supported) Startup.Apply(Settings.Current.LaunchAtStartup);

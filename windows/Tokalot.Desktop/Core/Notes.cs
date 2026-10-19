@@ -68,14 +68,17 @@ public static class Notes
     public static List<Note> All() { lock (Gate) return new List<Note>(Load()); }
 
     /** Saves a new note and returns it. */
-    public static Note Add(string text)
+    public static Note Add(string text) => Add(text, 0);
+
+    /** Saves a new note with [id] (a recording's, so its folder in NoteImport stays with it), or a new id if 0 or taken. */
+    public static Note Add(string text, long id)
     {
         lock (Gate)
         {
             var l = Load();
             var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             // Two notes in the same millisecond still get their own ids.
-            var id = Math.Max(now, l.Count > 0 ? l.Max(n => n.Id) + 1 : now);
+            if (id <= 0 || l.Any(n => n.Id == id)) id = Math.Max(now, l.Count > 0 ? l.Max(n => n.Id) + 1 : now);
             var note = new Note { Id = id, Time = now, Text = text };
             l.Insert(0, note);
             Save();
@@ -87,6 +90,7 @@ public static class Notes
     public static void Delete(long id)
     {
         lock (Gate) { Load().RemoveAll(x => x.Id == id); Save(); }
+        NoteImport.DeleteMedia(id);
         Sync.Queue();
     }
 
@@ -103,13 +107,17 @@ public static class Notes
     /** Stores a sync's result, unless a note was added or deleted here since [before] was read. */
     public static bool ApplySynced(List<Sync.SyncNote> before, List<Sync.SyncNote> after)
     {
+        HashSet<long> ids;
         lock (Gate)
         {
             if (unread || !Load().Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text)).SequenceEqual(before)) return false;
             cache = after.Select(n => new Note { Id = n.Id, Time = n.Time, Text = n.Text }).ToList();
             Save();
-            return true;
+            ids = cache.Select(n => n.Id).ToHashSet();
         }
+        // Outside the lock: NoteImport takes its own, and asks for the notes while holding it.
+        try { NoteImport.Prune(ids); } catch { }
+        return true;
     }
 
     /** Drops the in-memory copy so the next read comes from disk (after a restore). */

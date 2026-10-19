@@ -1,5 +1,12 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.9.0
+
+- Voice notes (beta) can now turn recordings into notes. Switch on Settings › Recording › Voice notes (beta), open Notes, and click **Add a recording** to pick an audio file (a WhatsApp voice message saved to this computer, say: .opus, .ogg, .m4a, .mp3, .wav and more). It's transcribed with Groq Whisper (or OpenAI) and saved as a note. A recording that fails stays on the page with Try again.
+- Each note has **Summarize** (five lengths, from one line to everything) and, for a recording, an **Index** of every point made with when it was said, plus **Play recording**. Uses the cleanup AI you picked in Settings.
+- Notes from your phone and other computers show up on the Notes page through sync, as on Windows.
+- The Notes beta card can be closed.
+
 ## New in 0.8.0
 
 - Choose a bigger offline model in Settings › Offline model: Standard (60 MB, as before), Better (190 MB) or Best (574 MB, the same model as Groq Whisper, compressed). Bigger ones make fewer mistakes, most of all with background noise. Your choice is used once it's downloaded; until then the one you have keeps working.

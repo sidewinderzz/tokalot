@@ -28,7 +28,7 @@ namespace Tokalot.Desktop.UI;
  */
 public sealed partial class MainWindow : Window
 {
-    public enum Page { Home, Dictionary, Style, Snippets, Settings, Stats }
+    public enum Page { Home, Dictionary, Style, Snippets, Notes, Settings, Stats }
 
     public Page CurrentPage { get; private set; } = Page.Home;
 
@@ -44,7 +44,7 @@ public sealed partial class MainWindow : Window
     private TextBlock? bannerText;
     private TextBlock? modelStatus;
     private TextBlock? modelProgress; // under the list in Settings › Offline model
-    private int historyLimit = 100;
+    private int historyLimit = 100, notesLimit = 100;
     private readonly HashSet<long> expanded = new(), showOriginal = new();
     private static string styleTab = "MESSAGING";
     private static int? downloadPct;
@@ -52,7 +52,7 @@ public sealed partial class MainWindow : Window
     private static string? downloadError;
     private Snippet? editing;
     private bool editingNew;
-    private readonly Action onHistory, onPlayer;
+    private readonly Action onHistory, onPlayer, onNoteImport;
     private readonly Action<bool> onSync;
 
     private static Settings S => Settings.Current;
@@ -152,6 +152,9 @@ public sealed partial class MainWindow : Window
         onSync = changed => Dispatcher.UIThread.Post(() => { if (changed || CurrentPage is Page.Settings or Page.Stats) Render(); });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
+        onNoteImport = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Notes) Render(); });
+        NoteImport.Changed += onNoteImport;
+        Closed += (_, _) => NoteImport.Changed -= onNoteImport;
         // Seen before the focused control gets the key (WPF's PreviewKeyDown).
         AddHandler(KeyDownEvent, (_, e) =>
         {
@@ -342,6 +345,7 @@ public sealed partial class MainWindow : Window
         Item(Page.Dictionary, "book", "Dictionary");
         Item(Page.Style, "style", "Style");
         Item(Page.Snippets, "snippet", "Snippets");
+        if (S.NotesBeta) Item(Page.Notes, "notes", "Notes");
         nav.Children.Add(new Border { Height = 14 });
         Item(Page.Settings, "settings", "Settings");
     }
@@ -365,6 +369,7 @@ public sealed partial class MainWindow : Window
     {
         var offset = scroller.Offset.Y;
         RenderNav();
+        if (CurrentPage == Page.Notes && !S.NotesBeta) CurrentPage = Page.Home; // voice notes were switched off (or restored away)
         var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 10, 36, 48) };
         switch (CurrentPage)
         {
@@ -372,6 +377,7 @@ public sealed partial class MainWindow : Window
             case Page.Dictionary: BuildDictionary(col); break;
             case Page.Style: BuildStyle(col); break;
             case Page.Snippets: BuildSnippets(col); break;
+            case Page.Notes: BuildNotes(col); break;
             case Page.Settings: BuildSettings(col); break;
             case Page.Stats: BuildStats(col); break;
         }
@@ -877,6 +883,234 @@ public sealed partial class MainWindow : Window
         col.Children.Add(Ui.List(rows));
     }
 
+    // ---------- Notes (beta) ----------
+
+    private void BuildNotes(StackPanel col)
+    {
+        Intro(col, "Notes", "Voice notes from your other devices show up here when sync is set up. You can also add a recording, like a WhatsApp voice message saved to this computer, and it's transcribed into a note you can summarize.");
+        col.Children.Add(Spaced(Ui.Button("Add a recording", AddRecording, filled: true), 0, 0, 0, 16));
+        if (!S.NotesFeedbackDone)
+        {
+            // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
+            void Done() { S.NotesFeedbackDone = true; S.Save(); Render(); }
+            var useful = Ui.Button("Useful", () => { Open(NotesFeedbackUrl("useful")); Done(); }, filled: true);
+            useful.Margin = new Thickness(0, 0, 8, 0);
+            var close = new Border
+            {
+                Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Background = Brushes.Transparent, Cursor = Cursors.Hand,
+                Child = Icons.Get("close", 15, C.Sub),
+            };
+            ToolTip.SetTip(close, "Close");
+            close.OnEnter(() => close.Background = C.Hover);
+            close.OnLeave(() => close.Background = Brushes.Transparent);
+            close.OnClick(Done);
+            Ui.Keys(close, Done, "Close");
+            col.Children.Add(Spaced(Ui.Card(Ui.Stack(
+                Spread(Ui.Text("Voice notes are a beta. Worth keeping?", 15.5, bold: true), close),
+                Spaced(Ui.Text("Opens a short form on GitHub (a free account is needed). It's public, so your notes aren't in it.", 13.5, C.Sub), 0, 2, 0, 10),
+                Ui.Row(useful, Ui.Button("Not for me", () => { Open(NotesFeedbackUrl("not for me")); Done(); }))), 20), 0, 0, 0, 16));
+        }
+        // Recordings still being transcribed, or that failed: they become notes once they're done.
+        foreach (var w in NoteImport.Waiting())
+        {
+            var running = NoteImport.IsRunning(w.Id);
+            var status = running ? "Transcribing…"
+                : w.Status == "pending" ? "Tokalot closed before this was transcribed."
+                : "Couldn't transcribe it: " + (w.Error.Length > 0 ? w.Error : "unknown error");
+            var actions = new List<Control>();
+            if (!running)
+            {
+                var again = Ui.Button("Try again", () => { _ = NoteImport.Transcribe(S, w.Id); Render(); }, filled: true);
+                again.Margin = new Thickness(0, 0, 8, 0);
+                actions.Add(again);
+                actions.Add(Ui.Button("Remove", async () =>
+                {
+                    if (!await Ui.Dialog(this, "Remove this recording? It can't be brought back.", "Remove")) return;
+                    NoteImport.DeleteMedia(w.Id);
+                    Render();
+                }));
+            }
+            col.Children.Add(Spaced(Ui.Card(Ui.Stack(
+                Ui.Text(w.Name.Length > 0 ? w.Name : "Recording", 15.5, bold: true),
+                Spaced(Ui.Text(status, 13.5, running ? C.Sub : C.Warn), 0, 2, 0, actions.Count > 0 ? 10 : 0),
+                Ui.Row(actions.ToArray())), 20), 0, 0, 0, 16));
+        }
+        var notes = Notes.All();
+        if (notes.Count == 0)
+        {
+            col.Children.Add(Ui.Card(Ui.Text(S.SyncFile.Length > 0
+                ? "No notes yet. Notes dictated on your phone or another computer show up here after a sync."
+                : "No notes yet. Add a recording, or set up sync in Settings to see the notes from your other devices.", 16, C.Sub), 24));
+            return;
+        }
+        string lastDay = "";
+        StackPanel? group = null;
+        foreach (var n in notes.Take(notesLimit))
+        {
+            var day = DayLabel(n.Time);
+            if (day != lastDay)
+            {
+                // Each day is a section, so on a wide window the days fill both columns.
+                var heading = Spaced(Ui.Heading(day, 30), 0, group == null ? 0 : 24, 0, 12);
+                heading.Tag = "section";
+                col.Children.Add(heading);
+                group = new StackPanel();
+                col.Children.Add(Ui.Card(group));
+                lastDay = day;
+            }
+            else group!.Children.Add(Ui.Divider());
+            group!.Children.Add(NoteView(n));
+        }
+        if (notes.Count > notesLimit)
+        {
+            var more = Ui.Button("Show older", () => { notesLimit += 200; Render(); });
+            more.HorizontalAlignment = HorizontalAlignment.Center;
+            col.Children.Add(Spaced(more, 0, 20, 0, 0));
+        }
+    }
+
+    private async void AddRecording()
+    {
+        try
+        {
+            var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Add a recording", AllowMultiple = true,
+                FileTypeFilter = new[]
+                {
+                    new FilePickerFileType("Recordings") { Patterns = NoteImport.Extensions.Select(e => "*" + e).ToArray() },
+                    FilePickerFileTypes.All,
+                },
+            });
+            if (files.Count == 0) return;
+            var added = files.Count(f => f.TryGetLocalPath() is { } path && NoteImport.AddRecording(S, path));
+            if (added < files.Count) Toast(added == 0 ? "Couldn't read that file" : "Some files couldn't be read");
+            Render();
+        }
+        catch (Exception e) { await Ui.Dialog(this, "Couldn't open the file chooser: " + e.Message, cancel: null); }
+    }
+
+    /**
+     * The beta's feedback form on GitHub (.github/ISSUE_TEMPLATE/voice-notes-feedback.yml), with the vote in the
+     * title and the app and system filled in. Nothing else about the computer or the notes is sent.
+     */
+    private static string NotesFeedbackUrl(string vote) =>
+        Updater.RepoUrl + "/issues/new?template=voice-notes-feedback.yml&title=" + Uri.EscapeDataString("[Voice notes] " + vote) +
+        "&app=" + Uri.EscapeDataString($"Tokalot {Updater.CurrentVersion} on {Host.Name} {Environment.OSVersion.Version}");
+
+    /** Per note on the Notes page: the summary level shown, and what's being asked for (summary or index) right now. */
+    private readonly Dictionary<long, int> noteLevel = new();
+    private readonly Dictionary<long, string> noteBusy = new(), noteError = new();
+    private readonly HashSet<long> noteIndexShown = new();
+
+    private async void RunNote(long id, string what, Func<Task> work)
+    {
+        if (noteBusy.ContainsKey(id)) return;
+        noteBusy[id] = what;
+        noteError.Remove(id);
+        Render();
+        try { await work(); }
+        catch (Exception e) { noteError[id] = e.Message; }
+        noteBusy.Remove(id);
+        if (CurrentPage == Page.Notes) Render();
+    }
+
+    private void Summarize(Note n, int level, bool voice)
+    {
+        noteLevel[n.Id] = level;
+        if (NoteImport.Get(n.Id)?.Summary(level) != null) { Render(); return; }
+        RunNote(n.Id, "Summarizing…", () => NoteImport.Summarize(S, n.Id, n.Text, level, voice));
+    }
+
+    private static SelectableTextBlock Selectable(string text, double size) => new()
+    {
+        Text = text, Foreground = C.Text, FontSize = size, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap,
+    };
+
+    private Control NoteView(Note n)
+    {
+        var box = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
+        // Selectable, so part of a note can be copied too.
+        box.Children.Add(Selectable(n.Text, 16.5));
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
+        box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
+        var info = NoteImport.Get(n.Id);
+        var audio = NoteImport.AudioFile(n.Id);
+        var voice = audio != null;
+        var actions = new WrapPanel();
+        void Act(Control c) { c.Margin = new Thickness(0, 0, 8, 8); actions.Children.Add(c); }
+        Act(Ui.Button("Copy", () => { _ = TextInjector.Copy(n.Text); Toast("Copied"); }, icon: "copy"));
+        if (audio != null)
+            Act(Ui.Button("Play recording" + (info!.Duration > 0 ? " · " + NoteMedia.Clock(info.Duration) : ""), () => Open(audio), icon: "play"));
+        if (!noteLevel.ContainsKey(n.Id)) Act(Ui.Button("Summarize", () => Summarize(n, 3, voice)));
+        var segments = info?.Segments ?? new();
+        if (segments.Count > 0 && !noteIndexShown.Contains(n.Id))
+            Act(Ui.Button("Index", () =>
+            {
+                noteIndexShown.Add(n.Id);
+                if (info!.Index != null) { Render(); return; }
+                RunNote(n.Id, "Making the index…", () => NoteImport.MakeIndex(S, n.Id, segments));
+            }));
+        Act(Ui.Button("Delete", async () =>
+        {
+            if (!await Ui.Dialog(this, voice ? "Delete this note and its recording? They can't be brought back." : "Delete this note? It can't be brought back.", "Delete")) return;
+            Notes.Delete(n.Id);
+            Render();
+        }));
+        box.Children.Add(actions);
+
+        if (noteBusy.TryGetValue(n.Id, out var busy)) box.Children.Add(Spaced(Ui.Text(busy, 14, C.Sub), 0, 4, 0, 0));
+        if (noteError.TryGetValue(n.Id, out var err)) box.Children.Add(Spaced(Ui.Text("Couldn't do that: " + err, 14, C.Warn), 0, 4, 0, 0));
+        if (noteLevel.TryGetValue(n.Id, out var level) && info?.Summary(level) is { } summary)
+        {
+            // The five lengths, from one line to everything; each is kept once made.
+            var levels = new WrapPanel { Margin = new Thickness(0, 10, 0, 6) };
+            for (var l = 1; l <= 5; l++)
+            {
+                var lv = l;
+                var b = Ui.Button(NoteMedia.LevelNames[l - 1], () => Summarize(n, lv, voice), filled: l == level);
+                b.Margin = new Thickness(0, 0, 6, 6);
+                levels.Children.Add(b);
+            }
+            box.Children.Add(Ui.Text("Summary", 13.5, C.Sub, bold: true));
+            box.Children.Add(levels);
+            box.Children.Add(Selectable(summary, 15.5));
+            var copySummary = Ui.Button("Copy summary", () => { _ = TextInjector.Copy(summary); Toast("Copied"); }, icon: "copy");
+            copySummary.Margin = new Thickness(0, 8, 8, 0);
+            var hide = Ui.Button("Hide", () => { noteLevel.Remove(n.Id); Render(); });
+            hide.Margin = new Thickness(0, 8, 0, 0);
+            box.Children.Add(Ui.Row(copySummary, hide));
+        }
+        if (noteIndexShown.Contains(n.Id) && info?.Index is { } points)
+        {
+            // Each point with when it was said, grouped under its topic, so the recording can be skimmed.
+            var list = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+            list.Children.Add(Ui.Text("Index", 13.5, C.Sub, bold: true));
+            var lastTopic = "";
+            foreach (var p in points)
+            {
+                if (p.Topic.Length > 0 && p.Topic != lastTopic) list.Children.Add(Spaced(Ui.Text(p.Topic, 14.5, bold: true), 0, 8, 0, 2));
+                lastTopic = p.Topic;
+                var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
+                var time = Ui.Text(NoteMedia.Clock(p.Time), 14, C.Sub);
+                time.Width = 48;
+                DockPanel.SetDock(time, Dock.Left);
+                row.Children.Add(time);
+                var text = Ui.Text(p.Text, 14.5);
+                text.TextWrapping = TextWrapping.Wrap;
+                row.Children.Add(text);
+                list.Children.Add(row);
+            }
+            if (points.Count == 0) list.Children.Add(Ui.Text("Nothing to index.", 14, C.Sub));
+            var hideIndex = Ui.Button("Hide index", () => { noteIndexShown.Remove(n.Id); Render(); });
+            hideIndex.Margin = new Thickness(0, 8, 0, 0);
+            hideIndex.HorizontalAlignment = HorizontalAlignment.Left;
+            list.Children.Add(hideIndex);
+            box.Children.Add(list);
+        }
+        return box;
+    }
+
     // ---------- Snippets ----------
 
     private void BuildSnippets(StackPanel col)
@@ -1138,7 +1372,9 @@ public sealed partial class MainWindow : Window
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); Render(); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
-                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); }))));
+                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); })),
+            Ui.SettingRow("Voice notes (beta)", "A Notes page with the voice notes from your other devices (when sync is set up), and recordings you add here, like a WhatsApp voice message, transcribed into notes you can summarize.",
+                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); }))));
         if (S.Sounds)
         {
             col.Children.Add(Spaced(Ui.Text("Sound style (click one to hear it)", 14, C.Sub), 4, 16, 0, 8));
