@@ -410,7 +410,13 @@ public static class WordStats
         Usage.Month Here, double? Pace, int Longest, long LongestAt, Streaks Days, DayOfWeek? BusiestDay, List<AppRow> Apps)
     {
         public MonthRow? Best => Months.Where(m => m.Words > 0).OrderByDescending(m => m.Words).FirstOrDefault();
-        public long Average => Months.Count == 0 ? 0 : Words / Months.Count;
+        /** Over the finished months: the month in progress (the last row) would drag it down. */
+        public long Average => Months.Count switch
+        {
+            0 => 0,
+            1 => Words,
+            _ => (Words - Months[^1].Words) / (Months.Count - 1),
+        };
         public string Since => Months.Count == 0 ? "" : Months[0].Label;
     }
 
@@ -496,10 +502,20 @@ public static class WordStats
             pace, longest.Words, longest.Entry?.Time ?? 0, days, busiest, apps);
     }
 
-    /** How long typing the words would have taken at 40 words a minute, said the short way. */
+    /** The commonly cited average keyboard typing speed. (The phone app uses 36, the average on a phone.) */
+    public const int TypingWpm = 40;
+
+    /**
+     * The words a month in progress ends on if the pace so far keeps up, on [day] of a [daysInMonth]-day month.
+     * Null for its first two days, when one busy morning would make a wild guess, and on its last day.
+     */
+    public static long? OnTrack(long words, int day, int daysInMonth) =>
+        words <= 0 || day < 3 || day >= daysInMonth ? null : words * daysInMonth / day;
+
+    /** How long typing the words would have taken at [TypingWpm], said the short way. */
     public static string TypingTime(long words)
     {
-        var minutes = words / 40.0;
+        var minutes = words / (double)TypingWpm;
         if (minutes < 60) return Math.Round(minutes).ToString("0", CultureInfo.InvariantCulture) + " min";
         var hours = Short(minutes / 60);
         return hours + (hours == "1" ? " hour" : " hours");

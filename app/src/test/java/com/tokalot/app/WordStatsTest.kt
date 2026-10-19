@@ -1,6 +1,7 @@
 package com.tokalot.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.TimeZone
@@ -47,9 +48,9 @@ class WordStatsTest {
     }
 
     @Test fun typingTimeAndWhatItFills() { // 13f
-        assertEquals("30 min", WordStats.typingTime(1200))
-        assertEquals("1 hour", WordStats.typingTime(2400))
-        assertEquals("42 hours", WordStats.typingTime(100_000))
+        assertEquals("33 min", WordStats.typingTime(1200))
+        assertEquals("1 hour", WordStats.typingTime(2160))
+        assertEquals("46 hours", WordStats.typingTime(100_000))
         assertEquals("", WordStats.equivalent(299))
         assertEquals("1 paperback page", WordStats.equivalent(450))
         assertEquals("1 novel", WordStats.equivalent(90_000))
@@ -60,5 +61,17 @@ class WordStatsTest {
         val tz = TimeZone.getTimeZone("America/Chicago") // UTC-5 in summer
         val lateEvening = 1_784_000_000_000L // 2026-07-14 03:33 UTC, still the 13th in Chicago
         assertEquals(WordStats.dayNumber(lateEvening, TimeZone.getTimeZone("UTC")) - 1, WordStats.dayNumber(lateEvening, tz))
+    }
+
+    @Test fun theMonthInProgressIsProjectedAndLeftOutOfTheAverage() { // 13g
+        assertEquals(3100L, WordStats.onTrack(1900, 19, 31))
+        assertNull(WordStats.onTrack(500, 2, 31))
+        assertNull(WordStats.onTrack(0, 19, 31))
+        assertNull(WordStats.onTrack(3000, 30, 30))
+        val b = WordStats.Breakdown(
+            WordStats.months(listOf(mapOf("2026-08" to UsageMonth(1000, 10), "2026-09" to UsageMonth(3000, 30), "2026-10" to UsageMonth(200, 2))), "2026-10"),
+            4200, 42, emptyList(), WordStats.Here(0, 0, 0), null, 0, 0, WordStats.Streaks(0, 0, 0), null, emptyList(),
+        )
+        assertEquals(2000L, b.average)
     }
 }

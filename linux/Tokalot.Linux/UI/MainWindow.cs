@@ -599,13 +599,11 @@ public sealed partial class MainWindow : Window
         var pace = minutes > 0 ? Math.Round(spoken.Sum(e => TextTools.WordCount(e.Raw)) / minutes).ToString(CultureInfo.InvariantCulture) : "–";
         var cells = new[] { Stat(Ui.Compact(m.Words), "words"), Stat(m.Dictations.ToString(CultureInfo.InvariantCulture), "dictations"), Stat(pace, "words a minute") };
         for (int i = 0; i < 3; i++) { Grid.SetColumn(cells[i], i); stats.Children.Add(cells[i]); }
-        var statCard = Ui.Stack(Ui.Text(DateTime.Now.ToString("MMMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant(), 12, C.Sub, bold: true), stats);
-        if (m.Fillers + m.Corrections > 0)
-            statCard.Children.Add(Spaced(Ui.Text($"Cleaned up {Plural(m.Fillers, "filler word")} and {Plural(m.Corrections, "self-correction")}", 13, C.Sub), 0, 10, 0, 0));
-        // Every device that syncs, once there's more than this one in the sync file.
-        if (Sync.AllDevices() is { Each.Count: > 1 } everywhere)
-            statCard.Children.Add(Spaced(Ui.Text($"On all {everywhere.Each.Count} devices: {Ui.Compact(everywhere.Month)} words this month · {Ui.Compact(everywhere.Total)} all time", 13, C.Sub), 0, 10, 0, 0));
-        statCard.Children.Add(Spaced(Ui.Text("See all your word stats ›", 13, C.Link), 0, 10, 0, 0));
+        // The month isn't over yet, so say how far in it is.
+        var header = $"{now.ToString("MMMM yyyy", CultureInfo.InvariantCulture)} \u00b7 Day {now.Day} of {DateTime.DaysInMonth(now.Year, now.Month)}";
+        var statCard = Ui.Stack(Ui.Text(header.ToUpperInvariant(), 12, C.Sub, bold: true), stats);
+        // Clean-ups, other devices and all-time totals live on the word stats page; Home keeps just the three numbers.
+        statCard.Children.Add(Spaced(Ui.Text("View stats ›", 13, C.Sub), 0, 10, 0, 0));
         var sc = Ui.Card(statCard, 22);
         sc.Cursor = Cursors.Hand;
         sc.OnClick(() => Go(Page.Stats));
@@ -779,7 +777,13 @@ public sealed partial class MainWindow : Window
         {
             Section(col, "Words per month");
             var max = Math.Max(1, b.Months.Max(m => m.Words));
-            col.Children.Add(Ui.List(b.Months.AsEnumerable().Reverse().Select(m => StatBar(m.Short, m.Words, max, $"{m.Dictations} dictations")).ToArray()));
+            // The month in progress says so, with where it's heading at the pace so far.
+            var today = DateTime.Now;
+            var nowKey = today.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            var days = DateTime.DaysInMonth(today.Year, today.Month);
+            string MonthSub(WordStats.MonthRow m) => m.Key != nowKey ? $"{m.Dictations} dictations"
+                : $"So far, day {today.Day} of {days}" + (WordStats.OnTrack(m.Words, today.Day, days) is { } w ? $" \u00b7 on track for {Ui.Compact(w)}" : "");
+            col.Children.Add(Ui.List(b.Months.AsEnumerable().Reverse().Select(m => StatBar(m.Short, m.Words, max, MonthSub(m))).ToArray()));
         }
 
         col.Children.Add(new ColBreak());
@@ -793,8 +797,8 @@ public sealed partial class MainWindow : Window
             rows.Add(Spaced(Spread(texts, Ui.Text(value, 15, bold: true)), 20, 13, 20, 13));
         }
         if (b.Best is { } best) Fact("Best month", Ui.Compact(best.Words) + " words", best.Label);
-        if (b.Months.Count > 1) Fact("Average month", Ui.Compact(b.Average) + " words");
-        if (b.Words > 0) Fact("Typing it would have taken", WordStats.TypingTime(b.Words), "At 40 words a minute");
+        if (b.Months.Count > 1) Fact("Average month", Ui.Compact(b.Average) + " words", "Not counting this month yet");
+        if (b.Words > 0) Fact("Typing it would have taken", WordStats.TypingTime(b.Words), $"At the average typing speed, {WordStats.TypingWpm} words a minute");
         Fact("That's about", WordStats.Equivalent(b.Words));
         if (b.Pace is { } pace) Fact("Speaking pace", $"{Math.Round(pace)} words a minute");
         if (b.Longest > 0)

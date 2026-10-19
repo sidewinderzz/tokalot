@@ -114,6 +114,11 @@ internal static class Shots
         Check("13f stats: typing time and what it fills",
             WordStats.TypingTime(1200) == "30 min" && WordStats.TypingTime(2400) == "1 hour" && WordStats.TypingTime(100_000) == "42 hours" &&
             WordStats.Equivalent(299) == "" && WordStats.Equivalent(450) == "1 paperback page" && WordStats.Equivalent(90_000) == "1 novel" && WordStats.Equivalent(135_000) == "1.5 novels");
+        var avg = new WordStats.Breakdown(WordStats.Months(new[] { UM(("2026-08", 1000, 10), ("2026-09", 3000, 30), ("2026-10", 200, 2)) }, "2026-10"),
+            4200, 42, new(), new Usage.Month(), null, 0, 0, new WordStats.Streaks(0, 0, 0), null, new());
+        Check("13g stats: the month in progress is projected and left out of the average",
+            WordStats.OnTrack(1900, 19, 31) == 3100 && WordStats.OnTrack(500, 2, 31) == null && WordStats.OnTrack(0, 19, 31) == null &&
+            WordStats.OnTrack(3000, 30, 30) == null && avg.Average == 2000);
         Check("10a stray thank you dropped", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.8}]}") == "");
         Check("10b said thank you kept", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.05}]}") == " Thank you.");
         var echoWords = new[] { "Tokalot", "srg62003" };

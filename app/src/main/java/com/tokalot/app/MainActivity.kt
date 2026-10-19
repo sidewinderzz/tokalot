@@ -813,7 +813,10 @@ class MainActivity : Activity() {
         // This month at a glance.
         val m = Usage.month(this)
         val stats = card(20)
-        stats.addView(text(m.label.uppercase(Locale.US), 12f, C.SUB).apply { letterSpacing = 0.08f })
+        // The month isn't over yet, so say how far in it is.
+        val today = java.util.Calendar.getInstance()
+        val dayOf = "Day ${today.get(java.util.Calendar.DAY_OF_MONTH)} of ${today.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)}"
+        stats.addView(text("${m.label} · $dayOf".uppercase(Locale.US), 12f, C.SUB).apply { letterSpacing = 0.08f })
         val statRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
         fun stat(value: String, label: String) = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -832,18 +835,8 @@ class MainActivity : Activity() {
         val pace = if (minutes > 0) Math.round(spoken.sumOf { TextTools.wordCount(it.raw) } / minutes).toString() else "–"
         statRow.addView(stat(pace, "words a minute"), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         stats.addView(statRow)
-        if (m.fillers + m.corrections > 0) {
-            stats.addView(text("Cleaned up ${m.fillers} filler word${if (m.fillers == 1) "" else "s"} and ${m.corrections} self-correction${if (m.corrections == 1) "" else "s"}", 13f, C.SUB).apply {
-                setPadding(0, dp(10), 0, 0)
-            })
-        }
-        // Every device that syncs, once there's more than this one in the sync file.
-        Usage.everywhere(this)?.takeIf { it.devices > 1 }?.let { e ->
-            stats.addView(text("On all ${e.devices} devices: ${compact(e.month.toInt())} words this month · ${compact(e.total.toInt())} all time", 13f, C.SUB).apply {
-                setPadding(0, dp(10), 0, 0)
-            })
-        }
-        stats.addView(text("See all your word stats ›", 13f, C.LINK).apply { setPadding(0, dp(10), 0, 0) })
+        // Clean-ups, other devices and all-time totals live on the word stats page; Home keeps just the three numbers.
+        stats.addView(text("View stats ›", 13f, C.SUB).apply { setPadding(0, dp(10), 0, 0) })
         stats.contentDescription = "Word stats"
         stats.setOnClickListener { inStats = true; render() }
         col.addView(stats, lp().margins(this, b = 16))
