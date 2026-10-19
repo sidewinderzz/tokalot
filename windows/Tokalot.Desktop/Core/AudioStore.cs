@@ -146,3 +146,109 @@ public static class Player
         if (notify && was != null) Changed?.Invoke();
     }
 }
+
+/**
+ * A voice note's recording, for the note page: plays from any point at a chosen speed (Windows' own media player,
+ * which keeps the pitch), and can be paused and moved while playing. Used from the UI thread only.
+ */
+public static class NotePlayer
+{
+    private static System.Windows.Media.MediaPlayer? media;
+    private static double? pendingFrom;
+    private static double speed = 1;
+    public static string? File { get; private set; }
+    public static bool Playing { get; private set; }
+    /** Where playback is now, in seconds. */
+    public static double Position => pendingFrom ?? media?.Position.TotalSeconds ?? 0;
+    /** Started, paused, stopped, reached the end, or couldn't play. */
+    public static event Action? Changed;
+    /** Set when Windows couldn't play the file (some .opus or .ogg files without the codec). */
+    public static string? Error { get; private set; }
+
+    /** Plays [file] from [from] seconds at [rate] (1 = normal). */
+    public static void Play(string file, double from, double rate)
+    {
+        speed = rate;
+        Error = null;
+        if (media == null || File != file)
+        {
+            Stop(false);
+            Player.Stop();
+            var m = media = new System.Windows.Media.MediaPlayer();
+            m.MediaOpened += (_, _) =>
+            {
+                if (!ReferenceEquals(media, m)) return;
+                if (pendingFrom is { } t) { m.Position = TimeSpan.FromSeconds(t); pendingFrom = null; }
+                if (Playing) m.SpeedRatio = speed;
+            };
+            m.MediaEnded += (_, _) => { if (ReferenceEquals(media, m)) { m.Pause(); m.Position = TimeSpan.Zero; Playing = false; Changed?.Invoke(); } };
+            m.MediaFailed += (_, e) => { if (ReferenceEquals(media, m)) { Error = e.ErrorException?.Message ?? "unknown error"; Stop(); } };
+            pendingFrom = from;
+            m.Open(new Uri(file));
+            File = file;
+        }
+        else Seek(from);
+        media.Play();
+        media.SpeedRatio = speed; // only holds once playing
+        Playing = true;
+        Changed?.Invoke();
+    }
+
+    public static void Pause()
+    {
+        if (media == null || !Playing) return;
+        media.Pause();
+        Playing = false;
+        Changed?.Invoke();
+    }
+
+    public static void Seek(double t)
+    {
+        if (media == null) return;
+        if (pendingFrom != null) pendingFrom = t;
+        else media.Position = TimeSpan.FromSeconds(Math.Max(0, t));
+    }
+
+    public static void SetSpeed(double rate)
+    {
+        speed = rate;
+        if (media != null && Playing) media.SpeedRatio = rate;
+    }
+
+    public static void Stop(bool notify = true)
+    {
+        var m = media;
+        media = null;
+        pendingFrom = null;
+        Playing = false;
+        File = null;
+        if (m != null) { try { m.Stop(); m.Close(); } catch { } }
+        if (notify) Changed?.Invoke();
+    }
+
+    /** The stretches of [file] with no voice in them, or null if it can't be decoded here. Slow: run it off the UI thread. */
+    public static List<NoteMedia.Cut>? FindSilence(string file, IReadOnlyList<NoteMedia.Word> words, double duration)
+    {
+        try
+        {
+            using var reader = file.EndsWith(".wav") ? (WaveStream)new WaveFileReader(file) : new MediaFoundationReader(file);
+            var provider = reader.ToSampleProvider();
+            var channels = provider.WaveFormat.Channels;
+            IEnumerable<float> Mono()
+            {
+                var buf = new float[provider.WaveFormat.SampleRate * channels];
+                int n;
+                while ((n = provider.Read(buf, 0, buf.Length)) > 0)
+                    for (var i = 0; i + channels <= n; i += channels)
+                    {
+                        float sum = 0;
+                        for (var c = 0; c < channels; c++) sum += buf[i + c];
+                        yield return sum / channels;
+                    }
+            }
+            var db = NoteMedia.FrameLoudness(Mono(), provider.WaveFormat.SampleRate).ToArray();
+            return NoteMedia.SilenceCuts(NoteMedia.SpeechFrames(db), words, duration > 0 ? duration : reader.TotalTime.TotalSeconds);
+        }
+        catch { return null; }
+    }
+}
