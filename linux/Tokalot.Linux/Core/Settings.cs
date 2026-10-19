@@ -116,6 +116,8 @@ public sealed class Settings
     /** Optional sync: the shared file's path on this computer ("" = off), and whether this computer puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }
+    /** "Include dictation history": whether this device shares its dictations through the sync file. Off unless turned on. */
+    public bool SyncHistory { get; set; }
     /** Services this device has held a key for. One of these with no key now was cleared by the user, so sync doesn't refill it. */
     public List<string> KnownKeys { get; set; } = new();
     /** This device's id for its own word counts in the sync file (made on its first sync). Not this device's name. */
