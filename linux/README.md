@@ -11,12 +11,13 @@ already has (see "What it needs from the system").
 
 ## Install
 
-1. Download `Tokalot-linux-x64-<version>.tar.gz` from the project's GitHub Releases page
-   (https://github.com/sidewinderzz/tokalot/releases, the release tagged `linux-v<version>`) and
-   unpack it somewhere it can stay, for example:
+1. Download `Tokalot-linux-x64-<version>.tar.gz` (Intel/AMD) or `Tokalot-linux-arm64-<version>.tar.gz`
+   (ARM64, such as a Raspberry Pi 4/5; `uname -m` prints `aarch64` there) from the project's GitHub
+   Releases page (https://github.com/sidewinderzz/tokalot/releases, the release tagged `linux-v<version>`)
+   and unpack it somewhere it can stay, for example:
 
    ```
-   mkdir -p ~/.local/opt && tar -xzf Tokalot-linux-x64-*.tar.gz -C ~/.local/opt
+   mkdir -p ~/.local/opt && tar -xzf Tokalot-linux-*.tar.gz -C ~/.local/opt
    ```
 
 2. Give your user the two permissions below (once), then **log out and back in**.
