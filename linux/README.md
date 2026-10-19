@@ -11,12 +11,13 @@ already has (see "What it needs from the system").
 
 ## Install
 
-1. Download `Tokalot-linux-x64-<version>.tar.gz` from the project's GitHub Releases page
-   (https://github.com/sidewinderzz/tokalot/releases, the release tagged `linux-v<version>`) and
-   unpack it somewhere it can stay, for example:
+1. Download `Tokalot-linux-x64-<version>.tar.gz` (Intel/AMD) or `Tokalot-linux-arm64-<version>.tar.gz`
+   (ARM64, such as a Raspberry Pi 4/5; `uname -m` prints `aarch64` there) from the project's GitHub
+   Releases page (https://github.com/sidewinderzz/tokalot/releases, the release tagged `linux-v<version>`)
+   and unpack it somewhere it can stay, for example:
 
    ```
-   mkdir -p ~/.local/opt && tar -xzf Tokalot-linux-x64-*.tar.gz -C ~/.local/opt
+   mkdir -p ~/.local/opt && tar -xzf Tokalot-linux-*.tar.gz -C ~/.local/opt
    ```
 
 2. Give your user the two permissions below (once), then **log out and back in**.
@@ -89,10 +90,11 @@ Optional:
 | `notify-send` | A notification if the shortcut can't be set up when Tokalot starts in the background |
 | An AppIndicator / tray | The tray icon (see GNOME below) |
 
-Optional sync: Settings › Sync can keep your dictionary, snippets, styles and instructions in one
-small file (`tokalot-sync.json`) that you put in a folder you already sync (Nextcloud, Dropbox,
+Optional sync: Settings › Sync can keep your dictionary, snippets, styles, instructions, voice notes,
+settings and word stats in one small file (`tokalot-sync.json`) that you put in a folder you already sync (Nextcloud, Dropbox,
 Syncthing…). Point each device at the same file, including the Windows and Android apps. There is
-no account or server; API keys stay out of the file unless you switch "Include API keys" on.
+no account or server; API keys and dictation history stay out of the file unless you switch
+"Include API keys" or "Include dictation history" on.
 
 Data lives in `~/.config/Tokalot` (settings, history, recordings, the offline model, `log.txt`).
 The folder is private to your user (mode 0700).

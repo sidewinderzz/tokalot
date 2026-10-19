@@ -88,10 +88,10 @@ If you try it, please open an issue saying which distro and desktop you use and 
 
 ## Install
 
-1. Download `Tokalot-linux-x64-<version>.tar.gz` below and unpack it, for example:
+1. Download `Tokalot-linux-x64-<version>.tar.gz` below (or `Tokalot-linux-arm64-<version>.tar.gz` on an ARM64 machine such as a Raspberry Pi 4/5) and unpack it, for example:
 
    ```
-   mkdir -p ~/.local/opt && tar -xzf Tokalot-linux-x64-*.tar.gz -C ~/.local/opt
+   mkdir -p ~/.local/opt && tar -xzf Tokalot-linux-*.tar.gz -C ~/.local/opt
    ```
 
 2. Run `~/.local/opt/Tokalot/Tokalot`. The Home page and Settings › Setup show the two one-time permission commands (keyboard shortcut and paste) with a Copy button; run them, then log out and back in.

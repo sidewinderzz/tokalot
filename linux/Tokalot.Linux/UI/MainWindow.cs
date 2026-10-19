@@ -42,6 +42,8 @@ public sealed partial class MainWindow : Window
     private readonly List<Control> grips = new();
     private StackPanel? historyBox;
     private TextBlock? bannerText;
+    /** The theme this window was built with (see onSync). */
+    private readonly string shownTheme = Settings.Current.Theme;
     private TextBlock? modelStatus;
     private TextBlock? modelProgress; // under the list in Settings › Offline model
     private int historyLimit = 100, notesLimit = 100;
@@ -149,7 +151,12 @@ public sealed partial class MainWindow : Window
         // The indicator previews in Settings redraw 60 times a second; they hold still while nobody is looking.
         Activated += (_, _) => FreezePreviews();
         Deactivated += (_, _) => FreezePreviews();
-        onSync = changed => Dispatcher.UIThread.Post(() => { if (changed || CurrentPage is Page.Settings or Page.Stats) Render(); });
+        onSync = changed => Dispatcher.UIThread.Post(() =>
+        {
+            // The theme may have come in from another device; changing it rebuilds this window.
+            if (changed && S.Theme != shownTheme) { App.Current.ApplyTheme(); return; }
+            if (changed || CurrentPage is Page.Settings or Page.Stats) Render();
+        });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
         onNoteImport = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Notes) Render(); });
@@ -563,6 +570,15 @@ public sealed partial class MainWindow : Window
                 : Spread(bannerText, Ui.Button("Update", () => _ = app.InstallUpdate(), filled: true));
             col.Children.Add(Spaced(Ui.Card(banner, 14), 0, 0, 0, 14));
         }
+        else if (Sync.NewerElsewhere)
+        {
+            // Another device runs a newer Tokalot that syncs things this one can't: worth updating even before a release shows up here.
+            var check = Ui.Button("Check for updates", async () => { await app.CheckForUpdates(); Render(); }, filled: true);
+            col.Children.Add(Spaced(Ui.Card(Spread(Ui.Stack(
+                Ui.Text("Update Tokalot to sync everything", 15),
+                Ui.Text("Another device that shares your sync file has a newer Tokalot. This one keeps syncing what it knows, but settings or history added since then only arrive once it's updated.", 13, C.Sub)),
+                check), 14), 0, 0, 0, 14));
+        }
 
         // The permissions this platform needs that aren't in place yet, each naming what to do.
         PlatformWarnings(col);
@@ -814,8 +830,9 @@ public sealed partial class MainWindow : Window
 
         var history = OperatingSystem.IsMacOS() ? "this Mac's history" : "this computer's history";
         col.Children.Add(Spaced(Ui.Text(
-            (b.Devices.Count > 1 ? "Words per month count every device that syncs. " : "") +
-            $"Pace, streaks, apps and clean-ups come from {history}.", 13, C.Sub), 4, 8, 0, 0));
+            (b.Devices.Count > 1 ? "Words per month and clean-ups count every device that syncs. " : "") +
+            (S.SyncFile.Length > 0 && S.SyncHistory ? "Pace, streaks and apps come from the dictation history, synced from your other devices too."
+                : $"Pace, streaks and apps come from {history}."), 13, C.Sub), 4, 8, 0, 0));
     }
 
     /** One row of a bar list: a label, a bar as long as [value] is next to [max], and the number. */
@@ -1573,10 +1590,12 @@ public sealed partial class MainWindow : Window
     }
 
     private const string SyncInfo =
-        "Tokalot keeps your dictionary, snippets, styles and instructions in one small file. Put that file in a folder you already sync, " +
+        "Tokalot keeps your dictionary, snippets, styles, instructions, voice notes, word stats and settings in one small file. Put that file in a folder you already sync, " +
         "such as Nextcloud, Google Drive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.\n\n" +
         "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. " +
-        "Your history and recordings are never put in it.\n\n" +
+        "Recordings are never put in it, and your dictation history only if you turn on Include dictation history (the newest 1,000 dictations, as text). " +
+        "A few settings stay on each device because they depend on it: the on-device model, how long recordings are kept, where the indicator sits " +
+        "and starting with the computer.\n\n" +
         "API keys are left out unless you turn on Include API keys. The file isn't encrypted, so only do that if the folder is private to you. " +
         "You can stop syncing at any time; your settings stay on this device.";
 
@@ -1641,13 +1660,16 @@ public sealed partial class MainWindow : Window
         col.Children.Add(Ui.List(
             head,
             Ui.SettingRow("Include API keys", "Off by default. The sync file isn't encrypted, so only turn this on if the folder is private to you.",
-                Ui.Switch(S.SyncKeys, v => { S.SyncKeys = v; S.Save(); }))));
+                Ui.Switch(S.SyncKeys, v => { S.SyncKeys = v; S.Save(); })),
+            Ui.SettingRow("Include dictation history", "Off by default. Shares the text of your newest 1,000 dictations, so every device has the same history and stats. Recordings stay on each device.",
+                Ui.Switch(S.SyncHistory, v => { S.SyncHistory = v; Sync.ForgetHistoryBasis(); S.Save(); }))));
         var now = Ui.Button("Sync now", async () => { await Sync.Run(); Render(); }, filled: true);
         var stop = Ui.Button("Stop syncing", async () =>
         {
             if (!await Ui.Dialog(this, "Stop syncing on this computer? The sync file and your settings here stay as they are.", "Stop syncing")) return;
             S.SyncFile = "";
             S.SyncKeys = false;
+            S.SyncHistory = false;
             Sync.Forget();
             S.Save();
             Render();

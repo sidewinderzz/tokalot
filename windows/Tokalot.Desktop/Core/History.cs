@@ -19,6 +19,7 @@ public sealed class Entry
     public string AppKey { get; set; } = "";
     public string AppLabel { get; set; } = "";
     public bool Pending { get; set; }        // recording kept but not transcribed (it failed or was cancelled)
+    public bool Own { get; set; }            // the phone's "My wording": the AI's wording swapped back for the user's own (kept for sync)
 }
 
 internal static class Files
@@ -128,6 +129,7 @@ public static class History
             Save();
         }
         Changed?.Invoke();
+        Shared();
     }
 
     /** Swaps in a new version of the entry with the same id (a retried transcription); adds it if it's gone. */
@@ -141,12 +143,14 @@ public static class History
             Save();
         }
         Changed?.Invoke();
+        Shared();
     }
 
     public static void Delete(long id)
     {
         lock (Gate) { Load().RemoveAll(x => x.Id == id); Save(); }
         Changed?.Invoke();
+        Shared();
     }
 
     /** Drops the in-memory copy so the next read comes from disk (after a restore). */
@@ -157,6 +161,58 @@ public static class History
     }
 
     public static void NotifyChanged() => Changed?.Invoke();
+
+    /** A dictation was added, changed or deleted: worth a sync only when history goes in the file. */
+    private static void Shared() { if (Settings.Current.SyncHistory) Sync.Queue(); }
+
+    // ---------- sync (only with "Include dictation history" on; see Sync.cs) ----------
+
+    private static Sync.SyncEntry ToSync(Entry e) =>
+        new(e.Id, e.Time, e.Text, e.Raw, e.DurationMs, e.Cleaned, e.AppKey, e.AppLabel, e.Own);
+
+    /** Dictations with a transcript, as the sync file holds them, newest first. Null while the file can't be read. */
+    public static List<Sync.SyncEntry>? ForSync()
+    {
+        lock (Gate)
+        {
+            var l = Load();
+            return unread ? null : l.Where(e => !e.Pending).Select(ToSync).ToList();
+        }
+    }
+
+    /**
+     * Stores a sync's result, unless a dictation was added, changed or deleted here since before was read
+     * (false: the sync runs again). One still waiting for a transcript is never replaced.
+     */
+    public static bool ApplySynced(List<Sync.SyncEntry> before, List<Sync.SyncEntry> put, HashSet<long> delete)
+    {
+        lock (Gate)
+        {
+            var l = Load();
+            if (unread || !l.Where(e => !e.Pending).Select(ToSync).SequenceEqual(before)) return false;
+            if (put.Count == 0 && delete.Count == 0) return true;
+            l.RemoveAll(e => delete.Contains(e.Id) && !e.Pending);
+            foreach (var s in put)
+            {
+                var i = l.FindIndex(e => e.Id == s.Id);
+                if (i >= 0 && l[i].Pending) continue;
+                var old = i >= 0 ? l[i] : null;
+                // Which app it was here stays as it was, so its stats stay under that app's name.
+                var entry = new Entry
+                {
+                    Id = s.Id, Time = s.Time, Text = s.Text, Raw = s.Raw, DurationMs = s.DurationMs, Cleaned = s.Cleaned, Own = s.Own,
+                    AppKey = old?.AppKey ?? s.App, AppLabel = old?.AppLabel ?? s.Label,
+                };
+                if (i >= 0) l[i] = entry; else l.Add(entry);
+            }
+            var sorted = l.OrderByDescending(e => e.Time).ThenByDescending(e => e.Id).Take(Max).ToList();
+            l.Clear();
+            l.AddRange(sorted);
+            Save();
+        }
+        Changed?.Invoke();
+        return true;
+    }
 }
 
 /**
@@ -319,13 +375,15 @@ public static class Usage
         }
     }
 
-    /** This device's words and dictations per month, as the sync file holds them. */
+    /** This device's counts per month, as the sync file holds them. */
     public static Dictionary<string, Sync.UsageMonth> ForSync()
     {
         lock (Gate)
         {
-            return Load().Where(kv => kv.Value.Words > 0 || kv.Value.Dictations > 0)
-                .ToDictionary(kv => kv.Key, kv => new Sync.UsageMonth(kv.Value.Words, kv.Value.Dictations));
+            return Load()
+                .Select(kv => (kv.Key, M: new Sync.UsageMonth(kv.Value.Words, kv.Value.Dictations, kv.Value.Fillers, kv.Value.Corrections, kv.Value.Local)))
+                .Where(x => x.M != new Sync.UsageMonth(0, 0))
+                .ToDictionary(x => x.Key, x => x.M);
         }
     }
 
@@ -333,8 +391,9 @@ public static class Usage
 }
 
 /**
- * The numbers behind the word stats page. Words per month count every device that shares the sync file
- * (this one alone when it's the only one); pace, streaks and apps come from this device's history.
+ * The numbers behind the word stats page. Words per month and clean-ups count every device that shares the
+ * sync file (this one alone when it's the only one); pace, streaks and apps come from the history here,
+ * which holds the other devices' dictations too when "Include dictation history" is on.
  */
 public static class WordStats
 {
@@ -426,8 +485,14 @@ public static class WordStats
         var apps = counted.Where(c => c.Entry.AppLabel.Length > 0).GroupBy(c => c.Entry.AppLabel)
             .Select(g => new AppRow(g.Key, g.Sum(c => (long)c.Words))).OrderByDescending(a => a.Words).Take(5).ToList();
 
+        var here = devices.Count > 1
+            ? new Usage.Month
+            {
+                Fillers = (int)devices.Sum(d => d.Fillers), Corrections = (int)devices.Sum(d => d.Corrections), Local = (int)devices.Sum(d => d.Offline),
+            }
+            : Usage.AllTime();
         return new Breakdown(
-            months, months.Sum(m => m.Words), months.Sum(m => m.Dictations), devices, Usage.AllTime(),
+            months, months.Sum(m => m.Words), months.Sum(m => m.Dictations), devices, here,
             pace, longest.Words, longest.Entry?.Time ?? 0, days, busiest, apps);
     }
 

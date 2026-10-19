@@ -7,8 +7,9 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * The numbers behind the word stats page. Words per month count every device that shares the sync file
- * (this phone alone when it's the only one); pace, streaks and apps come from this phone's history.
+ * The numbers behind the word stats page. Words per month and clean-ups count every device that shares the
+ * sync file (this phone alone when it's the only one); pace, streaks and apps come from the history here,
+ * which holds the other devices' dictations too when "Include dictation history" is on.
  * The Windows, Linux and Mac apps work these out the same way (WordStats in History.cs).
  */
 object WordStats {
@@ -22,7 +23,7 @@ object WordStats {
 
     data class Streaks(val days: Int, val best: Int, val current: Int)
 
-    /** This phone's own counts over every month: clean-ups and offline dictations aren't in the sync file. */
+    /** Clean-ups and offline dictations over every month, on every device that syncs. */
     data class Here(val fillers: Int, val corrections: Int, val offline: Int)
 
     data class Breakdown(
@@ -129,13 +130,17 @@ object WordStats {
             .maxByOrNull { (_, l) -> l.sumOf { it.second } }?.key
             ?.let { d -> Calendar.getInstance().apply { set(Calendar.DAY_OF_WEEK, d) }.getDisplayName(Calendar.DAY_OF_WEEK, Calendar.LONG, Locale.US) }
         // Grouped by app before looking up names, which can be slow for a long history.
-        val apps = counted.filter { it.first.app.isNotEmpty() }.groupBy { it.first.app }
-            .map { (pkg, l) -> pkg to l.sumOf { it.second.toLong() } }
-            .sortedByDescending { it.second }.take(5)
-            .map { (pkg, w) -> AppRow(AppContext.label(ctx, pkg), w) }
+        val apps = counted.filter { it.first.app.isNotEmpty() }.groupBy { it.first.label.ifEmpty { it.first.app } }
+            .map { (key, l) -> Triple(key, l.first().first, l.sumOf { it.second.toLong() }) }
+            .sortedByDescending { it.third }.take(5)
+            // A dictation synced from another device brings its app's name; this phone's own are looked up.
+            .map { (_, e, w) -> AppRow(e.label.ifEmpty { AppContext.label(ctx, e.app) }, w) }
 
+        val here = if (devices.size > 1) WordStats.Here(
+            devices.sumOf { it.fillers }.toInt(), devices.sumOf { it.corrections }.toInt(), devices.sumOf { it.offline }.toInt(),
+        ) else Usage.here(ctx)
         return Breakdown(
-            months, months.sumOf { it.words }, months.sumOf { it.dictations }, devices, Usage.here(ctx),
+            months, months.sumOf { it.words }, months.sumOf { it.dictations }, devices, here,
             pace, longest?.second ?: 0, longest?.first?.time ?: 0, days, busiest, apps,
         )
     }

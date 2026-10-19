@@ -18,6 +18,7 @@ data class Entry(
     val app: String = "",   // package name of the app it was typed into
     val status: String = "", // "" = transcribed; History.FAILED / CANCELLED = audio kept, waiting for a retry
     val own: Boolean = false, // the AI's wording was swapped back for the user's own ("My wording")
+    val label: String = "", // the app's name, for a dictation synced from another device (where [app] means nothing here)
 ) {
     /** No transcript yet: the recording is kept (whatever the retention setting) until it's retried or deleted. */
     val pending: Boolean get() = status.isNotEmpty()
@@ -56,7 +57,10 @@ object History {
             val status = o.optString("st").ifEmpty {
                 if (raw.isEmpty() && text.startsWith("Transcription failed: ")) FAILED else ""
             }
-            list.add(Entry(o.getLong("id"), o.getLong("time"), text, raw, o.optLong("dur"), o.optBoolean("ai"), o.optString("app"), status, o.optBoolean("own")))
+            list.add(Entry(
+                o.getLong("id"), o.getLong("time"), text, raw, o.optLong("dur"), o.optBoolean("ai"), o.optString("app"), status,
+                o.optBoolean("own"), o.optString("label"),
+            ))
         }
         return list
     }
@@ -68,6 +72,7 @@ object History {
                 .put("raw", it.raw).put("dur", it.durationMs).put("ai", it.cleaned).put("app", it.app)
             if (it.status.isNotEmpty()) o.put("st", it.status)
             if (it.own) o.put("own", true)
+            if (it.label.isNotEmpty()) o.put("label", it.label)
             arr.put(o)
         }
         return arr.toString()
@@ -102,6 +107,7 @@ object History {
         val app = ctx.applicationContext
         val gen = generation
         writer.execute { write(app, gen) }
+        Sync.historyChanged(app)
     }
 
     private fun write(ctx: Context, gen: Int) {
@@ -197,5 +203,40 @@ object History {
     fun delete(ctx: Context, id: Long) {
         load(ctx).removeAll { it.id == id }
         save(ctx)
+    }
+
+    // ---------- sync (only with "Include dictation history" on; see Sync.kt) ----------
+
+    /** Dictations with a transcript, as the sync file holds them, newest first. [label] names an app for the file. */
+    @Synchronized
+    fun forSync(ctx: Context, label: (String) -> String): List<SyncEntry> =
+        load(ctx).filter { !it.pending }.map { e ->
+            SyncEntry(e.id, e.time, e.text, e.raw, e.durationMs, e.cleaned, e.app, e.label.ifEmpty { if (e.app.isEmpty()) "" else label(e.app) }, e.own)
+        }
+
+    /**
+     * Stores a sync's result, unless a dictation was added, changed or deleted here since [before] was read
+     * (false: the sync runs again). One still waiting for a transcript is never replaced.
+     */
+    @Synchronized
+    fun applySynced(ctx: Context, before: List<SyncEntry>, put: List<SyncEntry>, delete: Set<Long>): Boolean {
+        val list = load(ctx)
+        val now = list.filter { !it.pending }
+        if (now.size != before.size || now.indices.any { now[it].id != before[it].id || now[it].text != before[it].text || now[it].own != before[it].own || now[it].cleaned != before[it].cleaned }) return false
+        if (put.isEmpty() && delete.isEmpty()) return true
+        val pending = list.filter { it.pending }.mapTo(HashSet()) { it.id }
+        list.removeAll { it.id in delete && !it.pending }
+        for (s in put) {
+            if (s.id in pending) continue
+            val i = list.indexOfFirst { it.id == s.id }
+            val old = if (i >= 0) list[i] else null
+            // Kept from this device's own copy: which app it was here, so its stats stay under that app's name.
+            val e = Entry(s.id, s.time, s.text, s.raw, s.durationMs, s.cleaned, old?.app ?: s.app, own = s.own, label = if (old != null) old.label else s.label)
+            if (i >= 0) list[i] = e else list.add(e)
+        }
+        list.sortWith(compareByDescending<Entry> { it.time }.thenByDescending { it.id })
+        while (list.size > MAX) list.removeAt(list.size - 1)
+        save(ctx)
+        return true
     }
 }

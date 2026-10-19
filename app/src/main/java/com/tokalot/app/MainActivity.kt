@@ -384,7 +384,9 @@ class MainActivity : Activity() {
 
     /** A sync ended. Only a change to what's on screen redraws it; otherwise just the status line moves. */
     private fun syncFinished(changedLocal: Boolean) {
-        if (changedLocal || inStats || (inSettings && prefs.syncBroken != SettingsScreen.syncShownBroken)) render()
+        // The theme may have come in from another device.
+        if (changedLocal && wantDark() != C.dark) applyTheme()
+        else if (changedLocal || inStats || (inSettings && prefs.syncBroken != SettingsScreen.syncShownBroken)) render()
         else if (inSettings) SettingsScreen.showSyncStatus(prefs)
     }
 
@@ -783,6 +785,17 @@ class MainActivity : Activity() {
                 addView(notes)
             }
             col.addView(banner, lp().margins(this, b = 12))
+        }
+
+        // Another device runs a newer Tokalot that syncs things this one can't: worth updating even before a release shows up here.
+        if (Updater.available(this) == null && prefs.syncUri != null && prefs.syncNewer) {
+            val c = card(20)
+            c.addView(text("Update Tokalot to sync everything", 17f))
+            c.addView(text("Another device that shares your sync file has a newer Tokalot. This one keeps syncing what it knows, but settings or history added since then only reach this phone once it's updated.", 14f, C.SUB), lp().margins(this, t = 4))
+            c.addView(row(pill("Check for updates") {
+                Thread { Updater.check(applicationContext, force = true); runOnUiThread { if (!isDestroyed) render() } }.start()
+            }), lp().margins(this, t = 10))
+            col.addView(c, lp().margins(this, b = 12))
         }
 
         suggestionsCard()?.let { col.addView(it, lp().margins(this, b = 12)) }
