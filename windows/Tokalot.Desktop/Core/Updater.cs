@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Velopack;
 using Velopack.Sources;
@@ -20,7 +21,17 @@ public static class Updater
     /** The rolling "desktop" release on GitHub always holds the newest Windows build. */
     public const string FeedUrl = RepoUrl + "/releases/download/desktop/";
 
-    private static UpdateManager Manager => manager ??= new UpdateManager(new SimpleWebSource(FeedUrl));
+    /** This copy is the Intel/AMD build running emulated on a Windows on ARM PC. */
+    public static bool EmulatedOnArm =>
+        RuntimeInformation.ProcessArchitecture == Architecture.X64 && RuntimeInformation.OSArchitecture == Architecture.Arm64;
+
+    /** The installer for this PC: the native ARM64 one on Windows on ARM, otherwise the x64 one. */
+    public static string SetupUrl => FeedUrl + (RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "TokalotSetup-arm64.exe" : "TokalotSetup.exe");
+
+    // Each build reads its own channel's feed (releases.win.json for x64, releases.win-arm64.json for ARM64).
+    // An x64 copy on an ARM PC reads the ARM64 feed instead, so its next update moves it to the native build.
+    private static UpdateManager Manager => manager ??= new UpdateManager(new SimpleWebSource(FeedUrl),
+        EmulatedOnArm ? new UpdateOptions { ExplicitChannel = "win-arm64" } : null);
 
     /** False when running from a build folder instead of the installed app (updates can't apply). */
     public static bool CanUpdate

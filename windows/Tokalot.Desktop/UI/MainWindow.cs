@@ -476,7 +476,7 @@ public sealed class MainWindow : Window
             var c = Ui.Stack(
                 Ui.Text("Tokalot is installed inside another app's private storage", 15.5, C.Warn, bold: true),
                 Spaced(Ui.Text("That happens when the installer is opened from within another app instead of from your browser's downloads. Windows then hides Tokalot from the Start menu, doesn't start it when you sign in, and can show it an empty set of settings. To fix it, download the installer with your web browser and run it from File Explorer. Your settings and history are kept.", 14, C.Sub), 0, 4, 0, 12),
-                Ui.Button("Download the installer", () => Open(Updater.RepoUrl + "/releases/download/desktop/TokalotSetup.exe"), filled: true));
+                Ui.Button("Download the installer", () => Open(Updater.SetupUrl), filled: true));
             col.Children.Add(Spaced(Ui.Card(c, 20), 0, 0, 0, 14));
         }
 
@@ -1481,7 +1481,7 @@ public sealed class MainWindow : Window
         // --- About
         Section(col, "About");
         var about = new StackPanel();
-        about.Children.Add(Ui.Text("Tokalot for Windows " + Updater.CurrentVersion, 16, bold: true));
+        about.Children.Add(Ui.Text("Tokalot for Windows " + Updater.CurrentVersion + (RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? " (ARM64)" : ""), 16, bold: true));
         about.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this PC. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The Ctrl+Win listener only watches for that shortcut; it never records your typing.", 14, C.Sub), 0, 4, 0, 0));
         about.Children.Add(Spaced(Link("Source code: github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)), 0, 8, 0, 0));
         // A new version can be installed from here too, not only from the banner on Home.
