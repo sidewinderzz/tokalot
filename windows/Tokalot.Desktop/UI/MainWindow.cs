@@ -1258,7 +1258,7 @@ public sealed class MainWindow : Window
         (SetupCategory, new[] { "Setup" }),
         (SpeechCategory, new[] { "Speech to text", "Offline model", "AI cleanup", "API keys", "Speed" }),
         ("Recording & look", new[] { "Recording", "Recording indicator", "Appearance" }),
-        (DataCategory, new[] { "Recordings", "Sync", "Backup", "Usage" }),
+        (DataCategory, new[] { "Recordings", "Sync", "AI assistants", "Backup", "Usage" }),
         ("About", new[] { "About" }),
     };
 
@@ -1595,6 +1595,18 @@ public sealed class MainWindow : Window
         // --- Sync (optional)
         Section(col, "Sync");
         BuildSync(col);
+
+        // --- AI assistants (optional)
+        Section(col, "AI assistants");
+        var mcpInfo = Ui.Button("", () => Ui.Dialog(this, NotesMcp.Help, "Got it", cancel: null, title: "Connect an AI assistant"), icon: "info");
+        mcpInfo.Margin = new Thickness(0, 0, 8, 0);
+        mcpInfo.ToolTip = "How to connect an AI assistant";
+        System.Windows.Automation.AutomationProperties.SetName(mcpInfo, "How to connect an AI assistant");
+        col.Children.Add(Ui.List(
+            Ui.SettingRow("Let AI assistants read my notes", "Off by default. Claude Desktop, Claude Code and other MCP apps on this PC can search and read your voice notes. Read-only.",
+                Ui.Row(mcpInfo, Ui.Switch(S.NotesMcp, v => { S.NotesMcp = v; S.Save(); Render(); })))));
+        if (S.NotesMcp)
+            col.Children.Add(Spaced(Ui.Row(Ui.Button("Copy setup", () => { _ = TextInjector.Copy(NotesMcp.Config(NotesMcp.Exe)); Toast("Copied"); }, icon: "copy")), 0, 12, 0, 0));
 
         // --- Backup
         Section(col, "Backup");

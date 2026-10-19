@@ -47,6 +47,7 @@
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\NoteImport.cs" Link="Shared\Core\NoteImport.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\NoteMedia.cs" Link="Shared\Core\NoteMedia.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Notes.cs" Link="Shared\Core\Notes.cs" />
+    <Compile Include="..\..\windows\Tokalot.Desktop\Core\NotesMcp.cs" Link="Shared\Core\NotesMcp.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Sync.cs" Link="Shared\Core\Sync.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\TextTools.cs" Link="Shared\Core\TextTools.cs" />
     <Compile Include="..\..\windows\Tokalot.Desktop\Core\Tones.cs" Link="Shared\Core\Tones.cs" />
