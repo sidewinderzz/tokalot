@@ -119,12 +119,15 @@ object Usage {
         sp(ctx).safeString(DEVICE_KEY, null)?.takeIf { it.isNotBlank() }
             ?: UUID.randomUUID().toString().also { sp(ctx).edit().putString(DEVICE_KEY, it).commit() }
 
-    /** This phone's words and dictations per month, as the sync file holds them. */
+    /** This phone's counts per month, as the sync file holds them. */
     fun forSync(ctx: Context): DeviceUsage {
         val months = sp(ctx).all.keys.filter { it.matches(MONTH) }.sorted().associateWith { k ->
             val o = read(ctx, k)
-            UsageMonth(o.optDouble("words", 0.0).toLong(), o.optDouble("n", 0.0).toLong())
-        }.filterValues { it.words > 0 || it.dictations > 0 }
+            UsageMonth(
+                o.optDouble("words", 0.0).toLong(), o.optDouble("n", 0.0).toLong(),
+                o.optDouble("fillers", 0.0).toLong(), o.optDouble("corrections", 0.0).toLong(), o.optDouble("local", 0.0).toLong(),
+            )
+        }.filterValues { it != UsageMonth() }
         return DeviceUsage("Android · ${Build.MODEL}", System.currentTimeMillis(), months)
     }
 

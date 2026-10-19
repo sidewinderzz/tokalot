@@ -318,4 +318,123 @@ class SyncTest {
         assertTrue(SyncMerge.remoteLost(null, SyncState(words = listOf("Kowalski"))))
         assertFalse(SyncMerge.remoteLost(null, SyncState()))
     }
+
+    // ---------- settings ----------
+
+    private val anyValue = { _: String, _: String -> true }
+
+    private fun settings(l: Map<String, String>, r: Map<String, String>?, b: Map<String, String>?, usable: (String, String) -> Boolean = anyValue) =
+        SyncMerge.settings(l, r, b, usable)
+
+    @Test fun settingChangedHereWinsAndOneLeftAloneFollowsTheFile() {
+        val base = mapOf("sounds" to "true", "theme" to "\"dark\"")
+        val out = settings(mapOf("sounds" to "false", "theme" to "\"dark\""), mapOf("sounds" to "true", "theme" to "\"light\""), base)
+        assertEquals(mapOf("sounds" to "false", "theme" to "\"light\""), out)
+    }
+
+    @Test fun aJoiningDeviceTakesTheFilesSettings() {
+        // No base yet (first sync, or the first sync after updating): the file wins wherever it has a value.
+        val out = settings(mapOf("sounds" to "false", "haptics" to "true"), mapOf("sounds" to "true"), null)
+        assertEquals(mapOf("haptics" to "true", "sounds" to "true"), out)
+        // Same for a setting added in an update that the base doesn't know yet.
+        assertEquals(mapOf("sounds" to "true"), settings(mapOf("sounds" to "false"), mapOf("sounds" to "true"), mapOf("theme" to "\"dark\"")))
+    }
+
+    @Test fun settingsThisDeviceDoesntHavePassThrough() {
+        val out = settings(mapOf("sounds" to "true"), mapOf("sounds" to "true", "indicatorStyle" to "\"bars\""), mapOf("sounds" to "true"))
+        assertEquals("\"bars\"", out["indicatorStyle"])
+    }
+
+    @Test fun aValueThisDeviceCantUseIsKeptInTheFileNotApplied() {
+        val usable = { k: String, v: String -> !(k == "stt" && v == "\"DEEPGRAM\"") }
+        // Even changed here: a newer device's choice stays in the file until it's one this device knows.
+        val out = settings(mapOf("stt" to "\"GROQ\""), mapOf("stt" to "\"DEEPGRAM\""), mapOf("stt" to "\"OPENAI\""), usable)
+        assertEquals("\"DEEPGRAM\"", out["stt"])
+    }
+
+    @Test fun settingsSurviveTheFileAndTheBase() {
+        val s = mapOf(
+            "accent" to "4294945083", "learnedWords" to "[\"Kowalski\"]", "sounds" to "true",
+            "sttModels" to "{\"GROQ\":\"whisper-large-v3\"}", "theme" to "\"dark\"",
+        )
+        val state = SyncState(settings = s)
+        val r = SyncFormat.parse(SyncFormat.encode(state, null, 1, "Android"))!!
+        assertEquals(s, r.settings)
+        assertEquals(s, SyncFormat.parseBase(SyncFormat.encodeBase(state), "").settings)
+        assertTrue(SyncMerge.sameContent(state, r))
+    }
+
+    @Test fun canonicalValuesCompareEqual() {
+        assertEquals("{\"a\":1,\"b\":[true,\"x\"]}", SyncFormat.canon(org.json.JSONObject("{\"b\":[true,\"x\"],\"a\":1.0,\"c\":\"\"}")))
+        assertEquals("4294093115", SyncFormat.canon(0xFFF2A93BL))
+        assertNull(SyncFormat.canon(null))
+    }
+
+    @Test fun aFileWithoutSettingsKeepsThisDevicesAndWritesThem() {
+        val local = SyncState(settings = mapOf("sounds" to "true"))
+        val res = merge(local, remote(), SyncState())
+        assertEquals(mapOf("sounds" to "true"), res.state.settings)
+        assertTrue(res.write)
+    }
+
+    // ---------- history ----------
+
+    private fun entry(id: Long, text: String = "said $id", own: Boolean = false) =
+        SyncEntry(id, id, text, text, 1000, true, "com.whatsapp", "WhatsApp", own)
+
+    @Test fun historyIsJoinedAndDeletionsSpread() {
+        val one = entry(1); val two = entry(2); val three = entry(3)
+        // First time: everything from both sides, nothing deleted.
+        val first = SyncMerge.history(listOf(two, one), listOf(three, one), emptyMap())
+        assertEquals(listOf(three, two, one), first.file)
+        assertEquals(listOf(three), first.put)
+        assertTrue(first.delete.isEmpty())
+        // Later: 1 deleted here, 3 deleted elsewhere.
+        val base = mapOf(1L to one.hash, 2L to two.hash, 3L to three.hash)
+        val second = SyncMerge.history(listOf(three, two), listOf(two, one), base)
+        assertEquals(listOf(two), second.file)
+        assertEquals(setOf(3L), second.delete)
+        assertTrue(second.put.isEmpty())
+    }
+
+    @Test fun historyEditMadeElsewhereComesIn() {
+        val mine = entry(1)
+        val edited = entry(1, "my own words", own = true)
+        val res = SyncMerge.history(listOf(mine), listOf(edited), mapOf(1L to mine.hash))
+        assertEquals(listOf(edited), res.file)
+        assertEquals(listOf(edited), res.put)
+        // Edited here instead: this device's version goes in the file.
+        val back = SyncMerge.history(listOf(edited), listOf(mine), mapOf(1L to mine.hash))
+        assertEquals(listOf(edited), back.file)
+        assertTrue(back.put.isEmpty())
+    }
+
+    @Test fun historyKeepsTheNewestAndOneThatFellOffIsntDeleted() {
+        val max = SyncMerge.HISTORY_MAX.toLong()
+        val all = (1..max + 5).map { entry(it) }.reversed()
+        val first = SyncMerge.history(all, null, emptyMap())
+        assertEquals(SyncMerge.HISTORY_MAX, first.file.size)
+        assertEquals(max + 5, first.file.first().id)
+        // Another device had entry 3 in its base from back when the file still held it: it fell off, it wasn't deleted.
+        val other = SyncMerge.history(listOf(entry(3)), first.file, mapOf(3L to entry(3).hash))
+        assertTrue(other.delete.isEmpty())
+    }
+
+    @Test fun historySurvivesTheFile() {
+        val h = listOf(entry(2, own = true), entry(1))
+        val text = SyncFormat.encode(SyncState(), null, 1, "Android", history = h)
+        assertEquals(h, SyncFormat.parse(text)!!.history)
+        assertNull(SyncFormat.parse(SyncFormat.encode(SyncState(), null, 1, "Android"))!!.history)
+        assertEquals(mapOf(2L to h[0].hash, 1L to h[1].hash), SyncFormat.parseHistoryBase(SyncFormat.encodeHistoryBase(h)))
+    }
+
+    @Test fun cleanupCountsSurviveTheFile() {
+        val usage = mapOf("phone" to DeviceUsage("Android", 1, mapOf("2026-10" to UsageMonth(500, 20, fillers = 7, corrections = 2, offline = 3))))
+        assertEquals(usage, SyncFormat.parse(SyncFormat.encode(SyncState(), null, 1, "Android", usage))!!.usage)
+    }
+
+    @Test fun fnvMatchesTheDesktopApps() {
+        // The same string hashes the same in C# (Sync.Fnv); the value is FNV-1a 32-bit.
+        assertEquals(0x4f9f2cab, SyncMerge.fnv("hello"))
+    }
 }

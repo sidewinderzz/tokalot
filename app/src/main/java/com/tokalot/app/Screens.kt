@@ -478,8 +478,9 @@ class StatsScreen(private val a: MainActivity) {
         }
 
         col.addView(text(
-            (if (b.devices.size > 1) "Words per month count every device that syncs. " else "") +
-                "Pace, streaks, apps and clean-ups come from this phone's history.", 13f, C.SUB,
+            (if (b.devices.size > 1) "Words per month and clean-ups count every device that syncs. " else "") +
+                (if (prefs.syncUri != null && prefs.syncHistory) "Pace, streaks and apps come from the dictation history, synced from your other devices too."
+                else "Pace, streaks and apps come from this phone's history."), 13f, C.SUB,
         ), lp().margins(this, t = 8, l = 4))
         scroll(col)
     }
@@ -564,8 +565,9 @@ class SettingsScreen(private val a: MainActivity) {
         }
 
         val SYNC_INFO = listOf(
-            "Tokalot keeps your dictionary, snippets, styles, instructions and voice notes in one small file. Put that file in a folder you already sync, such as Google Drive, OneDrive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.",
-            "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. Your history and recordings are never put in it.",
+            "Tokalot keeps your dictionary, snippets, styles, instructions, voice notes, word stats and settings in one small file. Put that file in a folder you already sync, such as Google Drive, OneDrive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.",
+            "A few settings stay on each device because they depend on it: the on-device model, how long recordings are kept, the volume-key shortcut and where things sit on the screen.",
+            "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. Recordings are never put in it, and your dictation history only if you turn on Include dictation history (the newest ${SyncMerge.HISTORY_MAX} dictations, as text).",
             "API keys are left out unless you turn on Include API keys. The file isn't encrypted, so only do that if the folder is private to you. You can stop syncing at any time; your settings stay on this device.",
         ).joinToString("\n\n")
     }
@@ -1194,6 +1196,11 @@ class SettingsScreen(private val a: MainActivity) {
                 prefs.syncKeys = it
                 Sync.request(this)
                 render() // the note under API keys says where they go
+            })
+            c.addView(divider())
+            c.addView(switchRow("Include dictation history", "Off by default. Shares the text of your newest ${SyncMerge.HISTORY_MAX} dictations, so every device has the same history and stats. Recordings stay on each device.", prefs.syncHistory) {
+                prefs.syncHistory = it
+                Sync.request(this)
             })
             c.addView(divider())
             c.addView(row(pill("Stop syncing") {

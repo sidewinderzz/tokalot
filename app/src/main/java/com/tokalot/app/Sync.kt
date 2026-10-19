@@ -2,6 +2,7 @@ package com.tokalot.app
 
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -13,6 +14,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Optional settings sync without an account or a server: one small JSON file the user keeps
  * in a folder they already sync (Drive, OneDrive, Dropbox, Syncthing…). Every Tokalot pointed
  * at that file reads it, merges in its own changes and writes it back (rules in [SyncMerge]).
+ * It carries the dictionary, snippets, styles, instructions, voice notes, the other settings, each
+ * device's counts, API keys only if asked, and dictation history only if asked.
  * The file is reached through Android's document picker, so no storage permission is needed.
  * Nothing here runs on the main thread, and a failure only ever becomes a line in Settings.
  */
@@ -20,7 +23,7 @@ object Sync {
     const val UNREACHABLE = "Sync file can't be reached. Choose it again."
     private const val BY = "Android"
     private const val DEBOUNCE_MS = 2500L
-    private const val MAX_BYTES = 8 * 1024 * 1024 // a real file is a few KB; refuses something that clearly isn't ours
+    private const val MAX_BYTES = 16 * 1024 * 1024 // a few KB, or a few MB with history in it; refuses something that clearly isn't ours
     private const val RW = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
     private val main = Handler(Looper.getMainLooper())
@@ -28,6 +31,8 @@ object Sync {
     @Volatile private var again = false
     @Volatile private var appContext: Context? = null
     private val debounced = Runnable { appContext?.let { request(it) } }
+    /** Held here because SharedPreferences only keeps a weak reference to it. */
+    private var watcher: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     /** Told on the main thread when a sync ends; true if it changed a setting on this device. */
     @Volatile var onDone: ((changedLocal: Boolean) -> Unit)? = null
@@ -41,8 +46,24 @@ object Sync {
     /** A synced setting changed in the app: sync a moment later, once the user has stopped typing. */
     fun changed(ctx: Context) {
         appContext = ctx.applicationContext
+        watch(ctx)
         main.removeCallbacks(debounced)
         main.postDelayed(debounced, DEBOUNCE_MS)
+    }
+
+    /** A dictation was added, changed or deleted: worth a sync only when history goes in the file. */
+    fun historyChanged(ctx: Context) {
+        val prefs = Prefs(ctx)
+        if (prefs.syncUri != null && prefs.syncHistory) main.post { changed(ctx) }
+    }
+
+    /** Syncs after any synced setting changes, wherever in the app it was changed. Once per process. */
+    private fun watch(ctx: Context) {
+        if (watcher != null) return
+        val app = ctx.applicationContext
+        val l = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key != null && Prefs.synced(key)) changed(app) }
+        watcher = l
+        app.getSharedPreferences("settings", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(l)
     }
 
     /** Syncs now in the background if a file is set up. Safe to call from anywhere, as often as you like. */
@@ -50,6 +71,7 @@ object Sync {
         val app = ctx.applicationContext
         val prefs = Prefs(app)
         if (prefs.syncUri == null || prefs.syncBroken) return
+        main.post { watch(app) }
         if (!busy.compareAndSet(false, true)) { again = true; return }
         Thread {
             var changed = false
@@ -158,7 +180,10 @@ object Sync {
         val base = SyncFormat.parseBase(if (firstSync) null else prefs.syncBase, DEFAULT_INSTRUCTIONS)
         if (SyncMerge.remoteLost(remote, base)) throw IOException(SyncMerge.EMPTY_FILE)
         val known = prefs.knownKeys
-        val result = SyncMerge.merge(local, remote, base, localKeys, prefs.syncKeys, known)
+        val result = SyncMerge.merge(local, remote, base, localKeys, prefs.syncKeys, known, Prefs::usable)
+        val withHistory = prefs.syncHistory
+        val localHistory = if (withHistory) History.forSync(app) { AppContext.label(app, it) } else emptyList()
+        val history = if (withHistory) SyncMerge.history(localHistory, remote?.history, SyncFormat.parseHistoryBase(if (firstSync) null else prefs.syncHistoryBase)) else null
         val nowKnown = known + result.localKeys.filterValues { it.isNotEmpty() }.keys
         if (nowKnown != known) prefs.knownKeys = nowKnown
 
@@ -169,7 +194,11 @@ object Sync {
             again = true
             return
         }
-        if (result.state.copy(notes = localNotes) != local || result.localKeys != localKeys) {
+        // Settings this phone doesn't have, or can't use, stay in the file without being applied here.
+        val settingsChanged = result.state.settings.orEmpty().any { (k, v) ->
+            local.settings?.get(k).let { it != null && it != v } && Prefs.usable(k, v)
+        }
+        if (result.state.copy(notes = localNotes, settings = local.settings) != local || settingsChanged || result.localKeys != localKeys) {
             prefs.applySynced(result.state, result.localKeys)
             changed[0] = true
         }
@@ -182,13 +211,27 @@ object Sync {
             }
             changed[0] = true
         }
+        if (history != null) {
+            // Same for a dictation that landed mid-sync.
+            if (!History.applySynced(app, localHistory, history.put, history.delete)) {
+                if (firstSync) throw IOException("A dictation finished while syncing. Choose the file again.")
+                again = true
+                return
+            }
+            if (history.put.isNotEmpty() || history.delete.isNotEmpty()) changed[0] = true
+        }
         // Usage isn't merged: this phone only ever replaces its own entry (see [SyncMerge.usage]).
         val usage = SyncMerge.usage(remote?.usage, Usage.deviceId(app), Usage.forSync(app))
-        if (result.write || usage != remote?.usage.orEmpty()) {
-            write(app, uri, SyncFormat.encode(result.state, result.fileKeys, System.currentTimeMillis(), BY, usage), bytes.size)
+        // With history off here, whatever other devices put in the file passes through untouched.
+        val fileHistory = history?.file ?: remote?.history
+        if (result.write || usage != remote?.usage.orEmpty() || fileHistory != remote?.history || (remote?.level ?: 0) < SyncFormat.LEVEL) {
+            write(app, uri, SyncFormat.encode(result.state, result.fileKeys, System.currentTimeMillis(), BY, usage, fileHistory, remote?.level ?: 1), bytes.size)
         }
+        // A newer Tokalot on another device puts things in the file that this one leaves out: Home asks for an update.
+        prefs.syncNewer = (remote?.level ?: 1) > SyncFormat.LEVEL
         prefs.syncUsage = SyncFormat.encodeUsage(usage)
         prefs.syncBase = SyncFormat.encodeBase(result.state)
+        if (history != null) prefs.syncHistoryBase = SyncFormat.encodeHistoryBase(history.file)
         prefs.syncLast = System.currentTimeMillis()
     }
 

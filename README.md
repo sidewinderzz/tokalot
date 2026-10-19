@@ -79,7 +79,7 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
     </td>
     <td valign="top">
       <b>Yours to keep</b><br>
-      One-file backup and restore, in-app updates with a changelog, light and dark themes, a usage and cost tracker, and optional sync of your dictionary, snippets, styles and voice notes between devices, with a combined count of the words you've dictated on all of them.
+      One-file backup and restore, in-app updates with a changelog, light and dark themes, a usage and cost tracker, and optional sync of your dictionary, snippets, styles, voice notes, settings and (if you want) dictation history between devices, with a combined count of the words you've dictated on all of them.
     </td>
   </tr>
   <tr>
@@ -162,7 +162,7 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 - **Windows:** the Ctrl+Win listener only watches for that shortcut; it never records your typing. API keys are encrypted with your Windows account. Dictated text is kept out of Windows clipboard history, and whatever you had copied before is put back after the paste.
 - History, recordings, settings and keys live only on your device. Backups leave out your API keys unless you choose to include them.
 - Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into, your dictionary words and, on Android, whether the cursor is in the middle of a sentence (never the text around it), so the model can match the style, spelling and capitals. With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
-- Sync is optional and off by default. It works through one small file that you keep in a folder you already sync (Google Drive, OneDrive, Dropbox, Syncthing); there is no Tokalot account or server. History and recordings are never put in it, and API keys only if you turn that on. Each device adds its own word and dictation counts per month (under a random id and the device's name), so every app can show the total across all your devices.
+- Sync is optional and off by default. It works through one small file that you keep in a folder you already sync (Google Drive, OneDrive, Dropbox, Syncthing); there is no Tokalot account or server. Recordings are never put in it; API keys and dictation history (the newest 1,000 dictations, as text) only if you turn those on. Settings sync too, except the few that belong to one device (the on-device model, how long recordings are kept, where the indicator sits). Each device adds its own word, dictation and clean-up counts per month (under a random id and the device's name), so every app can show the total across all your devices.
 - The apps check GitHub for new releases. There are no Tokalot servers, accounts or tracking.
 
 <details>

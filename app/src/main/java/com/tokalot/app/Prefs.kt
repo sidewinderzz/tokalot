@@ -182,6 +182,39 @@ object Secrets {
  * No accounts, no database; uninstalling the app erases it.
  */
 class Prefs(ctx: Context) {
+    companion object {
+        /** Synced on/off settings: name in the sync file -> key here. */
+        private val BOOLEANS = mapOf(
+            "autoStop" to "autostop", "quickSkip" to "quick_skip", "liveStt" to "live_stt", "weakSignal" to "weak_signal",
+            "autoLanguage" to "autolang", "polish" to "polish", "sounds" to "sounds", "learnWords" to "learn_words",
+            "notesBeta" to "notes_beta", "holdToTalk" to "hold", "haptics" to "haptics", "fitSentence" to "fit_sentence",
+        )
+
+        /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
+        fun synced(key: String) = key in BOOLEANS.values || key in setOf(
+            "stt", "cleanup", "theme", "accent", "sound_set", "note_phrases", "learned_words", "dismissed_words",
+        ) || key.startsWith("sttmodel_") || key.startsWith("model_") || key.startsWith("app_")
+
+        /** Whether a synced setting's value from the file is one this version can use. */
+        fun usable(name: String, text: String): Boolean {
+            val v = SyncFormat.value(text) ?: return false
+            fun strings(check: (String) -> Boolean = { true }) =
+                v is JSONObject && v.keys().asSequence().all { (v.opt(it) as? String)?.let(check) == true }
+            return when (name) {
+                "stt" -> v is String && SttChoice.values().any { it.name == v }
+                "cleanup" -> v is String && CleanupChoice.values().any { it.name == v }
+                "theme" -> v is String && v in setOf("system", "light", "dark")
+                "soundSet" -> v is String && Sounds.valid(v) == v
+                "notePhrases" -> v is String
+                "accent" -> v is Number && v.toLong() in 0L..0xFFFFFFFFL
+                "sttModels", "cleanupModels" -> strings()
+                "androidAppOverrides" -> strings { c -> AppCategory.values().any { it.name == c } }
+                "learnedWords", "dismissedWords" -> v is JSONArray && (0 until v.length()).all { v.opt(it) is String }
+                else -> name in BOOLEANS && v is Boolean
+            }
+        }
+    }
+
     private val app = ctx.applicationContext
     private val sp = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
     // Sync's own state lives in a separate file that Backup never reads or replaces, so a
@@ -327,7 +360,46 @@ class Prefs(ctx: Context) {
     // ---------- sync (optional; see Sync.kt) ----------
 
     /** What this device would put in the sync file right now. */
-    fun syncState() = SyncState(words, snippets, explicitStyles, customInstructions)
+    fun syncState() = SyncState(words, snippets, explicitStyles, customInstructions, settings = syncedSettings())
+
+    /**
+     * Every other setting the sync file carries, by its name there (the same names the desktop apps use), as
+     * [SyncFormat.canon] text. Left out on purpose: the on-device model and how long recordings are kept
+     * (they depend on this phone's storage), the apps that get the clipboard (this phone's launchers), what
+     * the accessibility shortcut does (set up with this phone's own accessibility settings), and anything about
+     * this screen or this network.
+     */
+    fun syncedSettings(): Map<String, String> {
+        fun overrides(prefix: String) = JSONObject().also { o ->
+            for ((k, v) in sp.all) if (k.startsWith(prefix) && v is String && v.isNotBlank()) o.put(k.removePrefix(prefix), v)
+        }
+        val v = mapOf<String, Any>(
+            "stt" to stt.name,
+            "cleanup" to cleanup.name,
+            "sttModels" to overrides("sttmodel_"),
+            "cleanupModels" to overrides("model_"),
+            "autoStop" to autoStop,
+            "quickSkip" to quickSkip,
+            "liveStt" to liveStt,
+            "weakSignal" to weakSignal,
+            "autoLanguage" to autoLanguage,
+            "polish" to polish,
+            "sounds" to sounds,
+            "soundSet" to soundSet,
+            "theme" to theme,
+            "accent" to (accent.toLong() and 0xFFFFFFFFL),
+            "learnWords" to learnWords,
+            "learnedWords" to JSONArray(learnedWords.toList()),
+            "dismissedWords" to JSONArray(dismissedWords.toList()),
+            "notesBeta" to notesBeta,
+            "holdToTalk" to holdToTalk,
+            "haptics" to haptics,
+            "fitSentence" to fitSentence,
+            "notePhrases" to notePhrases,
+            "androidAppOverrides" to overrides("app_"),
+        )
+        return v.mapNotNull { (k, x) -> SyncFormat.canon(x)?.let { k to it } }.toMap().toSortedMap()
+    }
 
     /** Stores a merge result in one go, without counting as a change the user made. */
     fun applySynced(state: SyncState, keys: Map<String, String>) {
@@ -339,9 +411,34 @@ class Prefs(ctx: Context) {
             val style = state.styles[c.name]?.takeIf { name -> Style.values().any { it.name == name } }
             if (style != null) ed.putString("style_${c.name}", style) else ed.remove("style_${c.name}")
         }
+        val now = syncedSettings()
+        state.settings?.forEach { (name, text) ->
+            if (now[name] != null && now[name] != text && usable(name, text)) putSetting(ed, name, SyncFormat.value(text)!!)
+        }
         ed.apply()
         // Only fills a slot (or replaces a key that changed), so a key is never re-encrypted for nothing.
         keys.forEach { (service, v) -> if (v.isNotEmpty() && v != key(service)) setKeyQuietly(service, v) }
+    }
+
+    /** Writes one synced setting that [usable] has checked. */
+    private fun putSetting(ed: SharedPreferences.Editor, name: String, v: Any) {
+        fun strings(a: JSONArray) = JSONArray((0 until a.length()).map { a.getString(it) }).toString()
+        fun overrides(prefix: String, o: JSONObject) {
+            for (k in sp.all.keys) if (k.startsWith(prefix)) ed.remove(k)
+            for (k in o.keys()) ed.putString(prefix + k, o.getString(k))
+        }
+        when (name) {
+            "stt", "cleanup", "theme" -> ed.putString(name, v as String)
+            "notePhrases" -> ed.putString("note_phrases", v as String)
+            "soundSet" -> ed.putString("sound_set", v as String)
+            "sttModels" -> overrides("sttmodel_", v as JSONObject)
+            "cleanupModels" -> overrides("model_", v as JSONObject)
+            "androidAppOverrides" -> overrides("app_", v as JSONObject)
+            "accent" -> ed.putInt("accent", (v as Number).toLong().toInt())
+            "learnedWords" -> ed.putString("learned_words", strings(v as JSONArray))
+            "dismissedWords" -> ed.putString("dismissed_words", strings(v as JSONArray))
+            else -> BOOLEANS[name]?.let { ed.putBoolean(it, v as Boolean) }
+        }
     }
 
     private fun setKeyQuietly(service: String, v: String) {
@@ -358,6 +455,21 @@ class Prefs(ctx: Context) {
     var syncKeys: Boolean
         get() = syncSp.safeBoolean("keys", false)
         set(v) = syncSp.edit().putBoolean("keys", v).apply()
+
+    /** "Include dictation history": whether this device shares its dictations through the sync file. Off unless turned on. */
+    var syncHistory: Boolean
+        get() = syncSp.safeBoolean("history", false)
+        set(v) = syncSp.edit().putBoolean("history", v).remove("history_base").apply()
+
+    /** The sync file was last written by a newer Tokalot that syncs more than this one does. */
+    var syncNewer: Boolean
+        get() = syncSp.safeBoolean("newer", false)
+        set(v) { if (v != syncNewer) syncSp.edit().putBoolean("newer", v).apply() }
+
+    /** Each dictation's id and hash as the sync file had them after the last sync (see [SyncFormat.encodeHistoryBase]). */
+    var syncHistoryBase: String?
+        get() = syncSp.safeString("history_base", null)
+        set(v) = syncSp.edit().putString("history_base", v).apply()
 
     /** The synced values as they were after the last successful sync (never keys); null before the first. */
     var syncBase: String?
@@ -471,10 +583,7 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("autolang", false)
         set(v) = sp.edit().putBoolean("autolang", v).apply()
 
-    /**
-     * Let the cleanup model tighten and clarify the wording. Off: the user's own words are kept.
-     * A per-device setting: it is in backups, but not in the sync file.
-     */
+    /** Let the cleanup model tighten and clarify the wording. Off: the user's own words are kept. */
     var polish: Boolean
         get() = sp.safeBoolean("polish", false)
         set(v) = sp.edit().putBoolean("polish", v).apply()

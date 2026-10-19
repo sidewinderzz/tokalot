@@ -71,9 +71,11 @@ cancels the dictation quietly.
 - **Polish my wording** (Style page): when on, the AI may tighten what you said, and for a few
   seconds after each dictation **Ctrl+Cmd+Z** puts your own words back (Tokalot sends ⌘Z and pastes
   the original).
-- **Sync** (Settings › Sync): keep your dictionary, snippets, styles and instructions in one file in
+- **Sync** (Settings › Sync): keep your dictionary, snippets, styles, instructions, voice notes, settings and
+  word stats in one file in
   a folder you already sync (iCloud Drive, Dropbox, Google Drive…) and point your other devices at
-  it. No account, no server; API keys stay out unless you switch that on.
+  it. No account, no server; API keys and dictation history stay out unless you switch
+  those on.
 
 Data lives in `~/Library/Application Support/Tokalot` (settings, history, recordings, the offline
 model, `log.txt`), private to your user. API keys are in your login Keychain under "Tokalot".
