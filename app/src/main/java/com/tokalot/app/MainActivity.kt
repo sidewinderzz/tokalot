@@ -211,7 +211,8 @@ class MainActivity : Activity() {
                 while (Updater.progress != null) {
                     val pct = Updater.progress
                     runOnUiThread {
-                        val line = "Downloading Tokalot ${r.version}… ${pct ?: 0}%"
+                        val v = Updater.available(app, evenDismissed = true)?.version ?: r.version
+                        val line = "Downloading Tokalot $v… ${pct ?: 0}%"
                         bannerText?.text = line
                         settingsUpdateText?.text = line
                     }
@@ -219,7 +220,10 @@ class MainActivity : Activity() {
                 }
             }.also { it.start() }
             try {
-                val apk = Updater.download(app, r)
+                // The banner may be hours old: look again so a release published since then is the one
+                // downloaded, not the one it replaced.
+                Updater.check(app, force = true)
+                val apk = Updater.download(app, Updater.available(app, evenDismissed = true) ?: r)
                 Updater.install(app, apk)
             } catch (e: Exception) {
                 runOnUiThread { toast("Update failed: ${e.message}") }

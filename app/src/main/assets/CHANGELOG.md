@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.39 · 2026-10-19
+- Tapping Update checks GitHub again first, so it always downloads the newest version, even if another one came out after the banner appeared.
+
 ## 1.38 · 2026-10-19
 - Notes is a clean list now: tap a note to open it. No more Open buttons.
 - A voice note shared from WhatsApp (or any app) is one note, not two. It opens like any other note, with the transcription first and a slim player at the bottom.
