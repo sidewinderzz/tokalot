@@ -186,7 +186,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             })
         }
         val speedPill = pill(speedLabel(), desc = "Playback speed") {
-            val next = speeds[(speeds.indexOf(speed()) + 1) % speeds.size]
+            val now = speeds.indices.firstOrNull { Math.abs(speeds[it] - speed()) < 0.001f } ?: 0
+            val next = speeds[(now + 1) % speeds.size]
             a.prefs.noteSpeed = next
             speedLabelView?.text = speedLabel()
             applySpeed()
