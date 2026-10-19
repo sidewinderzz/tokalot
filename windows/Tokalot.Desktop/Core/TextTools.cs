@@ -24,6 +24,32 @@ public static class TextTools
     /** Whisper invents these for silence or a lone beep. Only trusted as "nothing said" when barely any sound was heard. */
     public static bool IsPhantom(string s) => Phantoms.Contains(Spaces.Replace(NotLetters.Replace(s.ToLowerInvariant(), " "), " ").Trim());
 
+    private static readonly Regex Piece = new(@"[,.!?;:]+");
+    private static readonly Regex NotWord = new(@"[^\p{L}\p{N} ]");
+    private static string Key(string s) => Spaces.Replace(NotWord.Replace(s.ToLowerInvariant(), " "), " ").Trim();
+
+    /**
+     * Whisper is given the dictionary as its prompt. On a clip with nothing said it can hand that prompt back,
+     * mixed with its stock phrases: "Thank you. Thank you. Hó, Tokalot, Shelby." True when the text is made of
+     * nothing but those (plus a stray syllable or two). sparse: barely any sound was heard, so one dictionary
+     * word or a stock phrase alone is enough; otherwise it takes two dictionary words and nothing else.
+     */
+    public static bool IsEcho(string s, IEnumerable<string> words, bool sparse)
+    {
+        var dict = words.Select(Key).Where(k => k.Length > 0).ToHashSet();
+        var pieces = Piece.Split(s).Select(Key).Where(k => k.Length > 0).ToList();
+        if (pieces.Count == 0) return false;
+        int fromDict = 0, stock = 0;
+        foreach (var p in pieces)
+        {
+            if (dict.Contains(p)) fromDict++;
+            else if (Phantoms.Contains(Spaces.Replace(NotLetters.Replace(p, " "), " ").Trim())) stock++;
+            else if (p.Length <= 3 && !p.Contains(' ')) { } // "Hó", "Oh"
+            else return false;
+        }
+        return sparse ? fromDict + stock > 0 : fromDict >= 2;
+    }
+
     /** The fallback when AI cleanup is off or unreachable. */
     public static string BasicClean(string s)
     {
