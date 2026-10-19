@@ -117,6 +117,8 @@ public sealed class Settings
     public bool NotesBeta { get; set; }
     /** The Notes beta card was answered or closed. */
     public bool NotesFeedbackDone { get; set; }
+    /** "Let AI assistants read my notes": whether "Tokalot --mcp" answers (see NotesMcp). Off unless turned on. This PC only: not synced. */
+    public bool NotesMcp { get; set; }
     /** Optional sync: the shared file's path on this computer ("" = off), and whether this computer puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }
