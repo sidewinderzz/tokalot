@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.35 · 2026-10-18
+- Accessibility shortcut: if Android's floating accessibility button is on for Tokalot (the default on some phones, such as OnePlus), Settings › Recording & look says so and how to switch to just the volume keys, and its link opens Tokalot's own shortcut page. Removing the floating button by dragging it away can switch Tokalot off on those phones.
+
 ## 1.34 · 2026-10-18
 - Share a voice message to Tokalot from WhatsApp (or any app) and it's transcribed into a voice note, with the recording kept. Shared text is saved as a note. Sharing turns voice notes on if they were off. Needs a Groq or OpenAI key.
 - Open a voice note to play it: the transcript lights up word by word as it plays, and tapping a word jumps there. Skip silence and Skip ums make it quicker to listen to.
