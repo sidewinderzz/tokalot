@@ -86,6 +86,13 @@ public sealed class Settings
     public bool QuickSkip { get; set; }
     /** Send long dictations to the speech service in pieces while they are still being spoken. */
     public bool LiveStt { get; set; } = true;
+    /** Which on-device model to use: "base", "small" or "turbo" (see ModelManager.All). */
+    public string LocalModel { get; set; } = "base";
+    /**
+     * Weak signal: skip the cloud when there's no connection or the service was slow to answer while the user
+     * talked, and give the cloud only a few seconds before the on-device model takes over.
+     */
+    public bool WeakSignal { get; set; }
     public bool AutoLanguage { get; set; }
     public bool Sounds { get; set; } = true;
     /** Which Tones set plays (soft, chime, retro, bubble). */

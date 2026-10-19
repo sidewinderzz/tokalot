@@ -533,16 +533,19 @@ class SettingsScreen(private val a: MainActivity) {
         /** Settings categories, in order, each with its sections in the order shown when it's open. */
         val CATEGORIES = listOf(
             SETUP to listOf("Setup"),
-            SPEECH to listOf("Speech to text", "AI cleanup", "API keys", "Speed"),
+            SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "API keys", "Speed"),
             RECORDING to listOf("Recording", "Without a text box", "Appearance"),
             DATA to listOf("Recordings", "Sync", "Backup", "Usage"),
             "About" to listOf("About"),
         )
 
+        /** The on-device model being downloaded (one at a time), and how far along it is. */
+        @Volatile var downloading: LocalModel? = null
         @Volatile var downloadPct: Int? = null
         @Volatile var downloadError: String? = null
         // Progress updates only change this label; redrawing the whole screen each tick made it flash.
         var modelStatusView: TextView? = null
+        var modelRowStatus: TextView? = null // the line under the model being downloaded, in its own section
 
         // Same for sync: a finished sync only moves this line, so it never interrupts typing in a field below.
         var syncStatusView: TextView? = null
@@ -599,14 +602,15 @@ class SettingsScreen(private val a: MainActivity) {
         }
         setupRow("Accessibility switch", serviceEnabled(), "On", "Set up") { openAccessibilitySetup() }
         val pct = downloadPct
+        val haveModel = ModelManager.active(this)
         val modelStatus = when {
-            ModelManager.isReady(this) -> "Downloaded"
+            haveModel != null -> "${haveModel.label} downloaded"
             pct != null -> "Downloading $pct%"
             downloadError != null -> "Failed: $downloadError"
             else -> ""
         }
-        modelStatusView = setupRow("Offline backup model (60 MB)", ModelManager.isReady(this) || pct != null, modelStatus, "Download") {
-            startDownload()
+        modelStatusView = setupRow("Offline backup model", haveModel != null || pct != null, modelStatus, "Download") {
+            startDownload(prefs.localModel)
         }
         col.addView(setup)
         col.addView(text("If the accessibility switch is greyed out: phone Settings › Apps › Tokalot › ⋮ › Allow restricted settings. Also set Tokalot's battery usage to Unrestricted.", 13f, C.SUB), lp().margins(this, t = 8))
@@ -821,6 +825,42 @@ class SettingsScreen(private val a: MainActivity) {
         if (prefs.stt != SttChoice.LOCAL) {
             col.addView(modelField(prefs.sttModel(prefs.stt)) { prefs.setSttModel(prefs.stt, it) })
         }
+
+        // --- On-device model
+        section(col, "On-device model")
+        val om = card()
+        LocalModel.values().forEachIndexed { i, m ->
+            if (i > 0) om.addView(divider())
+            val state = when {
+                downloading == m -> "Downloading ${downloadPct ?: 0}%"
+                ModelManager.isDownloaded(this, m) -> "Downloaded"
+                downloading == null && downloadError != null && prefs.localModel == m -> "Download failed: $downloadError"
+                else -> "Tap to download"
+            }
+            val status = text(state, 14f, if (state == "Downloaded") C.GOOD else C.SUB)
+            if (downloading == m) modelRowStatus = status
+            om.addView(choiceRow(m.label, m.note, prefs.localModel == m) {
+                prefs.localModel = m
+                if (!ModelManager.isDownloaded(this, m)) startDownload(m) else render()
+            }.apply { ((this as LinearLayout).getChildAt(1) as LinearLayout).addView(status) })
+        }
+        col.addView(om)
+        val others = LocalModel.values().filter { it != prefs.localModel && it != downloading && ModelManager.isDownloaded(this, it) }
+        if (others.isNotEmpty()) {
+            val mb = others.sumOf { it.size } / 1_000_000
+            col.addView(row(pill("Remove the others ($mb MB)") {
+                confirm("Delete ${others.joinToString(" and ") { it.label }} from this phone? You can download them again any time.", "Delete") {
+                    others.forEach { ModelManager.delete(this, it) }
+                    render()
+                }
+            }), lp().margins(this, t = 8, l = 4))
+        }
+        val ow = card()
+        ow.addView(switchRow("Prefer on-device in weak signal", "Skips the cloud when there's no connection, or the speech service was slow to answer while you talked, and gives the cloud only a few seconds before switching to the phone. Needs an on-device model.", prefs.weakSignal) {
+            prefs.weakSignal = it
+        })
+        col.addView(ow, lp().margins(this, t = 12))
+        col.addView(text("Any time: while recording, slide the floating button sideways to do that dictation on the phone.", 13f, C.SUB), lp().margins(this, t = 8))
 
         // --- Cleanup
         section(col, "AI cleanup")
@@ -1190,21 +1230,27 @@ class SettingsScreen(private val a: MainActivity) {
         }.start()
     }
 
-    private fun startDownload() {
-        if (downloadPct != null) return
+    private fun startDownload(m: LocalModel) {
+        if (downloading != null) {
+            android.widget.Toast.makeText(a, "Wait for the ${downloading?.label} download to finish", android.widget.Toast.LENGTH_SHORT).show()
+            a.render()
+            return
+        }
+        downloading = m
         downloadPct = 0
         downloadError = null
         a.render()
         val app = a.applicationContext
         Thread {
             var last = -1
-            val err = ModelManager.download(app) { p ->
+            val err = ModelManager.download(app, m) { p ->
                 downloadPct = p
                 if (p != last) {
                     last = p
-                    a.runOnUiThread { modelStatusView?.text = "Downloading $p%" }
+                    a.runOnUiThread { modelStatusView?.text = "Downloading $p%"; modelRowStatus?.text = "Downloading $p%" }
                 }
             }
+            downloading = null
             downloadPct = null
             downloadError = err
             a.runOnUiThread { if (!a.isFinishing) a.render() }

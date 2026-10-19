@@ -43,10 +43,12 @@ public sealed partial class MainWindow : Window
     private StackPanel? historyBox;
     private TextBlock? bannerText;
     private TextBlock? modelStatus;
+    private TextBlock? modelProgress; // under the list in Settings › Offline model
     private int historyLimit = 100;
     private readonly HashSet<long> expanded = new(), showOriginal = new();
     private static string styleTab = "MESSAGING";
     private static int? downloadPct;
+    private static LocalModel? modelDownloading; // one at a time
     private static string? downloadError;
     private Snippet? editing;
     private bool editingNew;
@@ -1054,13 +1056,14 @@ public sealed partial class MainWindow : Window
 
         // --- Setup
         Section(col, "Setup");
-        var modelText = ModelManager.IsReady ? "Downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
+        var active = ModelManager.Active;
+        var modelText = active != null ? active.Label + " downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
         var setup = new List<Control>();
         // The shortcut, pasting and microphone rows, which name this platform's own permissions.
         PlatformSetupRows(setup);
         setup.Add(Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key below (free)"));
-        setup.Add(Status("Offline backup model (60 MB)", ModelManager.IsReady || downloadPct != null, modelText, modelText,
-            ModelManager.IsReady || downloadPct != null ? null : Ui.Button("Download", StartDownload)));
+        setup.Add(Status("Offline backup model", active != null || downloadPct != null, modelText, modelText,
+            active != null || downloadPct != null ? null : Ui.Button("Download", () => StartDownload(ModelManager.Of(S.LocalModel)))));
         setup.Add(Ui.SettingRow("Start at login", Startup.Supported ? $"Runs quietly in the {Host.TrayName} so {Host.Shortcut} always works." : "Not available in a test or development copy.",
             Ui.Switch(S.LaunchAtStartup, v => { S.LaunchAtStartup = v; S.Save(); Startup.Apply(v); })));
         col.Children.Add(Ui.List(setup.ToArray()));
@@ -1171,6 +1174,33 @@ public sealed partial class MainWindow : Window
             return (Control)Ui.Choice(o.Label, note + (needsKey ? " Needs a key." : ""), S.Stt == o.Id, () => { S.Stt = o.Id; S.Save(); Render(); });
         }).ToArray()));
         if (S.Stt != "LOCAL") col.Children.Add(ModelField(S.SttModel(S.SttOption), v => { S.SttModels[S.Stt] = v.Trim(); S.Save(); }));
+
+        // --- Offline model
+        Section(col, "Offline model");
+        col.Children.Add(Ui.List(ModelManager.All.Select(m =>
+        {
+            var state = modelDownloading == m ? "Downloading…"
+                : ModelManager.IsDownloaded(m) ? "Downloaded"
+                : modelDownloading == null && downloadError != null && S.LocalModel == m.Id ? "Download failed: " + downloadError
+                : "Click to download";
+            return (Control)Ui.Choice(m.Label, m.Note + "\n" + state, S.LocalModel == m.Id, () =>
+            {
+                S.LocalModel = m.Id; S.Save();
+                if (!ModelManager.IsDownloaded(m)) StartDownload(m); else Render();
+            });
+        }).ToArray()));
+        modelProgress = Ui.Text(modelDownloading != null ? $"Downloading {modelDownloading.Label}: {downloadPct ?? 0}%" : "", 13, C.Sub);
+        if (modelDownloading != null) col.Children.Add(Spaced(modelProgress, 4, 8, 0, 0));
+        var others = ModelManager.All.Where(m => m.Id != S.LocalModel && m != modelDownloading && ModelManager.IsDownloaded(m)).ToArray();
+        if (others.Length > 0)
+            col.Children.Add(Spaced(Ui.Button($"Remove the others ({others.Sum(m => m.Size) / 1_000_000} MB)", () =>
+            {
+                foreach (var m in others) ModelManager.Delete(m);
+                Render();
+            }), 0, 10, 0, 0));
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Prefer offline in weak signal",
+            "Skips the cloud when there's no connection, or the speech service was slow to answer while you talked, and gives the cloud only a few seconds before switching to the offline model. Needs an offline model.",
+            Ui.Switch(S.WeakSignal, v => { S.WeakSignal = v; S.Save(); }))), 0, 12, 0, 0));
 
         // --- Cleanup
         Section(col, "AI cleanup");
@@ -1475,9 +1505,10 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void StartDownload()
+    private void StartDownload(LocalModel m)
     {
-        if (downloadPct != null) return;
+        if (modelDownloading != null) { Toast($"Wait for the {modelDownloading.Label} download to finish"); Render(); return; }
+        modelDownloading = m;
         downloadPct = 0;
         downloadError = null;
         Render();
@@ -1485,9 +1516,11 @@ public sealed partial class MainWindow : Window
         {
             downloadPct = p;
             if (modelStatus != null) modelStatus.Text = $"Downloading {p}%";
+            if (modelProgress != null) modelProgress.Text = $"Downloading {m.Label}: {p}%";
         });
-        Task.Run(() => ModelManager.Download(progress)).ContinueWith(t => Dispatcher.UIThread.Post(() =>
+        Task.Run(() => ModelManager.Download(m, progress)).ContinueWith(t => Dispatcher.UIThread.Post(() =>
         {
+            modelDownloading = null;
             downloadPct = null;
             downloadError = t.Result;
             Render();

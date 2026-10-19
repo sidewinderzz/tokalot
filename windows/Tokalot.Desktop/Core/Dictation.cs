@@ -21,15 +21,26 @@ public sealed class Dictation : IDisposable
     /** Plain: the user's own wording (fillers out, no AI), set only when Polish reworded it, so it can be put back. */
     public sealed record Outcome(string Text, string? Warning, long? EntryId, string? Plain = null);
 
+    /** How long the speech service's warm-up took ([Net.Warm]), -1 if it failed; only meaningful once warmDone. */
+    private volatile int warmMs = -1;
+    private volatile bool warmDone;
+    private long warmedAt; // Environment.TickCount64 when it began, 0 if nothing was measured
+
     /** Opens connections to the chosen providers while the user talks. */
     public void WarmUp()
     {
         var s = Settings.Current;
+        warmDone = false;
+        warmMs = -1;
+        Interlocked.Exchange(ref warmedAt, s.CloudSttReady ? Environment.TickCount64 : 0);
         _ = Task.Run(async () =>
         {
             if (s.CloudSttReady)
-                await Net.Warm(s.SttOption.BaseUrl + "/models",
+            {
+                warmMs = await Net.Warm(s.SttOption.BaseUrl + "/models",
                     new Dictionary<string, string> { ["Authorization"] = "Bearer " + s.Key(s.SttOption.Service) });
+                warmDone = true;
+            }
             if (s.CleanupReady && !(s.CloudSttReady && s.SttOption.BaseUrl == s.CleanupOption.BaseUrl))
             {
                 var c = s.CleanupOption;
@@ -104,16 +115,27 @@ public sealed class Dictation : IDisposable
             inPieces = raw != null;
             if (inPieces) Usage.RecordStt(s.Stt, seconds);
         }
-        foreach (var c in raw != null ? Array.Empty<SttOption>() : SttOrder(s))
+        // Weak-signal mode: with no connection, or a slow warm-up while the user talked, go straight to the offline
+        // model; otherwise the cloud gets a few seconds before it takes over.
+        var weak = s.WeakSignal && ModelManager.IsReady && raw == null && SttOrder(s).Any();
+        var weakSwitch = weak && PoorLink();
+        foreach (var c in raw != null || weakSwitch ? Array.Empty<SttOption>() : SttOrder(s))
         {
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            if (weak) attempt.CancelAfter(Net.WeakCloudMs(samples.Length));
             try
             {
-                raw = await CloudStt.Transcribe(c.BaseUrl, s.Key(c.Service), s.SttModel(c), samples, hint, !s.AutoLanguage, ct);
+                raw = await CloudStt.Transcribe(c.BaseUrl, s.Key(c.Service), s.SttModel(c), samples, hint, !s.AutoLanguage, attempt.Token);
                 Usage.RecordStt(c.Id, seconds);
                 if (c.Id != s.Stt) warnings.Add($"{s.SttOption.Label} unavailable, used {c.Label}");
                 break;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception) when (weak && attempt.IsCancellationRequested)
+            {
+                weakSwitch = true; // out of time: the link is the problem, so another provider would wait the same
+                break;
+            }
             catch (Exception e)
             {
                 if (warnings.Count == 0) warnings.Add($"{c.Label} failed: {Short(e.Message)}");
@@ -125,6 +147,7 @@ public sealed class Dictation : IDisposable
                 throw new InvalidOperationException(warnings.Count == 0
                     ? "No speech model: add a Groq key or download the offline model in Settings"
                     : warnings[0] + ", and the offline model isn't downloaded");
+            if (weakSwitch && warnings.Count == 0) warnings.Add("Weak signal, transcribed offline");
             raw = await local.Transcribe(samples, hint, !s.AutoLanguage, ct);
             usedLocal = true;
         }
@@ -144,7 +167,8 @@ public sealed class Dictation : IDisposable
         // Quick mode: a short dictation with nothing for the AI to fix skips it and is tidied here, at once.
         var quick = s.QuickSkip && !s.Polish && !inPieces && s.Cleanup != "OFF"
             && TextTools.NothingToFix(baseText, map.Count > 0, s.StyleFor(category).Id, category.Id, s.CustomInstructions);
-        foreach (var c in quick ? Array.Empty<CleanupOption>() : CleanupOrder(s))
+        // The link was too poor for the speech step: waiting on the cleanup service too would only add delay.
+        foreach (var c in quick || weakSwitch ? Array.Empty<CleanupOption>() : CleanupOrder(s))
         {
             try
             {
@@ -171,10 +195,11 @@ public sealed class Dictation : IDisposable
         if (!usedLocal && !inPieces) SttRate = SttRate * 0.6f + 0.4f * (float)(sttMs / Math.Max(seconds, 3));
         if (cleaned) CleanRate = CleanRate * 0.6f + 0.4f * ((allMs - sttMs) / (float)Math.Max(baseText.Length, 40));
         LastTiming = string.Format(inv, "{0:0.0} s spoken · speech {1:0.00} s", seconds, sttMs / 1000.0) +
-            (inPieces ? $" ({live!.Pieces} pieces)" : usedLocal ? " (on device)" : "") +
+            (inPieces ? $" ({live!.Pieces} pieces)" : usedLocal ? $" (on device, {local.LastModel?.Id}{(weakSwitch ? ", weak signal" : "")})" : "") +
             (quick ? " · cleanup skipped, nothing to fix"
                 : cleaned ? string.Format(inv, " · cleanup {0:0.00} s", (allMs - sttMs) / 1000.0)
-                : s.Cleanup == "OFF" ? " · cleanup off" : string.Format(inv, " · cleanup failed after {0:0.00} s", (allMs - sttMs) / 1000.0)) +
+                : s.Cleanup == "OFF" ? " · cleanup off"
+                : weakSwitch ? " · weak signal, basic cleanup" : string.Format(inv, " · cleanup failed after {0:0.00} s", (allMs - sttMs) / 1000.0)) +
             string.Format(inv, " · total {0:0.00} s", allMs / 1000.0);
         lock (recent)
         {
@@ -236,6 +261,21 @@ public sealed class Dictation : IDisposable
     }
 
     private static string Short(string m) => m.Length > 80 ? m[..80] : m;
+
+    /**
+     * Weak-signal mode, before anything is sent: true with no network at all, or when the warm-up taken while the
+     * user talked failed, was slow, or still hadn't finished a couple of seconds in.
+     */
+    private bool PoorLink()
+    {
+        if (!Net.Online()) return true;
+        var at = Interlocked.Read(ref warmedAt);
+        var since = Environment.TickCount64 - at;
+        // Nothing measured for this recording (a retry from history): only the check above to go by.
+        if (at == 0 || since > 120_000) return false;
+        if (warmDone) return warmMs < 0 || warmMs > Net.WeakWarmMs;
+        return since > Net.WeakWarmMs;
+    }
 
     /** Chosen cloud STT first (if keyed), then the other keyed cloud option. Empty = on-device. */
     private static IEnumerable<SttOption> SttOrder(Settings s)

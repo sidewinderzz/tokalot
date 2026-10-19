@@ -448,6 +448,19 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("live_stt", true)
         set(v) = sp.edit().putBoolean("live_stt", v).apply()
 
+    /** Which on-device model to use (see [ModelManager.active] for when it isn't downloaded yet). */
+    var localModel: LocalModel
+        get() = LocalModel.of(sp.safeString("local_model", null))
+        set(v) = sp.edit().putString("local_model", v.id).apply()
+
+    /**
+     * Weak signal: go straight to the on-device model when there's no connection or the service was slow to
+     * answer while the user talked, and give the cloud only a few seconds before switching to it.
+     */
+    var weakSignal: Boolean
+        get() = sp.safeBoolean("weak_signal", false)
+        set(v) = sp.edit().putBoolean("weak_signal", v).apply()
+
     /** Stop automatically after 30 s of silence (tap mode only). */
     var autoStop: Boolean
         get() = sp.safeBoolean("autostop", true)

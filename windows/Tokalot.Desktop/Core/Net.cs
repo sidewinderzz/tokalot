@@ -48,9 +48,13 @@ public static class Net
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Timed out"); }
     }
 
-    /** Tiny authenticated request so the TLS connection is already open when the real upload starts. */
-    public static async Task Warm(string url, IDictionary<string, string> headers)
+    /**
+     * Tiny authenticated request so the TLS connection is already open when the real upload starts.
+     * Returns how long it took in milliseconds (connecting included), or -1 if it failed: a rough reading of the link.
+     */
+    public static async Task<int> Warm(string url, IDictionary<string, string> headers)
     {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             using var cts = new CancellationTokenSource(4000);
@@ -58,9 +62,23 @@ public static class Net
             foreach (var (k, v) in headers) req.Headers.TryAddWithoutValidation(k, v);
             using var res = await Http.SendAsync(req, cts.Token);
             await res.Content.ReadAsByteArrayAsync(cts.Token);
+            return (int)clock.ElapsedMilliseconds;
         }
-        catch { }
+        catch { return -1; }
     }
+
+    /** False when the computer has no network connection at all. */
+    public static bool Online()
+    {
+        try { return System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(); }
+        catch { return true; }
+    }
+
+    /** Weak-signal mode: how long the cloud gets for the speech step before the on-device model takes over (5 s, plus a tenth of the audio, at most 20 s). */
+    public static int WeakCloudMs(int sampleCount) => Math.Min(20_000, 5_000 + sampleCount / (Recorder.SampleRate / 100));
+
+    /** Weak-signal mode: a warm-up (connecting included) slower than this means the link is too poor to wait on. */
+    public const int WeakWarmMs = 2500;
 
     /** Pulls the human-readable message out of the usual API error shapes. */
     public static string ErrorMessage(string body)
