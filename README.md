@@ -17,7 +17,7 @@
   <img src="https://img.shields.io/badge/Linux-beta-3A3A3C?logo=linux&logoColor=white" alt="Linux beta">
   <img src="https://img.shields.io/badge/macOS-15%2B%20experimental-3A3A3C?logo=apple&logoColor=white" alt="macOS 15+, experimental">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/sidewinderzz/tokalot?color=3A3A3C" alt="MIT license"></a>
-  <a href="https://github.com/sidewinderzz/tokalot/releases"><img src="https://img.shields.io/github/downloads/sidewinderzz/tokalot/total?color=3A3A3C&label=downloads" alt="Downloads"></a>
+  <a href="https://github.com/sidewinderzz/tokalot/releases"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fsidewinderzz%2Ftokalot%2Fstats%2Fdownloads.json" alt="Downloads"></a>
 </p>
 
 <br>

@@ -129,6 +129,9 @@ jobs:
           # with one rename, so the old copy stays downloadable until the new one is complete. The
           # update packages go first and the feed that names them (releases.win.json, RELEASES)
           # last; only then are leftovers from older builds deleted.
+          # Replacing a file throws away its download count, so bank today's counts first.
+          GITHUB_TOKEN="$GH_TOKEN" "$(command -v python || command -v python3)" "$GITHUB_WORKSPACE/.github/scripts/download_tally.py" \
+            || echo "Couldn't update the downloads ledger; the hourly count will catch up."
           REPO="$GITHUB_REPOSITORY"
           asset_id() {
             gh api "repos/$REPO/releases/tags/desktop" --jq ".assets[] | select(.name == \"$1\") | .id"
