@@ -6,6 +6,14 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.37 · 2026-10-19
+- Home's stats card is simpler: just your three numbers and a gray View stats link. Clean-ups and the all-devices totals are on the word stats page.
+- The month in progress shows as partial: Home says how far into the month you are (Day 19 of 31), and the stats page reads "So far" with where you're on track to finish. The average month leaves the unfinished month out.
+- Time saved now compares with average phone typing (36 words a minute), and says so.
+- Sync carries much more: your settings (speech and cleanup choices, model names, switches, sounds, theme, accent, learned words, app overrides) and each device's clean-up counts. Settings that depend on the phone, like the on-device model, recording retention and the volume-key shortcut, stay on each device.
+- New in Settings › Your data › Sync: Include dictation history (off by default) shares the text of your newest 1,000 dictations, so every device has the same history and stats. Recordings never sync.
+- If another device syncing the same file has a newer Tokalot, Home shows an "Update Tokalot to sync everything" card with a button to check for updates.
+
 ## 1.36 · 2026-10-19
 - Choose a bigger on-device model in Settings › Speech & cleanup › On-device model: Standard (60 MB, as before), Better (190 MB) or Best (574 MB, the same model as Groq Whisper, compressed). Bigger ones make fewer mistakes, most of all with background noise, and use more of the phone's cores. Your choice is used once it's downloaded; until then the one you have keeps working.
 - New: Prefer on-device in weak signal. With no connection, or a speech service that was slow to answer while you talked, the dictation goes straight to the phone's model, and the cloud only gets a few seconds before the phone takes over (instead of up to half a minute).
