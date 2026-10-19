@@ -132,7 +132,7 @@ public sealed class Dictation : IDisposable
         var baseText = TextTools.StripNoise(raw);
         StageChars = baseText.Length;
         Stage = 1;
-        if (baseText.Length == 0 || (sparse && TextTools.IsPhantom(baseText))) return new Outcome("", warnings.FirstOrDefault(), null);
+        if (baseText.Length == 0 || (sparse && TextTools.IsPhantom(baseText)) || TextTools.IsEcho(baseText, s.Words, sparse)) return new Outcome("", warnings.FirstOrDefault(), null);
         // A word spelled out letter by letter is offered for the dictionary in the app (nothing is added unasked).
         try { Heard?.Invoke(baseText); } catch { }
 
