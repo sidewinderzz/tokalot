@@ -62,18 +62,18 @@ object Notes {
         }
     }
 
-    /** Saves a new note and returns its id. */
+    /** Saves a new note and returns its id. A shared voice note passes the id its audio is saved under. */
     @Synchronized
-    fun add(ctx: Context, text: String): Long {
-        val now = System.currentTimeMillis()
-        save(ctx, listOf(Note(now, now, text)) + forChange(ctx))
+    fun add(ctx: Context, text: String, id: Long = System.currentTimeMillis()): Long {
+        save(ctx, listOf(Note(id, id, text)) + forChange(ctx))
         Sync.changed(ctx)
-        return now
+        return id
     }
 
     @Synchronized
     fun delete(ctx: Context, id: Long) {
         save(ctx, forChange(ctx).filter { it.id != id })
+        NoteImport.deleteMedia(ctx, id)
         Sync.changed(ctx)
     }
 

@@ -9,6 +9,13 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 ## 1.35 · 2026-10-18
 - Accessibility shortcut: if Android's floating accessibility button is on for Tokalot (the default on some phones, such as OnePlus), Settings › Recording & look says so and how to switch to just the volume keys, and its link opens Tokalot's own shortcut page. Removing the floating button by dragging it away can switch Tokalot off on those phones.
 
+## 1.34 · 2026-10-18
+- Share a voice message to Tokalot from WhatsApp (or any app) and it's transcribed into a voice note, with the recording kept. Shared text is saved as a note. Sharing turns voice notes on if they were off. Needs a Groq or OpenAI key.
+- Open a voice note to play it: the transcript lights up word by word as it plays, and tapping a word jumps there. Skip silence and Skip ums make it quicker to listen to.
+- Summarize any note at five levels of detail, from one line to everything, with the cleanup AI you already use. Summaries are saved with the note.
+- Make an index of a long voice note: every point in the order it was said, grouped by topic. Tap one to hear that part.
+- The "Voice notes are a beta. Worth keeping?" card on Notes has an X to close it, and goes away for good once you close or answer it.
+
 ## 1.33 · 2026-10-17
 - Sounds: turn them on in Settings › Recording for a short tone when recording starts, stops, finishes or fails, alongside the buzz. Pick a style: Soft, Chime, Retro or Bubble. Off unless you turn it on.
 
