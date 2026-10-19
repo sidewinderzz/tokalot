@@ -113,6 +113,10 @@ public sealed class Settings
     public bool HideHandsFreeHint { get; set; }
     /** Let the cleanup model reword for clarity. Off: the user's own words are kept. */
     public bool Polish { get; set; }
+    /** Beta: a Notes page for voice notes (synced from other devices) and recordings added from files. */
+    public bool NotesBeta { get; set; }
+    /** The Notes beta card was answered or closed. */
+    public bool NotesFeedbackDone { get; set; }
     /** Optional sync: the shared file's path on this computer ("" = off), and whether this computer puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }

@@ -13,7 +13,7 @@ using System.Text.RegularExpressions;
 namespace Tokalot.Desktop.Core;
 
 /**
- * One-file backup (.zip): settings, dictionary, snippets, styles, usage, history, voice notes (Windows), and
+ * One-file backup (.zip): settings, dictionary, snippets, styles, usage, history, voice notes and their summaries, and
  * optionally recordings and API keys. Keys are left out unless explicitly included.
  */
 public static class Backup
@@ -57,6 +57,14 @@ public static class Backup
                 {
                     zip.CreateEntryFromFile(f, "audio/" + Path.GetFileName(f));
                     recordings++;
+                }
+            // A note's summaries, index and word times always; its recording only with the other recordings.
+            foreach (var dir in Directory.GetDirectories(Paths.Dir(NoteImport.DirName)))
+                foreach (var f in Directory.GetFiles(dir))
+                {
+                    var name = Path.GetFileName(f);
+                    if (name == "info.json" || (includeAudio && name.StartsWith("audio.")))
+                        zip.CreateEntryFromFile(f, NoteImport.DirName + "/" + Path.GetFileName(dir) + "/" + name);
                 }
         }
         // On Linux and macOS a new file is readable by other users by default; a backup holding keys must not be.
@@ -121,6 +129,12 @@ public static class Backup
                 var tmp = Paths.File(e.FullName + ".restore");
                 e.ExtractToFile(tmp, true);
                 File.Move(tmp, Paths.File(e.FullName), true);
+            }
+            else if (Regex.Match(e.FullName, @"^notes-media/(\d+)/(info\.json|audio\.[a-z0-9]{1,5})$") is { Success: true } nm)
+            {
+                var dir = Path.Combine(Paths.Dir(NoteImport.DirName), nm.Groups[1].Value);
+                Directory.CreateDirectory(dir);
+                e.ExtractToFile(Path.Combine(dir, nm.Groups[2].Value), true);
             }
             else if (e.FullName.StartsWith("audio/") && Regex.IsMatch(e.Name, @"^\d+\.(wma|m4a|wav)$"))
             {
