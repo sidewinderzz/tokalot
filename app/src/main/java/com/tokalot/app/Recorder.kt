@@ -42,6 +42,9 @@ class Recorder {
     @Volatile var speechSamples = 0
         private set
 
+    /** How many samples at the start belong to the start sound, which the mic can hear: not counted as talking. */
+    @Volatile var cueSamples = 0
+
     private var floor = 0.002f // running estimate of the room's background level
 
     /** Caller must already hold RECORD_AUDIO. Returns false if the mic couldn't be opened. */
@@ -87,12 +90,13 @@ class Recorder {
                     var sum = 0.0
                     for (i in 0 until n) { val v = buf[i] / 32768.0; sum += v * v }
                     level = kotlin.math.sqrt(sum / n).toFloat()
-                    if (level > SPEECH_RMS) speechSamples += n
+                    val cue = total < cueSamples
+                    if (level > SPEECH_RMS && !cue) speechSamples += n
                     // The bar for "talking" follows the room: three times the background level, which drops at once
                     // in a quiet moment and creeps up slowly. A fixed bar read soft speech on a quiet mic as
                     // silence, and auto-stop then ended the recording 30 s in, mid-sentence.
-                    floor = if (level < floor) level else minOf(level, floor * 1.003f + 0.00001f)
-                    if (level > (floor * 3).coerceIn(VOICE_MIN, VOICE_RMS)) {
+                    if (!cue) floor = if (level < floor) level else minOf(level, floor * 1.003f + 0.00001f)
+                    if (!cue && level > (floor * 3).coerceIn(VOICE_MIN, VOICE_RMS)) {
                         lastVoiceAt = System.currentTimeMillis()
                         lastVoiceSample = total + n
                     }

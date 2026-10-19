@@ -300,7 +300,7 @@ class Dictation(context: Context) {
         }
         val sttMs = (System.nanoTime() - began) / 1_000_000
         val heard = TextTools.stripNoise(raw)
-        if (heard.isBlank() || (sparse && TextTools.isPhantom(heard))) return Outcome("", warnings.firstOrNull())
+        if (heard.isBlank() || (sparse && TextTools.isPhantom(heard)) || TextTools.isEcho(heard, prefs.words, sparse)) return Outcome("", warnings.firstOrNull())
         // Voice notes (beta): "Note this…" at the very start makes it a note, written in the plain style.
         val asNote = if (prefs.notesBeta) TextTools.noteTrigger(heard, prefs.notePhrases.split(',')) else null
         val base = asNote ?: heard

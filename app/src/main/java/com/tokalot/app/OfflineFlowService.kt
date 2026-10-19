@@ -60,6 +60,7 @@ class OfflineFlowService : AccessibilityService() {
         private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
         private const val LEARN_WATCH_MS = 120_000L // how long a dictation's text box is looked at again for corrections
         private const val LEARN_EVERY_MS = 1500L
+        private const val LOOK_AGAIN = 12 // re-checks (about 4.5 s) after an event while only half of keyboard and text box is found
         private const val AROUND = 64 // characters read either side of the cursor before typing
         /** Placeholders apps show in empty boxes, for apps that don't flag them as hints. */
         private val COMMON_PLACEHOLDERS = setOf(
@@ -143,20 +144,32 @@ class OfflineFlowService : AccessibilityService() {
         Sync.request(this) // picks up dictionary and snippet changes made on another device
         // The keyboard may already be up (the switch was just turned on, or the service restarted):
         // look now rather than wait for the next event.
-        lookAgain = 6
+        lookAgain = LOOK_AGAIN
         handler.postDelayed(recheck, 150)
         applyShortcut()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
+        val type = event.eventType
+        // The cursor moves on every letter typed: once the button is up there's nothing to look at.
+        if (type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED && attached) return
+        // Remember the text box the event came from. Some apps (web pages, newer-style screens) never say
+        // which box has the keyboard when asked afterwards, which kept the button hidden until the keyboard
+        // was closed and opened again; this box is the one to check then.
+        if (type == AccessibilityEvent.TYPE_VIEW_FOCUSED || type == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED
+        ) {
+            event.source?.takeIf { it.isEditable && it.packageName != packageName }?.let { lastField = it }
+        }
         // A new input field taking focus brings a dismissed button back.
-        if (dismissed && event.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
+        if (dismissed && type == AccessibilityEvent.TYPE_VIEW_FOCUSED &&
             event.source?.isEditable == true
         ) {
             dismissed = false
         }
         lookForUpdate()
-        lookAgain = 6
+        // Cursor moves come with every key on a hardware keyboard: they ask for one more look, not a new round.
+        if (type != AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) lookAgain = LOOK_AGAIN
         // Debounce: keyboard open/close fires a burst of window events.
         handler.removeCallbacks(recheck)
         handler.postDelayed(recheck, 150)
@@ -523,8 +536,17 @@ class OfflineFlowService : AccessibilityService() {
             if (node.isPassword) return null
             if (node.isEditable) return node
         }
-        return null
+        // Nothing reported input focus. The box the last tap or focus came from still counts if it's
+        // still on screen, focused and editable.
+        val last = lastField ?: return null
+        if (!last.refresh() || !last.isFocused || !last.isEditable || last.isPassword) {
+            lastField = null
+            return null
+        }
+        return last
     }
+
+    private var lastField: AccessibilityNodeInfo? = null // the text box the last focus, tap or cursor move came from
 
     private var lookAgain = 0 // re-checks left while only one of keyboard and text box has been found
 
@@ -543,7 +565,7 @@ class OfflineFlowService : AccessibilityService() {
                 if (!dismissed && (keyboard || field) && lookAgain > 0) {
                     lookAgain--
                     handler.removeCallbacks(recheck)
-                    handler.postDelayed(recheck, 300)
+                    handler.postDelayed(recheck, if (lookAgain > LOOK_AGAIN / 2) 250L else 500L)
                 }
                 detach()
                 return
@@ -980,6 +1002,7 @@ class OfflineFlowService : AccessibilityService() {
                         }
                     }
                 }
+                recorder.cueSamples = if (prefs.sounds) Sounds.CUE_SAMPLES else 0
                 if (recorder.start()) {
                     live = dictation.newLive()
                     if (live != null) handler.postDelayed(liveFeed, 300)

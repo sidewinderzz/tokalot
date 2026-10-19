@@ -23,6 +23,8 @@ object Backup {
     private const val KEY_PREFIX = "key_"
     private const val MAX_JSON_BYTES = 64 * 1024 * 1024 // far above any real history; stops a hostile zip
     private val AUDIO_NAME = Regex("""\d+\.m4a""")
+    /** A shared voice note's files: notes-media/<id>/info.json and its recording. */
+    private val NOTE_MEDIA_NAME = Regex("""${NoteImport.DIR}/\d+/(info\.json|audio\.[a-z0-9]{2,5})""")
 
     class Summary(val entries: Int, val recordings: Int, val keys: Boolean)
 
@@ -78,6 +80,14 @@ object Backup {
                 zip.putNextEntry(ZipEntry(Notes.FILE))
                 notes.inputStream().use { it.copyTo(zip) }
                 zip.closeEntry()
+            }
+            // Each shared voice note's timings, summaries and index; its recording only when recordings are included.
+            NoteImport.dir(app).listFiles()?.filter { it.isDirectory && it.name.toLongOrNull() != null }?.forEach { d ->
+                d.listFiles()?.filter { it.name == "info.json" || (includeAudio && it.name.startsWith("audio.")) }?.forEach { f ->
+                    zip.putNextEntry(ZipEntry("${NoteImport.DIR}/${d.name}/${f.name}"))
+                    f.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
             }
             if (includeAudio) {
                 AudioStore.dir(app).listFiles { f -> f.name.endsWith(".m4a") }?.forEach { f ->
@@ -136,6 +146,7 @@ object Backup {
             var historyJson: String? = null
             var notesJson: String? = null
             val audio = ArrayList<String>()
+            val noteMedia = ArrayList<String>()
             ZipInputStream(input.buffered()).use { zip ->
                 while (true) {
                     val e = zip.nextEntry ?: break
@@ -149,6 +160,11 @@ object Backup {
                             val file = name.removePrefix("audio/")
                             File(holding, file).outputStream().use { zip.copyTo(it) }
                             if (file !in audio) audio.add(file)
+                        }
+                        name.matches(NOTE_MEDIA_NAME) -> {
+                            val to = File(holding, name).apply { parentFile?.mkdirs() }
+                            to.outputStream().use { zip.copyTo(it) }
+                            if (name !in noteMedia) noteMedia.add(name)
                         }
                     }
                 }
@@ -209,6 +225,11 @@ object Backup {
                 val to = File(AudioStore.dir(app), file)
                 to.delete()
                 if (from.renameTo(to) || runCatching { from.copyTo(to, overwrite = true) }.isSuccess) recordings++
+            }
+            for (name in noteMedia) {
+                val to = File(app.filesDir, name).apply { parentFile?.mkdirs(); delete() }
+                val from = File(holding, name)
+                if (!from.renameTo(to)) runCatching { from.copyTo(to, overwrite = true) }
             }
             return Summary(History.all(app).size, recordings, m.hasKeys)
         } finally {

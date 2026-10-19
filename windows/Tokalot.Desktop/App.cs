@@ -188,12 +188,12 @@ public sealed class App : Application
     }
 
     /**
-     * Home shows the new entry and stats, and Notes a new note. Other pages are left alone so a half-typed
+     * Home shows the new entry and stats, Notes a new note, and the word stats page its new totals. Other pages are left alone so a half-typed
      * snippet or word list isn't wiped.
      */
     public void RefreshAfterDictation()
     {
-        if (window != null && window.CurrentPage is UI.MainWindow.Page.Home or UI.MainWindow.Page.Notes) window.Render();
+        if (window != null && window.CurrentPage is UI.MainWindow.Page.Home or UI.MainWindow.Page.Notes or UI.MainWindow.Page.Stats) window.Render();
     }
 
 

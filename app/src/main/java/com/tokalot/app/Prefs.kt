@@ -407,6 +407,16 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("haptics", true)
         set(v) = sp.edit().putBoolean("haptics", v).apply()
 
+    /** Feedback sounds from the floating button. Off unless turned on. */
+    var sounds: Boolean
+        get() = sp.safeBoolean("sounds", false)
+        set(v) = sp.edit().putBoolean("sounds", v).apply()
+
+    /** Which Sounds style plays (soft, chime, retro, bubble). */
+    var soundSet: String
+        get() = Sounds.valid(sp.safeString("sound_set", null))
+        set(v) = sp.edit().putString("sound_set", v).apply()
+
     /**
      * How long things have been taking lately, for the progress ring's estimate. Running averages, kept
      * separately for Wi-Fi and mobile data: "stt_wifi" / "stt_cell" (speech-to-text, milliseconds per second
@@ -481,6 +491,11 @@ class Prefs(ctx: Context) {
     var notesBeta: Boolean
         get() = sp.safeBoolean("notes_beta", false)
         set(v) = sp.edit().putBoolean("notes_beta", v).apply()
+
+    /** The "worth keeping?" card on Notes was closed or answered, so it stays hidden. */
+    var notesFeedbackDone: Boolean
+        get() = sp.safeBoolean("notes_feedback_done", false)
+        set(v) = sp.edit().putBoolean("notes_feedback_done", v).apply()
 
     /**
      * Apps where, with no keyboard showing, dictated text goes on the clipboard instead of into the selected text

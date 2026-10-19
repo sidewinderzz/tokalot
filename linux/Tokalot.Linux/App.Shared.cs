@@ -105,10 +105,10 @@ public sealed partial class App
         window?.ShowToast(message);
     }
 
-    /** Home shows the new entry and stats. Other pages are left alone so a half-typed snippet or word list isn't wiped. */
+    /** Home shows the new entry and stats, and the word stats page its new totals. Other pages are left alone so a half-typed snippet or word list isn't wiped. */
     public void RefreshAfterDictation()
     {
-        if (window?.CurrentPage == UI.MainWindow.Page.Home) window.Render();
+        if (window?.CurrentPage is UI.MainWindow.Page.Home or UI.MainWindow.Page.Stats) window.Render();
     }
 
     // ---------- updates ----------

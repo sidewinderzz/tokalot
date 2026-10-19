@@ -18,6 +18,31 @@ object TextTools {
     /** Whisper invents these for silence. Only trusted as "nothing said" when barely any sound was heard. */
     fun isPhantom(s: String) = s.lowercase().replace(NOT_LETTERS, " ").replace(SPACES, " ").trim() in PHANTOMS
 
+    private val PIECE = Regex("""[,.!?;:]+""")
+    private val NOT_WORD = Regex("""[^\p{L}\p{N} ]""")
+    private fun key(s: String) = s.lowercase().replace(NOT_WORD, " ").replace(SPACES, " ").trim()
+
+    /**
+     * Whisper is given the dictionary as its prompt. On a clip with nothing said it can hand that prompt back,
+     * mixed with its stock phrases: "Thank you. Thank you. Hó, Tokalot, Shelby." True when the text is made of
+     * nothing but those (plus a stray syllable or two). sparse: barely any sound was heard, so one dictionary
+     * word or a stock phrase alone is enough; otherwise it takes two dictionary words and nothing else.
+     */
+    fun isEcho(s: String, words: List<String>, sparse: Boolean): Boolean {
+        val dict = words.map { key(it) }.filter { it.isNotEmpty() }.toSet()
+        val pieces = s.split(PIECE).map { key(it) }.filter { it.isNotEmpty() }
+        if (pieces.isEmpty()) return false
+        var fromDict = 0
+        var stock = 0
+        for (p in pieces) when {
+            p in dict -> fromDict++
+            p.replace(NOT_LETTERS, " ").replace(SPACES, " ").trim() in PHANTOMS -> stock++
+            p.length <= 3 && ' ' !in p -> {} // "Hó", "Oh"
+            else -> return false
+        }
+        return if (sparse) fromDict + stock > 0 else fromDict >= 2
+    }
+
     /** The fallback when AI cleanup is off or unreachable. */
     fun basicClean(s: String) = s.replace(FILLERS, "")
         .replace(SPACES, " ")

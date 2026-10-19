@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Avalonia;
@@ -37,6 +38,8 @@ internal static class Shots
             Page(dir, theme, "7-wide-home", w => { w.Go(MainWindow.Page.Home); w.Render(); }, 1700);
             Page(dir, theme, "8-wide-settings", w => { w.Go(MainWindow.Page.Settings); w.Render(); }, 1700);
             Page(dir, theme, "9-wide-style", w => { w.SetStyleTab("MESSAGING"); w.Go(MainWindow.Page.Style); w.Render(); }, 1700);
+            Page(dir, theme, "10-stats", w => w.Go(MainWindow.Page.Stats));
+            Page(dir, theme, "11-wide-stats", w => { w.Go(MainWindow.Page.Stats); w.Render(); }, 1700);
         }
         PillShots(dir);
         IndicatorShots(dir);
@@ -57,6 +60,7 @@ internal static class Shots
         string W(Sync.Data d) => string.Join(",", d.Words);
         string St(Sync.Data d) => string.Join(",", d.Styles.OrderBy(kv => kv.Key).Select(kv => kv.Key + "=" + kv.Value));
 
+        Check("tones: every start sound ends inside the 600 ms cue window", Tones.Sets.All(t => Tones.Length(t.Id, Tones.Kind.Start) < 600 && Tones.Pcm(t.Id, Tones.Kind.Start).Length > 0));
         Check("1 first sync unions words", W(Sync.Merge(D(new[] { "Alpha", "Beta" }), D(new[] { "beta", "Gamma" }), D())) == "beta,Gamma,Alpha");
         Check("2 local delete wins", W(Sync.Merge(D(new[] { "Alpha", "Gamma" }), D(new[] { "Alpha", "Beta", "Gamma", "Delta" }), D(new[] { "Alpha", "Beta", "Gamma" }))) == "Alpha,Gamma,Delta");
         Check("3 remote delete applies", W(Sync.Merge(D(new[] { "Alpha", "Beta" }), D(new[] { "Alpha" }), D(new[] { "Alpha", "Beta" }))) == "Alpha");
@@ -96,8 +100,25 @@ internal static class Shots
         var bad = Sync.ParseUsage(System.Text.Json.Nodes.JsonNode.Parse(
             "{\"a\":{\"name\":\"Mac\",\"months\":{\"2026-10\":{\"words\":12,\"dictations\":-3},\"oops\":{\"words\":5},\"2026-11\":\"x\"}},\"b\":\"not a device\"}"));
         Check("12f bad usage is skipped", bad!.Count == 1 && bad["a"].Words == 12 && bad["a"].Dictations == 0 && bad["a"].Months.Count == 1);
+        static Dictionary<string, Sync.UsageMonth> UM(params (string Month, long Words, long Dictations)[] months) =>
+            months.ToDictionary(m => m.Month, m => new Sync.UsageMonth(m.Words, m.Dictations));
+        var rowsWs = WordStats.Months(new[] { UM(("2026-07", 100, 4), ("2026-10", 50, 2)), UM(("2026-07", 20, 1), ("2026-09", 0, 0)) }, "2026-11");
+        Check("13a stats: months add up across devices, gaps filled to now",
+            string.Join(",", rowsWs.Select(r => $"{r.Key}={r.Words}/{r.Dictations}")) == "2026-07=120/5,2026-08=0/0,2026-09=0/0,2026-10=50/2,2026-11=0/0");
+        Check("13b stats: nothing counted, or no real month, is no months",
+            WordStats.Months(new[] { UM(("2026-07", 0, 0)) }, "2026-11").Count == 0 && WordStats.Months(new[] { UM(("2026-99", 5, 1), ("2026-00", 5, 1)) }, "2026-11").Count == 0);
+        Check("13c stats: a clock set years back lists at most ten years", WordStats.Months(new[] { UM(("1990-01", 5, 1)) }, "2026-11").Count == WordStats.MaxMonths);
+        var streaks = WordStats.DayStreaks(new[] { 10, 11, 12, 15, 19, 20, 20 }, 21);
+        Check("13d stats: days, best streak and the run up to yesterday", streaks == new WordStats.Streaks(6, 3, 2));
+        Check("13e stats: a run that ended earlier isn't current", WordStats.DayStreaks(new[] { 1, 2 }, 9).Current == 0);
+        Check("13f stats: typing time and what it fills",
+            WordStats.TypingTime(1200) == "30 min" && WordStats.TypingTime(2400) == "1 hour" && WordStats.TypingTime(100_000) == "42 hours" &&
+            WordStats.Equivalent(299) == "" && WordStats.Equivalent(450) == "1 paperback page" && WordStats.Equivalent(90_000) == "1 novel" && WordStats.Equivalent(135_000) == "1.5 novels");
         Check("10a stray thank you dropped", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.8}]}") == "");
         Check("10b said thank you kept", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.05}]}") == " Thank you.");
+        var echoWords = new[] { "Tokalot", "srg62003" };
+        Check("10e dictionary echoed on silence dropped", TextTools.IsEcho("Thank you. Thank you. Hó, Tokalot, srg62003.", echoWords, false));
+        Check("10f dictionary word said kept", !TextTools.IsEcho("Tokalot is working.", echoWords, false));
         Check("10c other words kept", CloudStt.Text("{\"text\":\"Call me\",\"segments\":[{\"no_speech_prob\":0.9}]}") == "Call me");
         File.WriteAllLines(Path.Combine(dir, "sync-checks.txt"), lines);
     }
@@ -253,6 +274,15 @@ internal static class Shots
         s.Snippets.Add(new Snippet("meeting link", "Here's the link for our call: https://meet.example.com/abc-defg-hij"));
         s.SetKey("groq", "sample-key-for-screenshots");
         s.Save();
+
+        // Six earlier months of counts, so the word stats page has a history to show.
+        var earlier = new Dictionary<string, Usage.Month>();
+        int[] made = { 2100, 3400, 2800, 5200, 4100, 6300 };
+        for (int i = 0; i < made.Length; i++)
+            earlier[DateTime.Now.AddMonths(i - made.Length).ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture)] =
+                new Usage.Month { Words = made[i], Dictations = made[i] / 24, Fillers = made[i] / 90, Corrections = made[i] / 400 };
+        File.WriteAllText(Paths.File("usage.json"), System.Text.Json.JsonSerializer.Serialize(earlier, Settings.Json));
+        Usage.Reload();
 
         var now = DateTimeOffset.Now;
         void Add(TimeSpan ago, string text, string raw, string app, int secs, bool cleaned = true)

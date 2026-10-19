@@ -6,11 +6,32 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
-## 1.31 · 2026-10-12
+## 1.36 · 2026-10-19
 - Choose a bigger on-device model in Settings › Speech & cleanup › On-device model: Standard (60 MB, as before), Better (190 MB) or Best (574 MB, the same model as Groq Whisper, compressed). Bigger ones make fewer mistakes, most of all with background noise, and use more of the phone's cores. Your choice is used once it's downloaded; until then the one you have keeps working.
 - New: Prefer on-device in weak signal. With no connection, or a speech service that was slow to answer while you talked, the dictation goes straight to the phone's model, and the cloud only gets a few seconds before the phone takes over (instead of up to half a minute).
 - The on-device model runs much faster: phones from about 2018 on get a build that uses their CPU's faster maths instructions, and a short dictation no longer pays for a full 30 seconds of audio.
 - While recording, slide the floating button sideways to do that dictation on the phone. It works in tap mode and hold-to-talk; sliding up to the X still cancels.
+- When nothing was said, the words in your dictionary are no longer typed back. Whisper sometimes returns them (with a stray "Thank you.") on a near-silent clip; that now counts as nothing said.
+- Settings › API keys: the "Get one at" addresses are links now. Tap to open the page, hold to copy the address.
+
+## 1.35 · 2026-10-18
+- Accessibility shortcut: if Android's floating accessibility button is on for Tokalot (the default on some phones, such as OnePlus), Settings › Recording & look says so and how to switch to just the volume keys, and its link opens Tokalot's own shortcut page. Removing the floating button by dragging it away can switch Tokalot off on those phones.
+
+## 1.34 · 2026-10-18
+- Share a voice message to Tokalot from WhatsApp (or any app) and it's transcribed into a voice note, with the recording kept. Shared text is saved as a note. Sharing turns voice notes on if they were off. Needs a Groq or OpenAI key.
+- Open a voice note to play it: the transcript lights up word by word as it plays, and tapping a word jumps there. Skip silence and Skip ums make it quicker to listen to.
+- Summarize any note at five levels of detail, from one line to everything, with the cleanup AI you already use. Summaries are saved with the note.
+- Make an index of a long voice note: every point in the order it was said, grouped by topic. Tap one to hear that part.
+- The "Voice notes are a beta. Worth keeping?" card on Notes has an X to close it, and goes away for good once you close or answer it.
+
+## 1.33 · 2026-10-17
+- Sounds: turn them on in Settings › Recording for a short tone when recording starts, stops, finishes or fails, alongside the buzz. Pick a style: Soft, Chime, Retro or Bubble. Off unless you turn it on.
+
+## 1.32 · 2026-10-16
+- Tap the stats card on Home to see all your word stats: words for every month since you started (every synced device added together), your best and average month, how long it would have taken to type, speaking pace, longest dictation, streaks, busiest day, top apps, and a breakdown by device.
+
+## 1.31 · 2026-10-14
+- The floating record button shows up when you tap a text box, every time. In some apps it could stay hidden until the keyboard was closed and opened again; it now also watches where the cursor lands, and keeps looking a little longer while the keyboard slides up.
 
 ## 1.30 · 2026-10-10
 - When the on-device speech model hits an error (the phone short of memory, say), the recording is kept in history with a Transcribe button, instead of "Didn't catch anything" and the words lost.

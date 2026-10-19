@@ -2,10 +2,18 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
-## New in 0.4.0
+## New in 0.6.0
 
 - Choose a bigger offline model in Settings › Offline model: Standard (60 MB, as before), Better (190 MB) or Best (574 MB, the same model as Groq Whisper, compressed). Bigger ones make fewer mistakes, most of all with background noise. Your choice is used once it's downloaded; until then the one you have keeps working.
 - New: Prefer offline in weak signal (Settings › Offline model). With no connection, or a speech service that was slow to answer while you talked, the dictation goes straight to the offline model, and the cloud only gets a few seconds before the offline model takes over.
+
+## New in 0.5.0
+
+- Pick a sound style in Settings › Recording: Soft (the original), Chime, Retro or Bubble. Click one to hear it.
+
+## New in 0.4.0
+
+- Click the stats card on Home to see all your word stats: words for every month since you started (every synced device added together), your best and average month, how long it would have taken to type, speaking pace, longest dictation, streaks, busiest day, top apps, and a breakdown by device.
 
 ## New in 0.3.3
 
