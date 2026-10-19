@@ -121,7 +121,7 @@ No text box? Add the **Dictate** tile to Quick Settings: your words go into the 
   </picture>
 </p>
 
-1. **Install.** Download [TokalotSetup.exe](https://github.com/sidewinderzz/tokalot/releases/download/desktop/TokalotSetup.exe) and run it. Tokalot then lives in the tray and updates itself.
+1. **Install.** Download [TokalotSetup.exe](https://github.com/sidewinderzz/tokalot/releases/download/desktop/TokalotSetup.exe) and run it. On a Windows on ARM PC (Snapdragon), use [TokalotSetup-arm64.exe](https://github.com/sidewinderzz/tokalot/releases/download/desktop/TokalotSetup-arm64.exe) instead; an x64 copy already installed there moves itself to the ARM64 build at its next update. Tokalot then lives in the tray and updates itself.
 2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it under Settings › API keys.
 3. **Talk.** Click into any text box, hold **Ctrl+Win** while you talk, and let go. Tap Ctrl+Win once for hands-free and tap again to finish. Esc cancels.
 
@@ -132,7 +132,7 @@ No text box? Turn on **Voice notes (beta)** in Settings, then hold **Ctrl+Shift+
 
 ### Linux (beta)
 
-A port of the Windows app, for X11 and Wayland desktops on 64-bit Intel/AMD: hold **Ctrl+Super** and talk. Download the newest `Tokalot-linux-x64` build from [Releases](https://github.com/sidewinderzz/tokalot/releases) (tagged `linux-v…`, marked pre-release) and follow [linux/README.md](linux/README.md). It needs two one-time permissions, which the app shows you with a Copy button.
+A port of the Windows app, for X11 and Wayland desktops on 64-bit Intel/AMD and ARM64 (such as a Raspberry Pi 4/5): hold **Ctrl+Super** and talk. Download the newest `Tokalot-linux-x64` or `Tokalot-linux-arm64` build from [Releases](https://github.com/sidewinderzz/tokalot/releases) (tagged `linux-v…`, marked pre-release) and follow [linux/README.md](linux/README.md). It needs two one-time permissions, which the app shows you with a Copy button.
 
 > [!WARNING]
 > The Linux build has only been run under WSL so far, not on a real Linux desktop. Recording, pasting, the tray icon and the on-screen indicator may need fixes on your setup. If you try it, please open an issue with your distro, desktop and the output of `Tokalot --diagnose`.
@@ -183,13 +183,17 @@ To release, bump `versionCode` and `versionName` in `app/build.gradle.kts`, add 
 dotnet publish windows/Tokalot.Desktop -c Release -r win-x64 --self-contained
 ```
 
-To release, bump `<Version>` in `Tokalot.Desktop.csproj` and push to `main`. The workflow publishes `desktop-v<version>` and refreshes the rolling `desktop` release that the installer link and the in-app updater use. `Tokalot.exe --screenshots <folder>` renders every page with sample data, which is how the screenshots here are made.
+Use `-r win-arm64` for Windows on ARM. CI builds both, and checks the ARM64 one on a Windows on ARM machine.
+
+To release, bump `<Version>` in `Tokalot.Desktop.csproj` and push to `main`. The workflow publishes `desktop-v<version>` and refreshes the rolling `desktop` release that the installer links and the in-app updater use (x64 and ARM64 each have their own update channel there). `Tokalot.exe --screenshots <folder>` renders every page with sample data, which is how the screenshots here are made.
 
 **Linux** (`linux/Tokalot.Linux`, which also compiles the shared code in `windows/Tokalot.Desktop/Core`). Requirements: the .NET 10 SDK. Then:
 
 ```sh
 dotnet publish linux/Tokalot.Linux -c Release -r linux-x64 --self-contained
 ```
+
+Use `-r linux-arm64` for ARM64. CI builds and tests both, each on its own kind of machine.
 
 To release, bump `<Version>` in `Tokalot.Linux.csproj` and push to `main`. The workflow publishes `linux-v<version>` as a pre-release.
 

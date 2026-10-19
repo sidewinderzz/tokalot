@@ -10,7 +10,44 @@ permissions:
   contents: write
 
 jobs:
+  # The ARM64 build on a real Windows on ARM machine: it starts and draws every page natively.
+  arm64-check:
+    runs-on: windows-11-arm
+    defaults:
+      run:
+        shell: bash
+        working-directory: windows/Tokalot.Desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        run: dotnet publish -c Release -r win-arm64 --self-contained -o publish
+
+      - name: Smoke test
+        run: |
+          uname -m
+          # The speech engine (whisper.cpp) must be there in its ARM64 form.
+          find publish -iname '*whisper*.dll' | tee engines.txt
+          grep -qi arm64 engines.txt || { echo "No ARM64 speech engine in the build"; exit 1; }
+          timeout 300 ./publish/Tokalot.exe --screenshots "$RUNNER_TEMP/screenshots" || true
+          ls -l "$RUNNER_TEMP/screenshots"
+          COUNT=$(ls "$RUNNER_TEMP/screenshots"/*.png | wc -l)
+          echo "$COUNT screenshots"
+          [ "$COUNT" -ge 10 ]
+
+      - uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: Tokalot-windows-arm64-screenshots
+          path: ${{ runner.temp }}/screenshots
+          retention-days: 3
+
   build:
+    needs: arm64-check
     runs-on: windows-latest
     defaults:
       run:
@@ -30,22 +67,37 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Building Tokalot for Windows $VERSION"
 
-      # Self-contained: the user doesn't need .NET installed.
+      # Self-contained: the user doesn't need .NET installed. One build for Intel/AMD PCs and a native
+      # one for Windows on ARM (Snapdragon), where the x64 build would run emulated and transcribe slower.
       - name: Publish
-        run: dotnet publish -c Release -r win-x64 --self-contained -o publish
+        run: |
+          dotnet publish -c Release -r win-x64 --self-contained -o publish
+          dotnet publish -c Release -r win-arm64 --self-contained -o publish-arm64
 
-      # Velopack turns the app into an installer (TokalotSetup) plus update packages.
+      # Velopack turns the app into an installer (TokalotSetup) plus update packages. Each build is its own
+      # channel ("win" for x64, as always, and "win-arm64"), so installed copies only ever update to their own kind.
       - name: Package installer
         run: |
           dotnet tool install -g vpk --version 1.2.161
           vpk pack --packId Tokalot --packVersion "$VERSION" --packDir publish --mainExe Tokalot.exe \
             --packTitle Tokalot --packAuthors sidewinderzz --icon Assets/icon.ico --outputDir releases
+          vpk pack --packId Tokalot --packVersion "$VERSION" --packDir publish-arm64 --mainExe Tokalot.exe \
+            --packTitle Tokalot --packAuthors sidewinderzz --icon Assets/icon.ico --outputDir releases-arm64 \
+            --channel win-arm64 --runtime win-arm64
+          ls -l releases releases-arm64
+          mv releases/*Setup.exe releases/TokalotSetup.exe
+          mv releases-arm64/*Setup.exe releases-arm64/TokalotSetup-arm64.exe
+          # Both go up to the same release, so no file name may be shared.
+          for f in releases-arm64/*; do
+            [ ! -e "releases/$(basename "$f")" ] || { echo "Both builds made $(basename "$f")"; exit 1; }
+          done
+          mv releases-arm64/* releases/
 
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: Tokalot-windows
-          path: windows/Tokalot.Desktop/releases/*Setup.exe
+          path: windows/Tokalot.Desktop/releases/TokalotSetup*.exe
           retention-days: 3
 
       # Bump <Version> in the .csproj and push to main to release. Desktop releases are tagged
@@ -61,8 +113,7 @@ jobs:
             echo "$TAG is already released; nothing to publish."
             exit 0
           fi
-          mv releases/*Setup.exe releases/TokalotSetup.exe
-          NOTES="Download **TokalotSetup.exe** and run it. Windows may show \"Windows protected your PC\" because the installer isn't code-signed yet: click **More info → Run anyway**. Tokalot then lives in your tray; hold **Ctrl+Win** in any app to dictate. Installed copies update themselves."
+          NOTES="Download **TokalotSetup.exe** and run it (on a Windows on ARM PC, such as a Snapdragon laptop, download **TokalotSetup-arm64.exe** instead). Windows may show \"Windows protected your PC\" because the installer isn't code-signed yet: click **More info → Run anyway**. Tokalot then lives in your tray; hold **Ctrl+Win** in any app to dictate. Installed copies update themselves."
           gh release create "$TAG" releases/* --target "$GITHUB_SHA" --latest=false \
             --title "Tokalot for Windows $VERSION" --notes "$NOTES"
 
@@ -98,7 +149,7 @@ jobs:
             gh api -X DELETE "repos/$REPO/releases/assets/$old"
             gh api -X PATCH "repos/$REPO/releases/assets/$new" -f name="$name" > /dev/null
           }
-          FEED="releases.win.json RELEASES"
+          FEED="releases.win.json RELEASES releases.win-arm64.json RELEASES-win-arm64"
           for f in releases/*; do
             case " $FEED " in *" $(basename "$f") "*) continue ;; esac
             put "$f"
