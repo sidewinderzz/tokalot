@@ -39,7 +39,12 @@ object WordStats {
         val apps: List<AppRow>,
     ) {
         val best: MonthRow? get() = months.filter { it.words > 0 }.maxByOrNull { it.words }
-        val average: Long get() = if (months.isEmpty()) 0 else words / months.size
+        /** Over the finished months: the month in progress (the last row) would drag it down. */
+        val average: Long get() = when {
+            months.isEmpty() -> 0
+            months.size == 1 -> words
+            else -> (words - months.last().words) / (months.size - 1)
+        }
         val since: String get() = months.firstOrNull()?.label ?: ""
     }
 
@@ -93,9 +98,12 @@ object WordStats {
     /** Days since 1970 in the phone's own time zone, so a day starts at local midnight. */
     fun dayNumber(ms: Long, tz: TimeZone = TimeZone.getDefault()) = Math.floorDiv(ms + tz.getOffset(ms), 86_400_000L)
 
-    /** How long typing the words would have taken at 40 words a minute, said the short way. */
+    /** Average typing speed on a phone, from a study of 37,000 people typing on their phones (Palin et al., 2019). */
+    const val TYPING_WPM = 36
+
+    /** How long typing the words would have taken at [TYPING_WPM], said the short way. */
     fun typingTime(words: Long): String {
-        val minutes = words / 40.0
+        val minutes = words / TYPING_WPM.toDouble()
         if (minutes < 60) return "${Math.round(minutes)} min"
         val hours = short(minutes / 60)
         return hours + if (hours == "1") " hour" else " hours"
@@ -107,6 +115,13 @@ object WordStats {
         words >= 300 -> "${words / 300}" + if (words < 600) " paperback page" else " paperback pages"
         else -> ""
     }
+
+    /**
+     * The words a month in progress ends on if the pace so far keeps up, on [day] of a [daysInMonth]-day month.
+     * Null for its first two days, when one busy morning would make a wild guess, and on its last day.
+     */
+    fun onTrack(words: Long, day: Int, daysInMonth: Int): Long? =
+        if (words <= 0 || day < 3 || day >= daysInMonth) null else words * daysInMonth / day
 
     /** One decimal under 10 (dropped when it's .0), whole numbers above. */
     private fun short(v: Double): String =

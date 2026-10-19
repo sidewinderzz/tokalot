@@ -800,7 +800,10 @@ class MainActivity : Activity() {
         // This month at a glance.
         val m = Usage.month(this)
         val stats = card(20)
-        stats.addView(text(m.label.uppercase(Locale.US), 12f, C.SUB).apply { letterSpacing = 0.08f })
+        // The month isn't over yet, so say how far in it is.
+        val today = java.util.Calendar.getInstance()
+        val dayOf = "Day ${today.get(java.util.Calendar.DAY_OF_MONTH)} of ${today.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)}"
+        stats.addView(text("${m.label} · $dayOf".uppercase(Locale.US), 12f, C.SUB).apply { letterSpacing = 0.08f })
         val statRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
         fun stat(value: String, label: String) = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL

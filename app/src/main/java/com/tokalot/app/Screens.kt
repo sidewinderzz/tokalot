@@ -431,7 +431,16 @@ class StatsScreen(private val a: MainActivity) {
         if (b.months.isNotEmpty()) {
             section(col, "Words per month")
             val max = maxOf(1L, b.months.maxOf { it.words })
-            col.addView(list(b.months.reversed().map { bar(it.short, it.words, max, "${it.dictations} dictations") }))
+            // The month in progress says so, with where it's heading at the pace so far.
+            val today = java.util.Calendar.getInstance()
+            val nowKey = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.US).format(today.time)
+            val day = today.get(java.util.Calendar.DAY_OF_MONTH)
+            val days = today.getActualMaximum(java.util.Calendar.DAY_OF_MONTH)
+            col.addView(list(b.months.reversed().map {
+                if (it.key != nowKey) return@map bar(it.short, it.words, max, "${it.dictations} dictations")
+                val track = WordStats.onTrack(it.words, day, days)?.let { w -> " · on track for ${MainActivity.compact(w.toInt())}" } ?: ""
+                bar(it.short, it.words, max, "So far, day $day of $days$track")
+            }))
         }
 
         section(col, "Highlights")
@@ -450,8 +459,8 @@ class StatsScreen(private val a: MainActivity) {
         }
         fun plural(n: Int, word: String) = "$n $word${if (n == 1) "" else "s"}"
         b.best?.let { fact("Best month", "${MainActivity.compact(it.words.toInt())} words", it.label) }
-        if (b.months.size > 1) fact("Average month", "${MainActivity.compact(b.average.toInt())} words")
-        if (b.words > 0) fact("Typing it would have taken", WordStats.typingTime(b.words), "At 40 words a minute")
+        if (b.months.size > 1) fact("Average month", "${MainActivity.compact(b.average.toInt())} words", "Not counting this month yet")
+        if (b.words > 0) fact("Typing it would have taken", WordStats.typingTime(b.words), "At the average phone typing speed, ${WordStats.TYPING_WPM} words a minute")
         fact("That's about", WordStats.equivalent(b.words))
         b.pace?.let { fact("Speaking pace", "${Math.round(it)} words a minute") }
         if (b.longest > 0) fact("Longest dictation", plural(b.longest, "word"),
