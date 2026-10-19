@@ -511,12 +511,8 @@ public sealed class MainWindow : Window
         var cells = new[] { Stat(Ui.Compact(m.Words), "words"), Stat(m.Dictations.ToString(CultureInfo.InvariantCulture), "dictations"), Stat(pace, "words a minute") };
         for (int i = 0; i < 3; i++) { Grid.SetColumn(cells[i], i); stats.Children.Add(cells[i]); }
         var statCard = Ui.Stack(Ui.Text(DateTime.Now.ToString("MMMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant(), 12, C.Sub, bold: true), stats);
-        if (m.Fillers + m.Corrections > 0)
-            statCard.Children.Add(Spaced(Ui.Text($"Cleaned up {Plural(m.Fillers, "filler word")} and {Plural(m.Corrections, "self-correction")}", 13, C.Sub), 0, 10, 0, 0));
-        // Every device that syncs, once there's more than this one in the sync file.
-        if (Sync.AllDevices() is { Each.Count: > 1 } everywhere)
-            statCard.Children.Add(Spaced(Ui.Text($"On all {everywhere.Each.Count} devices: {Ui.Compact(everywhere.Month)} words this month · {Ui.Compact(everywhere.Total)} all time", 13, C.Sub), 0, 10, 0, 0));
-        statCard.Children.Add(Spaced(Ui.Text("See all your word stats ›", 13, C.Link), 0, 10, 0, 0));
+        // Clean-ups, other devices and all-time totals live on the word stats page; Home keeps just the three numbers.
+        statCard.Children.Add(Spaced(Ui.Text("View stats ›", 13, C.Sub), 0, 10, 0, 0));
         var sc = Ui.Card(statCard, 22);
         sc.Cursor = Cursors.Hand;
         sc.MouseLeftButtonUp += (_, _) => Go(Page.Stats);
