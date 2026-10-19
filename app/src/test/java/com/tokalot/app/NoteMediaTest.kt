@@ -92,4 +92,25 @@ class NoteMediaTest {
         assertEquals("0:05", NoteMedia.clock(5.9))
         assertEquals("4:12", NoteMedia.clock(252.0))
     }
+
+    @Test fun voiceIsFoundOverSteadyNoise() {
+        // 1 s of tractor-like hum at -40 dB, 1 s of speech at -15 dB, 2 s of hum, 1 s of speech.
+        val db = FloatArray(250) { i -> if (i in 50 until 100 || i in 200 until 250) -15f else -40f }
+        val speech = NoteMedia.speechFrames(db)
+        assertTrue(speech[75] && speech[225])
+        assertTrue(!speech[150])
+        val cuts = NoteMedia.silenceCuts(speech, emptyList(), 5.0)
+        assertEquals(1, cuts.filter { it.start > 1.5 && it.endInclusive < 4.5 }.size)
+    }
+
+    @Test fun silenceNeverCutsAWordWhisperHeard() {
+        val speech = BooleanArray(250) { it < 50 }
+        val cuts = NoteMedia.silenceCuts(speech, listOf(Word("soft", 2.0, 2.4)), 5.0)
+        assertTrue(cuts.none { it.start < 2.3 && it.endInclusive > 2.1 })
+    }
+
+    @Test fun shortPausesStay() {
+        val speech = BooleanArray(100) { it !in 40 until 60 } // a 0.4 s pause
+        assertTrue(NoteMedia.silenceCuts(speech, emptyList(), 2.0).isEmpty())
+    }
 }

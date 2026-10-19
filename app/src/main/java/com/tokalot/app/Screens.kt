@@ -373,7 +373,7 @@ class NotesScreen(private val a: MainActivity) {
                 val media = NoteImport.info(this, n.id)
                 val voice = media?.audio != null
                 val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
-                val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}" else time
+                val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}${media.source?.let { " · from $it" } ?: ""}" else time
                 val preview = n.text.trim().replace(Regex("\\s+"), " ")
                 c.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL

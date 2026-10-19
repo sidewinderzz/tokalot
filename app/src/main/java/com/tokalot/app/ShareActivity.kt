@@ -46,14 +46,23 @@ class ShareActivity : Activity() {
             prefs.notesBeta = true
             runCatching { StartTile.setNoteTile(this, true) }
         }
+        val source = sourceName()
         var saved = 0
         for (u in uris) {
             val mime = contentResolver.getType(u) ?: i.type
             if (mime != null && !mime.startsWith("audio/") && mime != "application/ogg") continue
-            if (NoteImport.addAudio(this, u, mime)) saved++
+            // Text shared with a recording (WhatsApp adds its own line) stays with that recording, not a note of its own.
+            if (NoteImport.addAudio(this, u, mime, source, text.ifEmpty { null })) saved++
         }
-        // A caption that came with a recording is part of the share; text alone is the note.
-        if (text.isNotEmpty() && (uris.isEmpty() || saved > 0)) { NoteImport.addText(this, text); saved++ }
+        if (text.isNotEmpty() && uris.isEmpty()) { NoteImport.addText(this, text); saved++ }
         return saved
+    }
+
+    /** The app the share came from, by name ("WhatsApp"), when Android says which; null otherwise. */
+    private fun sourceName(): String? {
+        val pkg = referrer?.takeIf { it.scheme == "android-app" }?.host ?: callingPackage ?: return null
+        if (pkg.startsWith("com.whatsapp")) return "WhatsApp"
+        return runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrNull()
+            ?.takeIf { it.isNotBlank() && pkg != packageName }
     }
 }

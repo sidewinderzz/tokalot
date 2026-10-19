@@ -34,6 +34,12 @@ object NoteImport {
         val error get() = o.optString("error")
         val audio: String? get() = o.optString("audio").takeIf { it.isNotEmpty() }
         val duration get() = o.optDouble("duration", 0.0)
+        /** The app it was shared from ("WhatsApp"), if known. */
+        val source: String? get() = o.optString("source").takeIf { it.isNotEmpty() }
+        /** Where the recording has no voice, once it's been listened for (see [findSilence]). */
+        val silence: List<ClosedFloatingPointRange<Double>>? get() = o.optJSONArray("silence")?.let { a ->
+            List(a.length()) { a.getJSONArray(it).let { r -> r.getDouble(0)..r.getDouble(1) } }
+        }
         val words: List<NoteMedia.Word> get() = o.optJSONArray("words")?.let { a ->
             List(a.length()) { a.getJSONArray(it).let { w -> NoteMedia.Word(w.getString(0), w.getDouble(1), w.getDouble(2)) } }
         } ?: emptyList()
@@ -97,7 +103,7 @@ object NoteImport {
      * Copies a shared recording into the app (blocking, so the sharing app's permission to read it is still
      * there) and starts transcribing it in the background. Returns false if it couldn't be read.
      */
-    fun addAudio(ctx: Context, uri: Uri, mime: String?): Boolean {
+    fun addAudio(ctx: Context, uri: Uri, mime: String?, source: String? = null, caption: String? = null): Boolean {
         val app = ctx.applicationContext
         val id = freshId(app)
         val ext = extension(mime, uri.lastPathSegment)
@@ -113,6 +119,8 @@ object NoteImport {
         }
         update(app, id) {
             it.put("status", "pending").put("audio", file.name).put("mime", mime ?: "").put("duration", durationOf(file))
+            if (source != null) it.put("source", source)
+            if (caption != null) it.put("caption", caption)
         }
         transcribe(app, id)
         return true
@@ -141,6 +149,7 @@ object NoteImport {
                 val text = NoteMedia.text(words).ifBlank { throw IOException("No speech in this recording") }
                 update(app, id) { o ->
                     o.put("status", "done").remove("error")
+                    o.remove("silence")
                     o.put("words", JSONArray().also { a -> words.forEach { a.put(JSONArray().put(it.text).put(it.start).put(it.end)) } })
                     o.put("segments", JSONArray().also { a -> segments.forEach { a.put(JSONArray().put(it.start).put(it.end).put(it.text.trim())) } })
                     if (o.optDouble("duration", 0.0) <= 0 && words.isNotEmpty()) o.put("duration", words.last().end)
@@ -156,6 +165,81 @@ object NoteImport {
     }
 
     private fun changed() = main.post { Notes.onChange?.invoke() }
+
+    /**
+     * Listens through a recording for where someone is talking (blocking: call it off the main thread) and saves the
+     * stretches with no voice and no transcribed word, which Skip silence jumps over. Done once per recording.
+     */
+    fun findSilence(ctx: Context, id: Long): List<ClosedFloatingPointRange<Double>> {
+        info(ctx, id)?.silence?.let { return it }
+        val inf = info(ctx, id) ?: return emptyList()
+        val file = audioFile(ctx, id) ?: return emptyList()
+        val loudness = decodeLoudness(file) ?: return emptyList()
+        val cuts = NoteMedia.silenceCuts(NoteMedia.speechFrames(loudness.toFloatArray()), inf.words, inf.duration)
+        update(ctx, id) { o ->
+            o.put("silence", JSONArray().also { a -> cuts.forEach { a.put(JSONArray().put(it.start).put(it.endInclusive)) } })
+        }
+        return cuts
+    }
+
+    /** The recording's loudness every [NoteMedia.FRAME] seconds, decoded with the phone's own codecs. Null if it can't be read. */
+    private fun decodeLoudness(file: File): List<Float>? {
+        val ex = android.media.MediaExtractor()
+        var codec: android.media.MediaCodec? = null
+        return try {
+            ex.setDataSource(file.absolutePath)
+            val track = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                ?: return null
+            ex.selectTrack(track)
+            val format = ex.getTrackFormat(track)
+            var rate = format.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE)
+            var channels = format.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT)
+            val c = android.media.MediaCodec.createDecoderByType(format.getString(android.media.MediaFormat.KEY_MIME)!!)
+            codec = c
+            c.configure(format, null, null, 0)
+            c.start()
+            val out = ArrayList<Float>()
+            val state = FloatArray(4)
+            val info = android.media.MediaCodec.BufferInfo()
+            var inputDone = false
+            var mono = ShortArray(0)
+            while (true) {
+                if (!inputDone) {
+                    val i = c.dequeueInputBuffer(10_000)
+                    if (i >= 0) {
+                        val buf = c.getInputBuffer(i)!!
+                        val n = ex.readSampleData(buf, 0)
+                        if (n < 0) { c.queueInputBuffer(i, 0, 0, 0, android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM); inputDone = true }
+                        else { c.queueInputBuffer(i, 0, n, ex.sampleTime, 0); ex.advance() }
+                    }
+                }
+                val o = c.dequeueOutputBuffer(info, 10_000)
+                if (o == android.media.MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    rate = c.outputFormat.getInteger(android.media.MediaFormat.KEY_SAMPLE_RATE)
+                    channels = c.outputFormat.getInteger(android.media.MediaFormat.KEY_CHANNEL_COUNT)
+                } else if (o >= 0) {
+                    val buf = c.getOutputBuffer(o)!!.order(java.nio.ByteOrder.nativeOrder()).asShortBuffer()
+                    val frames = buf.remaining() / channels.coerceAtLeast(1)
+                    if (mono.size < frames) mono = ShortArray(frames)
+                    for (f in 0 until frames) {
+                        var sum = 0
+                        for (ch in 0 until channels) sum += buf.get(f * channels + ch)
+                        mono[f] = (sum / channels.coerceAtLeast(1)).toShort()
+                    }
+                    NoteMedia.frameLoudness(mono, frames, rate, state, out)
+                    c.releaseOutputBuffer(o, false)
+                    if (info.flags and android.media.MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                }
+            }
+            out
+        } catch (e: Exception) {
+            null
+        } finally {
+            runCatching { codec?.stop() }
+            runCatching { codec?.release() }
+            ex.release()
+        }
+    }
 
     private fun durationOf(file: File): Double = runCatching {
         MediaMetadataRetriever().run {

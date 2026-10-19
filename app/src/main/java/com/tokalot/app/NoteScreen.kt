@@ -12,7 +12,6 @@ import android.text.style.ClickableSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -38,6 +37,11 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     private var duration = 0.0
     private val opts by lazy { a.getSharedPreferences("note_player", 0) }
 
+    private var silenceCuts: List<ClosedFloatingPointRange<Double>> = emptyList()
+    private var folded = true
+    private var summaryShown = false
+    private var timelineShown = false
+
     fun build(): View = with(a) {
         val col = column()
         val note = Notes.all(this).firstOrNull { it.id == id }
@@ -49,93 +53,158 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
         val file = NoteImport.audioFile(this, id)
         words = info?.words.orEmpty()
         duration = info?.duration ?: 0.0
-        val stamp = java.text.SimpleDateFormat("EEE, MMM d · h:mm a", java.util.Locale.US).format(java.util.Date(note.time))
-        col.addView(heading(if (file != null) "Voice note" else "Note", 34f), lp().margins(this, t = 8))
-        col.addView(text(if (file != null && duration > 0) "$stamp · ${NoteMedia.clock(duration)}" else stamp, 14f, C.SUB), lp().margins(this, b = 14))
+        val voice = file != null && words.isNotEmpty()
+        silenceCuts = info?.silence.orEmpty()
+        if (voice && info?.silence == null) Thread {
+            val found = runCatching { NoteImport.findSilence(this, id) }.getOrDefault(emptyList())
+            runOnUiThread { if (!released) { silenceCuts = found; recut() } }
+        }.start()
+        recut()
 
-        if (file != null && words.isNotEmpty()) {
-            col.addView(playerCard(file), lp().margins(this, b = 12))
-            col.addView(card(20).apply {
-                transcript = text(spanned(), 17f).apply {
-                    movementMethod = LinkMovementMethod.getInstance()
-                    highlightColor = 0
-                    setLineSpacing(0f, 1.25f)
-                }
-                addView(transcript)
-            }, lp().margins(this, b = 12))
-        } else {
-            col.addView(card(20).apply {
-                addView(text(note.text, 17f).apply { setTextIsSelectable(true); setLineSpacing(0f, 1.2f) })
-            }, lp().margins(this, b = 12))
-        }
+        // A note from a recording reads like any other note: its text first, with the player in a slim bar below.
+        val stamp = java.text.SimpleDateFormat("EEE, MMM d · h:mm a", java.util.Locale.US).format(java.util.Date(note.time)) +
+            (info?.source?.let { " · from $it" } ?: "")
+        val more = iconButton(R.drawable.ic_more, "More", 22, C.SUB) {}
+        col.addView(row(text(stamp, 14f, C.SUB).apply {
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }, more).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this, t = 4, b = 8))
 
-        // The summary and timeline stay out of the way: a small button each under the note, opened on a tap.
-        val summary = summaryCard(note.text, file != null).apply { visibility = View.GONE }
+        val body = if (voice) text(spanned(), 17f).apply {
+            movementMethod = LinkMovementMethod.getInstance()
+            highlightColor = 0
+            setLineSpacing(0f, 1.25f)
+            transcript = this
+        } else text(note.text, 17f).apply { setTextIsSelectable(true); setLineSpacing(0f, 1.2f) }
+        col.addView(card(20).apply { addView(body) }, lp())
+        val foldLink = link("", 14f) {}
+        col.addView(foldLink, lp().margins(this, l = 4))
+
+        // Summary and Timeline: two small buttons under the text, each opening below it. While one is open a long
+        // text folds up to a few lines, so the summary or timeline is in view.
+        val summary = summaryCard(note.text, voice)
         val segments = info?.segments.orEmpty()
-        val timeline = if (file != null && segments.size >= 2) indexCard(segments).apply { visibility = View.GONE } else null
-        fun toggle(v: View, open: () -> Unit) {
-            v.visibility = if (v.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-            if (v.visibility == View.VISIBLE) open()
+        val timeline = if (voice && segments.size >= 2) indexCard(segments) else null
+        val buttons = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        fun layout() {
+            summary.visibility = if (summaryShown) View.VISIBLE else View.GONE
+            timeline?.visibility = if (timelineShown) View.VISIBLE else View.GONE
+            val long = body.lineCount > 6 || note.text.length > 400
+            val fold = (summaryShown || timelineShown) && long
+            body.maxLines = if (fold && folded) 5 else Int.MAX_VALUE
+            body.ellipsize = if (fold && folded) android.text.TextUtils.TruncateAt.END else null
+            foldLink.visibility = if (fold) View.VISIBLE else View.GONE
+            foldLink.text = if (folded) "Show the whole text" else "Fold it up"
+            buttons.removeAllViews()
+            buttons.addView(pill("Summary", filled = summaryShown) {
+                summaryShown = !summaryShown; folded = true; layout(); if (summaryShown) summaryOpened?.invoke()
+            })
+            if (timeline != null) {
+                buttons.addView(spacer(wDp = 8))
+                buttons.addView(pill("Timeline", filled = timelineShown) {
+                    timelineShown = !timelineShown; folded = true; layout(); if (timelineShown) indexOpened?.invoke()
+                })
+            }
         }
-        val actions = mutableListOf<View>(pill("Summary") { toggle(summary) { summaryOpened?.invoke() } })
-        if (timeline != null) actions += listOf(spacer(wDp = 8), pill("Timeline") { toggle(timeline) { indexOpened?.invoke() } })
-        actions += listOf(
-            weightSpacer(),
-            iconButton(R.drawable.ic_copy, "Copy note", 20, C.SUB) { copy(note.text) },
-            iconButton(R.drawable.ic_share, "Share note", 20, C.SUB) {
+        foldLink.setOnClickListener { folded = !folded; layout() }
+        col.addView(buttons, lp().margins(this, t = 4, b = 12))
+        col.addView(summary, lp().margins(this, b = 12))
+        timeline?.let { col.addView(it, lp().margins(this, b = 12)) }
+        layout()
+
+        // The less used settings and actions sit behind the "..." button.
+        more.setOnClickListener {
+            val items = mutableListOf<Pair<String, () -> Unit>>(
+                "Summary length: ${NoteMedia.LEVEL_NAMES[summaryLevel() - 1]}" to {
+                    choose("Summary length", NoteMedia.LEVEL_NAMES.toList(), summaryLevel() - 1) { i ->
+                        opts.edit().putInt("level", i + 1).apply()
+                        summaryLevelChanged?.invoke()
+                    }
+                    Unit
+                },
+            )
+            if (voice) {
+                items += "Skip silence: ${if (opts.getBoolean("silence", true)) "on" else "off"}" to {
+                    opts.edit().putBoolean("silence", !opts.getBoolean("silence", true)).apply(); recut()
+                }
+                items += "Skip ums: ${if (opts.getBoolean("ums", true)) "on" else "off"}" to {
+                    opts.edit().putBoolean("ums", !opts.getBoolean("ums", true)).apply(); recut()
+                }
+            }
+            items += "Copy text" to { copy(note.text) }
+            items += "Share" to {
                 startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
                     .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, note.text), "Share note"))
-            },
-            iconButton(R.drawable.ic_delete, "Delete note", 20, C.SUB) {
+            }
+            items += "Delete note" to {
                 confirm(if (file != null) "Delete this note and its recording? The text stays in history." else "Delete this note? It stays in history.", "Delete") {
                     release()
                     if (runCatching { Notes.delete(this, id) }.isFailure) toast("Couldn't delete the note")
                     @Suppress("DEPRECATION") onBackPressed()
                 }
-            },
-        )
-        col.addView(row(*actions.toTypedArray()).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this, b = 12))
-        col.addView(summary, lp().margins(this, b = 12))
-        timeline?.let { col.addView(it, lp().margins(this, b = 12)) }
-        scroll(col)
+                Unit
+            }
+            popupMenu(more, items)
+        }
+
+        if (!voice) return scroll(col)
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll(col), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(View(this@with).apply { setBackgroundColor(C.LINE) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)))
+            addView(playerBar(file!!), lp())
+        }
+    }
+
+    private fun summaryLevel() = opts.getInt("level", 3).coerceIn(1, 5)
+
+    /** What playback jumps over: stretches with no voice (heard in the recording itself) and "um"s, as switched on. */
+    private fun recut() {
+        cuts = NoteMedia.merge((if (opts.getBoolean("silence", true)) silenceCuts else emptyList()) +
+            (if (opts.getBoolean("ums", true)) NoteMedia.fillerCuts(words) else emptyList()))
     }
 
     // ---------- the player ----------
 
-    private fun playerCard(file: java.io.File): View = with(a) {
-        val c = card(16)
+    private val speeds = floatArrayOf(1f, 1.25f, 1.5f, 2f)
+    private var speedLabelView: TextView? = null
+
+    private fun speed() = opts.getFloat("speed", 1f).takeIf { it in speeds } ?: 1f
+
+    private fun speedLabel() = speed().let { if (it == it.toInt().toFloat()) "${it.toInt()}×" else "$it×" }
+
+    /** The slim bar under the note: play, the position, the time and the speed. */
+    private fun playerBar(file: java.io.File): View = with(a) {
         playButton = iconButton(R.drawable.ic_play, "Play", 26) { toggle(file) }
-        clock = text("0:00 / ${NoteMedia.clock(duration)}", 14f, C.SUB).apply { fontFeatureSettings = "tnum" }
+        clock = text("0:00 / ${NoteMedia.clock(duration)}", 13f, C.SUB).apply { fontFeatureSettings = "tnum" }
         seek = SeekBar(this).apply {
             max = (duration * 1000).toInt().coerceAtLeast(1)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) { if (fromUser) player?.seekTo(p) }
+                override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) {
+                    if (fromUser) player?.let { seekingTo = p / 1000.0; it.seekTo(p.toLong(), MediaPlayer.SEEK_CLOSEST); show(p) }
+                }
                 override fun onStartTrackingTouch(s: SeekBar) {}
                 override fun onStopTrackingTouch(s: SeekBar) {}
             })
         }
-        c.addView(row(playButton!!, seek!!.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) }, clock!!).apply {
-            gravity = Gravity.CENTER_VERTICAL
-        })
-        val skipRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        val saved = text("", 13f, C.SUB)
-        fun redraw() {
-            skipRow.removeAllViews()
-            val silence = opts.getBoolean("silence", true)
-            val ums = opts.getBoolean("ums", true)
-            cuts = NoteMedia.merge((if (silence) NoteMedia.gapCuts(words, duration) else emptyList()) +
-                (if (ums) NoteMedia.fillerCuts(words) else emptyList()))
-            skipRow.addView(pill("Skip silence", filled = silence) { opts.edit().putBoolean("silence", !silence).apply(); redraw() })
-            skipRow.addView(spacer(wDp = 8))
-            skipRow.addView(pill("Skip ums", filled = ums) { opts.edit().putBoolean("ums", !ums).apply(); redraw() })
-            skipRow.addView(spacer(wDp = 10))
-            val total = NoteMedia.total(cuts)
-            saved.text = if (total >= 1) "Saves ${NoteMedia.clock(total)}" else ""
-            skipRow.addView(saved)
+        val speedPill = pill(speedLabel(), desc = "Playback speed") {
+            val next = speeds[(speeds.indexOf(speed()) + 1) % speeds.size]
+            opts.edit().putFloat("speed", next).apply()
+            speedLabelView?.text = speedLabel()
+            applySpeed()
         }
-        redraw()
-        c.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(skipRow) }, lp().margins(this, t = 6))
-        c
+        speedLabelView = speedPill.getChildAt(0) as? TextView
+        row(playButton!!, seek!!.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+            clock!!, spacer(wDp = 6), speedPill).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(C.CARD)
+            setPadding(dp(12), dp(6), dp(16), dp(8))
+        }
+    }
+
+    /** Only while playing: setting a speed on a paused player starts it. */
+    private fun applySpeed() {
+        val p = player ?: return
+        if (p.isPlaying) runCatching { p.playbackParams = p.playbackParams.setSpeed(speed()) }
     }
 
     /** The transcript with every word tappable. The tap jumps there and plays. */
@@ -164,6 +233,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             MediaPlayer().apply {
                 setDataSource(file.absolutePath)
                 prepare()
+                setOnSeekCompleteListener { seekingTo = null }
                 setOnCompletionListener { playButton?.setImageResource(R.drawable.ic_play); show(0) }
                 if (this@NoteScreen.duration <= 0) this@NoteScreen.duration = getDuration() / 1000.0
             }.also { player = it }
@@ -177,6 +247,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
         val p = prepare(file) ?: return
         if (p.isPlaying) pause() else {
             p.start()
+            applySpeed()
             playButton?.setImageResource(R.drawable.ic_pause)
             playButton?.contentDescription = "Pause"
             main.removeCallbacksAndMessages(null) // one ticker at a time
@@ -187,8 +258,9 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     private fun jump(t: Double) {
         val file = NoteImport.audioFile(a, id) ?: return
         val p = prepare(file) ?: return
-        p.seekTo((t * 1000).toInt())
-        if (!p.isPlaying) toggle(file) else show(p.currentPosition)
+        seekingTo = t
+        p.seekTo((t * 1000).toLong(), MediaPlayer.SEEK_CLOSEST)
+        if (!p.isPlaying) toggle(file) else show((t * 1000).toInt())
     }
 
     /** About 20 times a second while playing: jumps over a cut, moves the highlight and the bar. */
@@ -196,10 +268,12 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
         if (released) return
         val p = player ?: return
         if (!p.isPlaying) return
-        val ms = p.currentPosition
-        NoteMedia.skipTo(cuts, ms / 1000.0)?.let { to ->
-            if (to >= duration - 0.05) { p.pause(); p.seekTo(0); playButton?.setImageResource(R.drawable.ic_play); show(0); return }
-            p.seekTo((to * 1000).toInt())
+        val now = p.currentPosition / 1000.0
+        // A jump takes a moment to land; until it does, the old position would ask for the same jump again.
+        if (seekingTo == null) NoteMedia.skipTo(cuts, now)?.let { to ->
+            if (to >= duration - 0.05) { p.pause(); p.seekTo(0); seekingTo = null; playButton?.setImageResource(R.drawable.ic_play); show(0); return }
+            seekingTo = to
+            p.seekTo((to * 1000).toLong(), MediaPlayer.SEEK_CLOSEST)
         }
         show(p.currentPosition)
         main.postDelayed({ tick() }, 50)
@@ -223,6 +297,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     }
 
     private var current: BackgroundColorSpan? = null
+    private var seekingTo: Double? = null
 
     fun pause() {
         player?.takeIf { it.isPlaying }?.pause()
@@ -243,20 +318,13 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     private fun summaryCard(noteText: String, voice: Boolean): View = with(a) {
         val c = card(18)
         c.addView(text("Summary", 16f, bold = true))
-        val levels = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val lengthLabel = text("", 13f, C.SUB)
+        c.addView(lengthLabel, lp().margins(this, t = 2, b = 8))
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        var level = opts.getInt("level", 2)
+        var level = summaryLevel()
         var busy = false
         fun fill() {
-            levels.removeAllViews()
-            NoteMedia.LEVEL_NAMES.forEachIndexed { i, name ->
-                if (i > 0) levels.addView(spacer(wDp = 6))
-                levels.addView(pill(name, filled = level == i + 1) {
-                    level = i + 1
-                    opts.edit().putInt("level", level).apply()
-                    if (!busy && NoteImport.info(this, id)?.summary(level) == null) summarize(level) else fill()
-                })
-            }
+            lengthLabel.text = "${NoteMedia.LEVEL_NAMES[level - 1]} · change the length in the ⋮ menu"
             body.removeAllViews()
             val saved = NoteImport.info(this, id)?.summary(level)
             when {
@@ -273,6 +341,11 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
         }
         // Opening it asks for a summary at the chosen length if there isn't one yet.
         summaryOpened = { if (!busy && NoteImport.info(this, id)?.summary(level) == null) summarize(level) }
+        // A new length from the menu shows that summary, making it first if the summary is open.
+        summaryLevelChanged = {
+            level = summaryLevel()
+            if (summaryShown && !busy && NoteImport.info(this, id)?.summary(level) == null) summarize(level) else fill()
+        }
         // Kept here so fill() and the call share the same busy flag.
         runner = { lv ->
             busy = true
@@ -293,7 +366,6 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             }.start()
         }
         fill()
-        c.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(levels) }, lp().margins(this, t = 6, b = 6))
         c.addView(body)
         c
     }
@@ -301,6 +373,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     private var runner: ((Int) -> Unit)? = null
     private var summaryOpened: (() -> Unit)? = null
     private var indexOpened: (() -> Unit)? = null
+    private var summaryLevelChanged: (() -> Unit)? = null
     private fun summarize(level: Int) { runner?.invoke(level) }
 
     // ---------- the index ----------

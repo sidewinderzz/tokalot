@@ -6,6 +6,14 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.38 · 2026-10-19
+- Notes is a clean list now: tap a note to open it. No more Open buttons.
+- A voice note shared from WhatsApp (or any app) is one note, not two. It opens like any other note, with the transcription first and a slim player at the bottom.
+- Tap any word in a voice note's transcription to play from there. The player has a seek bar and speeds of 1×, 1.25×, 1.5× and 2×, and you can replay a note any time.
+- Summary and Timeline are two small buttons under the transcription. They open right below it, and a long transcription folds up while one is open (tap "Show the whole text" to see it all).
+- Summary length, skip silence, skip ums, copy, share and delete are in the ⋮ menu on the note.
+- Skip silence listens for voice in the recording itself, so it works with an engine or wind in the background and no longer breaks playback or cuts off words. It's on by default.
+
 ## 1.37 · 2026-10-19
 - Home's stats card is simpler: just your three numbers and a gray View stats link. Clean-ups and the all-devices totals are on the word stats page.
 - The month in progress shows as partial: Home says how far into the month you are (Day 19 of 31), and the stats page reads "So far" with where you're on track to finish. The average month leaves the unfinished month out.
