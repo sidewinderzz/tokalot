@@ -61,12 +61,32 @@ public static class Updater
         }
     }
 
-    /** Downloads the pending update, then restarts into it. [beforeRestart] runs just before the app exits. */
-    public static async Task DownloadAndRestart(Action<int> progress, Action? beforeRestart = null)
+    /**
+     * Looks again for the newest build, downloads it, then restarts into it. [beforeRestart] runs just
+     * before the app exits. Returns the version being installed, or null when nothing newer is there.
+     *
+     * The banner may be hours old, and publishing a newer build removes the older one's package from
+     * the feed, so downloading what an earlier check found could get a 404. Checking right before
+     * downloading always fetches the newest; if a build is published mid-download, it checks once more.
+     */
+    public static async Task<string?> DownloadAndRestart(Action<int> progress, Action? beforeRestart = null)
     {
-        if (pending == null) return;
-        await Manager.DownloadUpdatesAsync(pending, progress);
+        for (var attempt = 0; ; attempt++)
+        {
+            pending = await Manager.CheckForUpdatesAsync();
+            if (pending == null) return null;
+            try
+            {
+                await Manager.DownloadUpdatesAsync(pending, progress);
+                break;
+            }
+            catch when (attempt == 0)
+            {
+                progress(0);
+            }
+        }
         beforeRestart?.Invoke();
         Manager.ApplyUpdatesAndRestart(pending);
+        return AvailableVersion;
     }
 }

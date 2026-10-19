@@ -292,6 +292,8 @@ public sealed class App : Application
         {
             await Updater.DownloadAndRestart(p => Dispatcher.BeginInvoke(() =>
             {
+                // The fresh check right before downloading may have found a newer build than the banner named.
+                UpdateVersion = Updater.AvailableVersion ?? UpdateVersion;
                 UpdateProgress = p;
                 window?.SetBannerProgress(p);
             }), beforeRestart: () =>
@@ -301,8 +303,10 @@ public sealed class App : Application
                 Controller?.SaveBeforeExit();
                 if (tray != null) tray.Visible = false;
             });
-            // Still here: there was nothing to install after all.
+            // Still here: there was nothing to install after all (the release was withdrawn).
             UpdateProgress = null;
+            UpdateVersion = null;
+            if (updateItem != null) updateItem.Visible = false;
             Refresh();
         }
         catch (Exception e)
