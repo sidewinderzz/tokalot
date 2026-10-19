@@ -39,6 +39,12 @@ public static class NoteImport
         public List<NoteMedia.Segment> Segments => (O["segments"] as JsonArray)?.Select(s =>
             new NoteMedia.Segment((double)s![0]!, (double)s[1]!, (string)s[2]!)).ToList() ?? new();
         public string? Summary(int level) => (string?)O["summaries"]?[level.ToString()] is { Length: > 0 } s ? s : null;
+        public List<NoteMedia.Word> Words => (O["words"] as JsonArray)?.Select(w =>
+            new NoteMedia.Word((string)w![0]!, (double)w[1]!, (double)w[2]!)).ToList() ?? new();
+        /** The app a shared recording came from ("WhatsApp"), if known. */
+        public string? Source => (string?)O["source"] is { Length: > 0 } src ? src : null;
+        /** The stretches with no voice, found once and kept (see NoteMedia.SilenceCuts). */
+        public List<NoteMedia.Cut>? Silence => (O["silence"] as JsonArray)?.Select(c => new NoteMedia.Cut((double)c![0]!, (double)c[1]!)).ToList();
         public List<NoteMedia.Point>? Index => (O["index"] as JsonArray)?.Select(p =>
             new NoteMedia.Point((double)p![0]!, (string)p[1]!, (string)p[2]!)).ToList();
     }
@@ -155,6 +161,7 @@ public static class NoteImport
             {
                 o["status"] = "done";
                 o.Remove("error");
+                o.Remove("silence"); // found again from the new word times
                 o["words"] = new JsonArray(words.Select(w => (JsonNode)new JsonArray(w.Text, w.Start, w.End)).ToArray());
                 o["segments"] = new JsonArray(segments.Select(g => (JsonNode)new JsonArray(g.Start, g.End, g.Text.Trim())).ToArray());
                 o["duration"] = duration > 0 ? duration : words.Count > 0 ? words[^1].End : 0;

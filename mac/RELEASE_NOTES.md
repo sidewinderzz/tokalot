@@ -2,6 +2,14 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.8.0
+
+- Notes is a clean list now: click a note to open it. Each note opens on its own page with its text first, **Summary** and **Timeline** as small buttons under it that open right below it (a long text folds up while one is open), and the rest (summary length, skip silence, skip ums, copy, delete) in the **⋮** menu. Esc or **Notes** goes back to the list.
+- Recordings play inside Tokalot: click any word to hear it from there, with a player along the bottom of the window (play/pause, a position bar, the time, and 1×, 1.25×, 1.5× or 2× speed). The word being said is lit up as it plays.
+- Skip silence listens for voice in the recording itself, so steady noise like an engine or wind counts as silence and words are never cut. Playing from any point, speeds and skipping need **ffplay** (part of ffmpeg) or **mpv**; finding the silence needs **ffmpeg**. Install them with `brew install ffmpeg` (or mpv). Without them a recording plays from the start, through macOS's own player.
+- Summary length, playback speed and the skip switches sync with your other devices.
+- New: **Settings › AI assistants › Let AI assistants read my notes** makes Tokalot a read-only MCP server, so Claude Desktop, Claude Code or any MCP app on this computer can list, search and read your notes. Off by default.
+
 ## New in 0.7.0
 
 - Voice notes (beta) can now turn recordings into notes. Switch on Settings › Recording › Voice notes (beta), open Notes, and click **Add a recording** to pick an audio file (a WhatsApp voice message saved to this computer, say: .opus, .ogg, .m4a, .mp3, .wav and more). It's transcribed with Groq Whisper (or OpenAI) and saved as a note. A recording that fails stays on the page with Try again.

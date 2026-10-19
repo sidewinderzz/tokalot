@@ -13,6 +13,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Summary and Timeline are two small buttons under the transcription. They open right below it, and a long transcription folds up while one is open (tap "Show the whole text" to see it all).
 - Summary length, skip silence, skip ums, copy, share and delete are in the ⋮ menu on the note.
 - Skip silence listens for voice in the recording itself, so it works with an engine or wind in the background and no longer breaks playback or cuts off words. It's on by default.
+- Summary length, playback speed and the skip switches sync with your other devices.
 
 ## 1.37 · 2026-10-19
 - Home's stats card is simpler: just your three numbers and a gray View stats link. Clean-ups and the all-devices totals are on the word stats page.

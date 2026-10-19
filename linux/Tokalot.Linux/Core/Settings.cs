@@ -115,6 +115,13 @@ public sealed class Settings
     public bool Polish { get; set; }
     /** Beta: a Notes page for voice notes (synced from other devices) and recordings added from files. */
     public bool NotesBeta { get; set; }
+    /** Voice notes: jump over stretches with no voice and over "um"s while playing, where this computer can. */
+    public bool NoteSkipSilence { get; set; } = true;
+    public bool NoteSkipUms { get; set; } = true;
+    /** How long a note's summary is, 1 (one line) to 5 (everything). */
+    public int NoteSummaryLevel { get; set; } = 3;
+    /** Voice note playback speed: 1, 1.25, 1.5 or 2. */
+    public double NoteSpeed { get; set; } = 1;
     /** The Notes beta card was answered or closed. */
     public bool NotesFeedbackDone { get; set; }
     /** "Let AI assistants read my notes": whether "Tokalot --mcp" answers (see NotesMcp). Off unless turned on. This PC only: not synced. */

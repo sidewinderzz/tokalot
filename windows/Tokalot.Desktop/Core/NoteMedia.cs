@@ -70,6 +70,166 @@ public static class NoteMedia
         return b.ToString();
     }
 
+    /** The index of the word being said at [t], or -1 before the first. */
+    public static int WordAt(IReadOnlyList<Word> words, double t)
+    {
+        int lo = 0, hi = words.Count - 1, found = -1;
+        while (lo <= hi)
+        {
+            var mid = (lo + hi) / 2;
+            if (words[mid].Start <= t) { found = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        return found;
+    }
+
+    // ---------- what playback can skip ----------
+
+    public readonly record struct Cut(double Start, double End);
+
+    /** Sounds that are never a word. */
+    private static readonly HashSet<string> Disfluencies = new()
+    {
+        "uh", "uhh", "uhhh", "um", "umm", "ummm", "er", "err", "erm", "ah", "ahh",
+        "eh", "hm", "hmm", "hmmm", "mm", "mmm", "mhm", "mmhm", "uh-huh", "huh",
+    };
+
+    /** Real words that are filler only when set off by a comma or a pause ("I like that" must survive). */
+    private static readonly HashSet<string> SoftFillers = new()
+    {
+        "like", "basically", "literally", "actually", "honestly", "obviously", "seriously", "anyway", "right", "well", "so",
+    };
+    private static readonly (string, string)[] SoftPhrases = { ("you", "know"), ("i", "mean"), ("sort", "of"), ("kind", "of"), ("you", "see") };
+
+    private const double SetOffPause = 0.18;
+    /** Left on each side of a cut so a jump never clips the start of a word. */
+    private const double Pad = 0.06;
+
+    private static bool SetOff(IReadOnlyList<Word> words, int i)
+    {
+        var raw = words[i].Text.Trim();
+        if (raw.Length > 0 && ",.!?…;".Contains(raw[^1])) return true;
+        var before = i > 0 ? words[i].Start - words[i - 1].End : SetOffPause;
+        var after = i + 1 < words.Count ? words[i + 1].Start - words[i].End : SetOffPause;
+        return before >= SetOffPause || after >= SetOffPause;
+    }
+
+    public static HashSet<int> FillerIndices(IReadOnlyList<Word> words)
+    {
+        var found = new HashSet<int>();
+        for (var i = 0; i < words.Count; i++)
+        {
+            var b = Bare(words[i].Text);
+            if (Disfluencies.Contains(b) || (SoftFillers.Contains(b) && SetOff(words, i))) found.Add(i);
+        }
+        for (var i = 0; i < words.Count - 1; i++)
+            if (SoftPhrases.Contains((Bare(words[i].Text), Bare(words[i + 1].Text))) && (SetOff(words, i) || SetOff(words, i + 1)))
+            { found.Add(i); found.Add(i + 1); }
+        return found;
+    }
+
+    /** Sorted, joined where they overlap or touch, and without the negligible ones. */
+    public static List<Cut> Merge(IEnumerable<Cut> ranges, double minLength = 0.08)
+    {
+        var output = new List<Cut>();
+        foreach (var r in ranges.Where(r => r.End - r.Start >= minLength).OrderBy(r => r.Start))
+        {
+            if (output.Count > 0 && r.Start <= output[^1].End + 0.02) output[^1] = new Cut(output[^1].Start, Math.Max(output[^1].End, r.End));
+            else output.Add(r);
+        }
+        return output;
+    }
+
+    public static List<Cut> FillerCuts(IReadOnlyList<Word> words) =>
+        Merge(FillerIndices(words).OrderBy(i => i).Select(i => new Cut(Math.Max(0, words[i].Start - 0.02), words[i].End + 0.02)), 0.03);
+
+    /** Where playback at [t] should jump to, or null when [t] isn't inside a cut. */
+    public static double? SkipTo(IReadOnlyList<Cut> cuts, double t)
+    {
+        foreach (var c in cuts) if (t >= c.Start && t < c.End - 0.01) return c.End;
+        return null;
+    }
+
+    // ---------- voice detection, for skipping silence ----------
+
+    /** Loudness is measured in frames this long, in seconds. */
+    public const double Frame = 0.02;
+    /** Kept around speech so a jump never clips a soft start or a trailing word. */
+    private const double Hangover = 0.25;
+    /** Stretches without speech shorter than this are left in. */
+    public const double MinSilence = 0.6;
+
+    /**
+     * Which frames hold speech, from their loudness in dB. The noise floor is measured from the recording itself
+     * (its quietest stretches), so a steady background (an engine, wind, a fan) counts as silence and only what
+     * stands clearly above it counts as speech. Short dips inside speech and the edges around it are kept.
+     */
+    public static bool[] SpeechFrames(float[] db)
+    {
+        var n = db.Length;
+        if (n == 0) return Array.Empty<bool>();
+        var sorted = (float[])db.Clone();
+        Array.Sort(sorted);
+        var floor = sorted[Math.Clamp((int)(n * 0.10), 0, n - 1)];
+        var loud = sorted[Math.Clamp((int)(n * 0.90), 0, n - 1)];
+        var threshold = floor + Math.Max(6f, (loud - floor) * 0.35f);
+        var output = new bool[n];
+        var pad = (int)(Hangover / Frame);
+        for (var i = 0; i < n; i++)
+            if (db[i] > threshold)
+                for (var k = Math.Max(0, i - pad); k <= Math.Min(n - 1, i + pad); k++) output[k] = true;
+        return output;
+    }
+
+    /**
+     * The stretches to skip as silence: no speech heard in the audio and no word placed there by the transcript.
+     * Requiring both keeps every word even where the word times are off or the detector misses a quiet one.
+     */
+    public static List<Cut> SilenceCuts(bool[] speech, IReadOnlyList<Word> words, double duration)
+    {
+        var quiet = new List<Cut>();
+        var i = 0;
+        while (i < speech.Length)
+        {
+            if (speech[i]) { i++; continue; }
+            var start = i;
+            while (i < speech.Length && !speech[i]) i++;
+            quiet.Add(new Cut(start * Frame, Math.Min(i * Frame, duration > 0 ? duration : i * Frame)));
+        }
+        var spoken = words.Select(w => new Cut(Math.Max(0, w.Start - Pad), w.End + Pad)).OrderBy(w => w.Start).ToList();
+        var cuts = new List<Cut>();
+        foreach (var q in quiet)
+        {
+            var from = q.Start;
+            foreach (var w in spoken)
+            {
+                if (w.End <= from) continue;
+                if (w.Start >= q.End) break;
+                if (w.Start > from) cuts.Add(new Cut(from, w.Start));
+                from = Math.Max(from, w.End);
+            }
+            if (from < q.End) cuts.Add(new Cut(from, q.End));
+        }
+        return Merge(cuts.Where(c => c.End - c.Start >= MinSilence));
+    }
+
+    /** Loudness in dB of each [Frame] of mono samples (-1 to 1), after a gentle high-pass that drops rumble below speech. */
+    public static List<float> FrameLoudness(IEnumerable<float> samples, int rate)
+    {
+        var output = new List<float>();
+        var per = Math.Max(1, (int)(rate * Frame));
+        var a = (float)(1.0 / (1.0 + 2 * Math.PI * 150.0 / rate)); // one-pole high-pass at about 150 Hz
+        float px = 0, py = 0, sum = 0;
+        var got = 0;
+        foreach (var x in samples)
+        {
+            var y = a * (py + x - px);
+            px = x; py = y;
+            sum += y * y;
+            if (++got >= per) { output.Add((float)(10 * Math.Log10(sum / got + 1e-10))); sum = 0; got = 0; }
+        }
+        return output;
+    }
+
     // ---------- summaries ----------
 
     private static readonly Dictionary<int, (string Instruction, int Bullets, int Cap)> Levels = new()

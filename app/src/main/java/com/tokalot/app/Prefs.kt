@@ -115,6 +115,9 @@ object Accents {
 }
 
 /** Pre-filled "Your instructions" for a fresh install; users can edit or clear it. */
+/** Playback speeds a voice note offers, in the order the speed button steps through them. */
+val NOTE_SPEEDS = floatArrayOf(1f, 1.25f, 1.5f, 2f)
+
 const val DEFAULT_INSTRUCTIONS = "Always write \"lol\" in lowercase."
 
 // Tolerant reads: a value of the wrong type (say, from a hand-edited backup) gives the
@@ -188,11 +191,13 @@ class Prefs(ctx: Context) {
             "autoStop" to "autostop", "quickSkip" to "quick_skip", "liveStt" to "live_stt", "weakSignal" to "weak_signal",
             "autoLanguage" to "autolang", "polish" to "polish", "sounds" to "sounds", "learnWords" to "learn_words",
             "notesBeta" to "notes_beta", "holdToTalk" to "hold", "haptics" to "haptics", "fitSentence" to "fit_sentence",
+            "noteSkipSilence" to "note_skip_silence", "noteSkipUms" to "note_skip_ums",
         )
 
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
         fun synced(key: String) = key in BOOLEANS.values || key in setOf(
             "stt", "cleanup", "theme", "accent", "sound_set", "note_phrases", "learned_words", "dismissed_words",
+            "note_level", "note_speed",
         ) || key.startsWith("sttmodel_") || key.startsWith("model_") || key.startsWith("app_")
 
         /** Whether a synced setting's value from the file is one this version can use. */
@@ -209,6 +214,8 @@ class Prefs(ctx: Context) {
                 "accent" -> v is Number && v.toLong() in 0L..0xFFFFFFFFL
                 "sttModels", "cleanupModels" -> strings()
                 "androidAppOverrides" -> strings { c -> AppCategory.values().any { it.name == c } }
+                "noteSummaryLevel" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 1..5
+                "noteSpeed" -> v is Number && NOTE_SPEEDS.any { Math.abs(it - v.toDouble()) < 0.001 }
                 "learnedWords", "dismissedWords" -> v is JSONArray && (0 until v.length()).all { v.opt(it) is String }
                 else -> name in BOOLEANS && v is Boolean
             }
@@ -395,6 +402,10 @@ class Prefs(ctx: Context) {
             "holdToTalk" to holdToTalk,
             "haptics" to haptics,
             "fitSentence" to fitSentence,
+            "noteSkipSilence" to noteSkipSilence,
+            "noteSkipUms" to noteSkipUms,
+            "noteSummaryLevel" to noteSummaryLevel,
+            "noteSpeed" to noteSpeed.toDouble(),
             "notePhrases" to notePhrases,
             "androidAppOverrides" to overrides("app_"),
         )
@@ -435,6 +446,8 @@ class Prefs(ctx: Context) {
             "cleanupModels" -> overrides("model_", v as JSONObject)
             "androidAppOverrides" -> overrides("app_", v as JSONObject)
             "accent" -> ed.putInt("accent", (v as Number).toLong().toInt())
+            "noteSummaryLevel" -> ed.putInt("note_level", (v as Number).toInt())
+            "noteSpeed" -> ed.putInt("note_speed", Math.round((v as Number).toDouble() * 100).toInt())
             "learnedWords" -> ed.putString("learned_words", strings(v as JSONArray))
             "dismissedWords" -> ed.putString("dismissed_words", strings(v as JSONArray))
             else -> BOOLEANS[name]?.let { ed.putBoolean(it, v as Boolean) }
@@ -597,6 +610,25 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putBoolean("fit_sentence", v).apply()
 
     /** Voice notes (beta): the Notes page, the "Voice note" Quick Settings tile and notes from the shortcut. */
+    /** On a voice note: jump over stretches with no voice, and over "um"s. */
+    var noteSkipSilence: Boolean
+        get() = sp.safeBoolean("note_skip_silence", true)
+        set(v) = sp.edit().putBoolean("note_skip_silence", v).apply()
+
+    var noteSkipUms: Boolean
+        get() = sp.safeBoolean("note_skip_ums", true)
+        set(v) = sp.edit().putBoolean("note_skip_ums", v).apply()
+
+    /** How long a note's summary is, 1 (one line) to 5 (everything). */
+    var noteSummaryLevel: Int
+        get() = sp.safeInt("note_level", 3).coerceIn(1, 5)
+        set(v) = sp.edit().putInt("note_level", v).apply()
+
+    /** Voice note playback speed, one of [NOTE_SPEEDS]. Kept as a percentage. */
+    var noteSpeed: Float
+        get() = (sp.safeInt("note_speed", 100) / 100f).takeIf { s -> NOTE_SPEEDS.any { Math.abs(it - s) < 0.001 } } ?: 1f
+        set(v) = sp.edit().putInt("note_speed", Math.round(v * 100)).apply()
+
     var notesBeta: Boolean
         get() = sp.safeBoolean("notes_beta", false)
         set(v) = sp.edit().putBoolean("notes_beta", v).apply()

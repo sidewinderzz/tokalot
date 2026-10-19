@@ -49,6 +49,8 @@ public sealed class MainWindow : Window
     private Snippet? editing;
     private bool editingNew;
     private readonly Action onHistory, onPlayer, onNoteImport;
+    private readonly Border playerHost = new() { Visibility = Visibility.Collapsed };
+    private readonly DispatcherTimer noteTimer;
     private readonly Action<bool> onSync;
 
     private static Settings S => Settings.Current;
@@ -116,8 +118,12 @@ public sealed class MainWindow : Window
         root.ColumnDefinitions.Add(new ColumnDefinition());
         root.Children.Add(Sidebar());
         var contentGrid = new Grid { Margin = new Thickness(0, CaptionHeight, 0, 0) };
+        contentGrid.RowDefinitions.Add(new RowDefinition());
+        contentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         scroller.PreviewMouseWheel += PassWheelToPage;
         contentGrid.Children.Add(scroller);
+        Grid.SetRow(playerHost, 1);
+        contentGrid.Children.Add(playerHost);
         contentGrid.Children.Add(toast);
         Grid.SetColumn(contentGrid, 1);
         root.Children.Add(contentGrid);
@@ -139,6 +145,10 @@ public sealed class MainWindow : Window
         History.Changed += onHistory;
         Player.Changed += onPlayer;
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); historyTimer.Stop(); SaveNow(); };
+        noteTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(50), DispatcherPriority.Normal, (_, _) => NoteTick(), Dispatcher);
+        noteTimer.Stop();
+        NotePlayer.Changed += NotePlayerChanged;
+        Closed += (_, _) => { NotePlayer.Changed -= NotePlayerChanged; NotePlayer.Stop(false); noteTimer.Stop(); };
         Deactivated += (_, _) => SaveNow();
         SourceInitialized += (_, _) => DarkTitleBar();
         Activated += (_, _) => Sync.Queue();
@@ -163,6 +173,7 @@ public sealed class MainWindow : Window
                 search.Focus();
             }
             else if (e.Key == Key.Escape && (editing != null || editingNew)) { e.Handled = true; editing = null; editingNew = false; Render(); }
+            else if (e.Key == Key.Escape && CurrentPage == Page.Notes && openNoteId != null) { e.Handled = true; CloseNote(); }
             else if (e.Key == Key.Escape && CurrentPage == Page.Home && search.Text.Length > 0) { e.Handled = true; search.Text = ""; }
         };
         SizeChanged += (_, _) => { if (IsLoaded && IsWide != wideLayout) Render(); };
@@ -298,6 +309,7 @@ public sealed class MainWindow : Window
 
     public void Go(Page p)
     {
+        if (openNoteId != null) { NotePlayer.Stop(false); openNoteId = null; } // the sidebar's Notes goes back to the list too
         if (p != CurrentPage) scroller.ScrollToTop();
         CurrentPage = p;
         Render();
@@ -309,6 +321,7 @@ public sealed class MainWindow : Window
         var offset = scroller.VerticalOffset;
         if (CurrentPage == Page.Notes && !S.NotesBeta) CurrentPage = Page.Home; // voice notes were switched off (or restored away)
         RenderNav();
+        playerHost.Visibility = Visibility.Collapsed; // the note page puts it back
         var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 10, 36, 48) };
         switch (CurrentPage)
         {
@@ -321,7 +334,7 @@ public sealed class MainWindow : Window
             case Page.Stats: BuildStats(col); break;
         }
         wideLayout = IsWide;
-        scroller.Content = wideLayout ? TwoColumns(col) : StripMarkers(col);
+        scroller.Content = wideLayout && !(CurrentPage == Page.Notes && openNoteId != null) ? TwoColumns(col) : StripMarkers(col);
         scroller.UpdateLayout();
         scroller.ScrollToVerticalOffset(offset);
     }
@@ -880,6 +893,7 @@ public sealed class MainWindow : Window
 
     private void BuildNotes(StackPanel col)
     {
+        if (openNoteId is { } open) { BuildNote(col, open); return; }
         Intro(col, "Notes", "Dictate without a text box: hold Ctrl+Shift+Win, or pick New voice note in the tray menu. Each dictation is saved here as its own note and copied to the clipboard. You can also add a recording, like a WhatsApp voice message saved to this PC, and it's transcribed into a note.");
         col.Children.Add(Spaced(Ui.Button("Add a recording", AddRecording, filled: true), 0, 0, 0, 16));
         if (!S.NotesFeedbackDone)
@@ -950,7 +964,7 @@ public sealed class MainWindow : Window
                 lastDay = day;
             }
             else group!.Children.Add(Ui.Divider());
-            group!.Children.Add(NoteView(n));
+            group!.Children.Add(NoteRow(n));
         }
         if (notes.Count > notesLimit)
         {
@@ -973,10 +987,8 @@ public sealed class MainWindow : Window
         Render();
     }
 
-    /** Per note on the Notes page: the summary level shown, and what's being asked for (summary or index) right now. */
-    private readonly Dictionary<long, int> noteLevel = new();
+    /** Per note: what's being asked for (a summary or the timeline) right now, and the last error. */
     private readonly Dictionary<long, string> noteBusy = new(), noteError = new();
-    private readonly HashSet<long> noteIndexShown = new();
 
     private async void RunNote(long id, string what, Func<Task> work)
     {
@@ -990,13 +1002,6 @@ public sealed class MainWindow : Window
         if (CurrentPage == Page.Notes) Render();
     }
 
-    private void Summarize(Note n, int level, bool voice)
-    {
-        noteLevel[n.Id] = level;
-        if (NoteImport.Get(n.Id)?.Summary(level) != null) { Render(); return; }
-        RunNote(n.Id, "Summarizing…", () => NoteImport.Summarize(S, n.Id, n.Text, level, voice));
-    }
-
     /**
      * The beta's feedback form on GitHub (.github/ISSUE_TEMPLATE/voice-notes-feedback.yml), with the vote in the
      * title and the app and Windows version filled in. Nothing else about the PC or the notes is sent.
@@ -1005,98 +1010,378 @@ public sealed class MainWindow : Window
         Updater.RepoUrl + "/issues/new?template=voice-notes-feedback.yml&title=" + Uri.EscapeDataString("[Voice notes] " + vote) +
         "&app=" + Uri.EscapeDataString($"Tokalot {Updater.CurrentVersion} on Windows {Environment.OSVersion.Version}");
 
-    private UIElement NoteView(Note n)
+    /** A note in the list: its first lines and when it was made. Clicking it opens the note. */
+    private UIElement NoteRow(Note n)
     {
-        var box = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
-        // Selectable, so part of a note can be copied too.
-        box.Children.Add(new TextBox
-        {
-            Text = n.Text, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
-            Foreground = C.Text, FontSize = 16.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
-        });
-        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
-        box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
-        var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(n.Text); Toast("Copied"); }, icon: "copy");
-        var delete = Ui.Button("Delete", () =>
-        {
-            if (!Ui.Dialog(this, NoteImport.AudioFile(n.Id) != null ? "Delete this note and its recording? They can't be brought back." : "Delete this note? It can't be brought back.", "Delete")) return;
-            Notes.Delete(n.Id);
-            Render();
-        });
         var info = NoteImport.Get(n.Id);
-        var audio = NoteImport.AudioFile(n.Id);
-        var voice = audio != null;
-        var actions = new WrapPanel();
-        void Act(UIElement e) { if (e is FrameworkElement f) f.Margin = new Thickness(0, 0, 8, 8); actions.Children.Add(e); }
-        Act(copy);
-        if (audio != null)
-            Act(Ui.Button("Play recording" + (info!.Duration > 0 ? " · " + NoteMedia.Clock(info.Duration) : ""), () => Open(audio!), icon: "play"));
-        if (!noteLevel.ContainsKey(n.Id)) Act(Ui.Button("Summarize", () => Summarize(n, 3, voice)));
-        var segments = info?.Segments ?? new();
-        if (segments.Count > 0 && !noteIndexShown.Contains(n.Id))
-            Act(Ui.Button("Index", () =>
-            {
-                noteIndexShown.Add(n.Id);
-                if (info!.Index != null) { Render(); return; }
-                RunNote(n.Id, "Making the index…", () => NoteImport.MakeIndex(S, n.Id, segments));
-            }));
-        Act(delete);
-        box.Children.Add(actions);
-
-        if (noteBusy.TryGetValue(n.Id, out var busy)) box.Children.Add(Spaced(Ui.Text(busy, 14, C.Sub), 0, 4, 0, 0));
-        if (noteError.TryGetValue(n.Id, out var err)) box.Children.Add(Spaced(Ui.Text("Couldn't do that: " + err, 14, C.Amber), 0, 4, 0, 0));
-        if (noteLevel.TryGetValue(n.Id, out var level) && info?.Summary(level) is { } summary)
+        var voice = info?.Audio != null;
+        var preview = Ui.Text(System.Text.RegularExpressions.Regex.Replace(n.Text.Trim(), @"\s+", " "), 16.5);
+        preview.MaxHeight = 16.5 * 1.4 * 2;
+        preview.TextTrimming = TextTrimming.CharacterEllipsis;
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("h:mm tt", CultureInfo.InvariantCulture);
+        if (voice)
         {
-            // The five lengths, from one line to everything; each is kept once made.
-            var levels = new WrapPanel { Margin = new Thickness(0, 10, 0, 6) };
-            for (var l = 1; l <= 5; l++)
+            meta += " · voice note";
+            if (info!.Duration > 0) meta += " · " + NoteMedia.Clock(info.Duration);
+            if (info.Source != null) meta += " · from " + info.Source;
+        }
+        var metaRow = Ui.Row();
+        if (voice) metaRow.Children.Add(Spaced(Icons.Get("play", 14, C.Sub), 0, 0, 4, 0));
+        metaRow.Children.Add(Ui.Text(meta, 13.5, C.Sub));
+        var row = new Border
+        {
+            Padding = new Thickness(16, 12, 16, 12), Margin = new Thickness(6), CornerRadius = new CornerRadius(22),
+            Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = Ui.Stack(preview, Spaced(metaRow, 0, 6, 0, 0)),
+        };
+        row.MouseEnter += (_, _) => row.Background = C.Hover;
+        row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+        row.MouseLeftButtonUp += (_, _) => OpenNote(n.Id);
+        return Ui.Keys(row, () => OpenNote(n.Id), "Open note");
+    }
+
+    // ---------- one note ----------
+
+    private long? openNoteId;
+    private bool noteSummaryShown, noteTimelineShown, noteFolded = true;
+    private string? noteFile;
+    private List<NoteMedia.Word> noteWords = new();
+    private List<NoteMedia.Cut>? noteSilence;
+    private List<NoteMedia.Cut> noteCuts = new();
+    private double noteDuration;
+    private readonly List<System.Windows.Documents.Run> noteRuns = new();
+    private int noteLit = -1;
+    private Slider? noteSlider;
+    private TextBlock? noteClock;
+    private bool noteSliderSetting;
+
+    private void OpenNote(long id)
+    {
+        openNoteId = id;
+        noteSummaryShown = noteTimelineShown = false;
+        noteFolded = true;
+        noteSilence = null;
+        noteResumeAt = 0;
+        NotePlayer.Stop(false);
+        scroller.ScrollToTop();
+        Render();
+    }
+
+    private void CloseNote()
+    {
+        NotePlayer.Stop(false);
+        noteTimer.Stop();
+        openNoteId = null;
+        Render();
+    }
+
+    /**
+     * The note page, laid out like the phone's: the text first (a voice note's words can be clicked to play from
+     * there), Summary and Timeline as small buttons under it that open below it, the rest in the ⋮ menu, and a
+     * slim player along the bottom of the window.
+     */
+    private void BuildNote(StackPanel col, long id)
+    {
+        var back = Ui.Button("Notes", CloseNote, icon: "back");
+        var note = Notes.All().FirstOrDefault(x => x.Id == id);
+        if (note == null)
+        {
+            col.Children.Add(back);
+            col.Children.Add(Spaced(Ui.Text("This note was deleted.", 16, C.Sub), 4, 16, 0, 0));
+            return;
+        }
+        var info = NoteImport.Get(id);
+        var file = NoteImport.AudioFile(id);
+        noteWords = info?.Words ?? new();
+        noteDuration = info?.Duration ?? 0;
+        var voice = file != null && noteWords.Count > 0;
+        noteFile = voice ? file : null;
+        if (voice && noteSilence == null)
+        {
+            noteSilence = info!.Silence;
+            if (noteSilence == null)
             {
-                var lv = l;
-                var b = Ui.Button(NoteMedia.LevelNames[l - 1], () => Summarize(n, lv, voice), filled: l == level);
-                b.Margin = new Thickness(0, 0, 6, 6);
-                levels.Children.Add(b);
+                noteSilence = new();
+                var words = noteWords; var duration = noteDuration;
+                Task.Run(() =>
+                {
+                    var found = NotePlayer.FindSilence(file!, words, duration);
+                    if (found == null) return;
+                    NoteImport.Update(id, o => o["silence"] = new System.Text.Json.Nodes.JsonArray(
+                        found.Select(c => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonArray(c.Start, c.End)).ToArray()));
+                    Dispatcher.BeginInvoke(() => { if (openNoteId == id) { noteSilence = found; NoteRecut(); } });
+                });
             }
-            box.Children.Add(Ui.Text("Summary", 13.5, C.Sub, bold: true));
-            box.Children.Add(levels);
+        }
+        NoteRecut();
+
+        // The ⋮ menu: what's set once and left alone, and the rarer actions.
+        var menu = new ContextMenu();
+        Border more = null!;
+        more = Ui.Button("", () => { menu.PlacementTarget = more; menu.IsOpen = true; }, icon: "more");
+        var length = new MenuItem { Header = "Summary length" };
+        for (var l = 1; l <= 5; l++)
+        {
+            var lv = l;
+            var item = new MenuItem { Header = NoteMedia.LevelNames[l - 1], IsCheckable = true, IsChecked = S.NoteSummaryLevel == l };
+            item.Click += (_, _) =>
+            {
+                S.NoteSummaryLevel = lv;
+                S.Save();
+                if (noteSummaryShown && NoteImport.Get(id)?.Summary(lv) == null) Summarize(note, lv, voice, false);
+                else Render();
+            };
+            length.Items.Add(item);
+        }
+        menu.Items.Add(length);
+        if (voice)
+        {
+            var silence = new MenuItem { Header = "Skip silence", IsCheckable = true, IsChecked = S.NoteSkipSilence };
+            silence.Click += (_, _) => { S.NoteSkipSilence = !S.NoteSkipSilence; S.Save(); NoteRecut(); };
+            var ums = new MenuItem { Header = "Skip ums", IsCheckable = true, IsChecked = S.NoteSkipUms };
+            ums.Click += (_, _) => { S.NoteSkipUms = !S.NoteSkipUms; S.Save(); NoteRecut(); };
+            menu.Items.Add(silence);
+            menu.Items.Add(ums);
+        }
+        var copy = new MenuItem { Header = "Copy text" };
+        copy.Click += (_, _) => { _ = TextInjector.Copy(note.Text); Toast("Copied"); };
+        menu.Items.Add(copy);
+        var delete = new MenuItem { Header = "Delete note" };
+        delete.Click += (_, _) =>
+        {
+            if (!Ui.Dialog(this, file != null ? "Delete this note and its recording? They can't be brought back." : "Delete this note? It can't be brought back.", "Delete")) return;
+            NotePlayer.Stop(false);
+            Notes.Delete(id);
+            CloseNote();
+        };
+        menu.Items.Add(delete);
+        more.ContextMenu = menu;
+        col.Children.Add(Spread(back, more));
+
+        var stamp = DateTimeOffset.FromUnixTimeMilliseconds(note.Time).LocalDateTime.ToString("dddd, MMM d · h:mm tt", CultureInfo.InvariantCulture);
+        if (info?.Source != null) stamp += " · from " + info.Source;
+        col.Children.Add(Spaced(Ui.Text(stamp, 13.5, C.Sub), 4, 16, 0, 10));
+
+        // The text. A voice note's is built word by word so a click plays from that word and playback lights it up.
+        FrameworkElement body;
+        noteRuns.Clear();
+        noteLit = -1;
+        if (voice)
+        {
+            var t = new TextBlock { FontSize = 16.5, FontFamily = C.Sans, Foreground = C.Text, TextWrapping = TextWrapping.Wrap, LineHeight = 16.5 * 1.5 };
+            for (var i = 0; i < noteWords.Count; i++)
+            {
+                if (i > 0) t.Inlines.Add(new System.Windows.Documents.Run(noteWords[i].Start - noteWords[i - 1].End >= 2.0 ? "\n\n" : " "));
+                var run = new System.Windows.Documents.Run(noteWords[i].Text) { Cursor = Cursors.Hand };
+                var at = noteWords[i].Start;
+                run.MouseLeftButtonUp += (_, e) => { e.Handled = true; NotePlay(at); };
+                t.Inlines.Add(run);
+                noteRuns.Add(run);
+            }
+            body = t;
+        }
+        else body = new TextBox
+        {
+            Text = note.Text, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+            Foreground = C.Text, FontSize = 16.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        // While a summary or the timeline is open, a long text folds to a few lines so they're in view.
+        var fold = (noteSummaryShown || noteTimelineShown) && note.Text.Length > 400;
+        if (fold && noteFolded) { body.MaxHeight = 16.5 * 1.5 * 5; body.ClipToBounds = true; }
+        col.Children.Add(Ui.Card(body, 24));
+        if (fold)
+            col.Children.Add(Spaced(Link(noteFolded ? "Show the whole text" : "Fold it up", () => { noteFolded = !noteFolded; Render(); }), 8, 8, 0, 0));
+
+        var segments = info?.Segments ?? new();
+        var buttons = Ui.Row(Ui.Button("Summary", () =>
+        {
+            noteSummaryShown = !noteSummaryShown;
+            noteFolded = true;
+            if (noteSummaryShown && NoteImport.Get(id)?.Summary(S.NoteSummaryLevel) == null) Summarize(note, S.NoteSummaryLevel, voice, false);
+            else Render();
+        }, filled: noteSummaryShown));
+        if (voice && segments.Count >= 2)
+        {
+            var timeline = Ui.Button("Timeline", () =>
+            {
+                noteTimelineShown = !noteTimelineShown;
+                noteFolded = true;
+                if (noteTimelineShown && NoteImport.Get(id)?.Index == null) RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments));
+                else Render();
+            }, filled: noteTimelineShown);
+            timeline.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(timeline);
+        }
+        col.Children.Add(Spaced(buttons, 0, 14, 0, 14));
+
+        noteBusy.TryGetValue(id, out var busy);
+        if (noteError.TryGetValue(id, out var err)) col.Children.Add(Spaced(Ui.Text("Couldn't do that: " + err, 14, C.Amber), 4, 0, 0, 12));
+        if (noteSummaryShown) col.Children.Add(Spaced(SummaryPanel(note, info, voice, busy), 0, 0, 0, 14));
+        if (noteTimelineShown && voice) col.Children.Add(Spaced(TimelinePanel(id, info, segments, busy), 0, 0, 0, 14));
+
+        if (voice) { playerHost.Child = NotePlayerBar(); playerHost.Visibility = Visibility.Visible; }
+    }
+
+    private void Summarize(Note n, int level, bool voice, bool redo)
+    {
+        if (!redo && NoteImport.Get(n.Id)?.Summary(level) != null) { Render(); return; }
+        RunNote(n.Id, "Summarizing…", () => NoteImport.Summarize(S, n.Id, n.Text, level, voice));
+    }
+
+    private UIElement SummaryPanel(Note n, NoteImport.Info? info, bool voice, string? busy)
+    {
+        var level = S.NoteSummaryLevel;
+        var box = Ui.Stack(Ui.Text("Summary", 15.5, bold: true),
+            Spaced(Ui.Text(NoteMedia.LevelNames[level - 1] + " · change the length in the ⋮ menu", 13, C.Sub), 0, 2, 0, 10));
+        if (busy == "Summarizing…") box.Children.Add(Ui.Text(busy, 14.5, C.Sub));
+        else if (info?.Summary(level) is { } summary)
+        {
             box.Children.Add(new TextBox
             {
                 Text = summary, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
                 Foreground = C.Text, FontSize = 15.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
             });
-            var copySummary = Ui.Button("Copy summary", () => { _ = TextInjector.Copy(summary); Toast("Copied"); }, icon: "copy");
-            copySummary.Margin = new Thickness(0, 8, 8, 0);
-            var hide = Ui.Button("Hide", () => { noteLevel.Remove(n.Id); Render(); });
-            hide.Margin = new Thickness(0, 8, 0, 0);
-            box.Children.Add(Ui.Row(copySummary, hide));
+            var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(summary); Toast("Copied"); }, icon: "copy");
+            copy.Margin = new Thickness(0, 10, 8, 0);
+            var redo = Ui.Button("Redo", () => Summarize(n, level, voice, true));
+            redo.Margin = new Thickness(0, 10, 0, 0);
+            box.Children.Add(Ui.Row(copy, redo));
         }
-        if (noteIndexShown.Contains(n.Id) && info?.Index is { } points)
+        else box.Children.Add(Ui.Button("Summarize", () => Summarize(n, level, voice, false), filled: true));
+        return Ui.Card(box, 22);
+    }
+
+    private UIElement TimelinePanel(long id, NoteImport.Info? info, List<NoteMedia.Segment> segments, string? busy)
+    {
+        var box = Ui.Stack(Ui.Text("Timeline", 15.5, bold: true),
+            Spaced(Ui.Text("Every point in the order it was said. Click one to hear it.", 13, C.Sub), 0, 2, 0, 8));
+        var points = info?.Index;
+        if (busy == "Making the timeline…") box.Children.Add(Ui.Text(busy, 14.5, C.Sub));
+        else if (points == null)
+            box.Children.Add(Ui.Button("Make the timeline", () => RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments)), filled: true));
+        else if (points.Count == 0) box.Children.Add(Ui.Text("Nothing to put on it.", 14, C.Sub));
+        else
         {
-            // Each point with when it was said, grouped under its topic, so the recording can be skimmed.
-            var list = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
-            list.Children.Add(Ui.Text("Index", 13.5, C.Sub, bold: true));
             var lastTopic = "";
             foreach (var p in points)
             {
-                if (p.Topic.Length > 0 && p.Topic != lastTopic) list.Children.Add(Spaced(Ui.Text(p.Topic, 14.5, bold: true), 0, 8, 0, 2));
+                if (p.Topic.Length > 0 && !p.Topic.Equals(lastTopic, StringComparison.OrdinalIgnoreCase))
+                    box.Children.Add(Spaced(Ui.Text(p.Topic.ToUpperInvariant(), 11.5, C.Sub, bold: true), 0, 10, 0, 2));
                 lastTopic = p.Topic;
-                var row = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
-                var time = Ui.Text(NoteMedia.Clock(p.Time), 14, C.Sub);
-                time.Width = 48;
+                var time = Ui.Text(NoteMedia.Clock(p.Time), 14, C.Link);
+                time.Width = 52;
                 DockPanel.SetDock(time, Dock.Left);
-                row.Children.Add(time);
                 var text = Ui.Text(p.Text, 14.5);
-                text.TextWrapping = TextWrapping.Wrap;
+                var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+                row.Children.Add(time);
                 row.Children.Add(text);
-                list.Children.Add(row);
+                var at = p.Time;
+                row.MouseLeftButtonUp += (_, _) => NotePlay(at);
+                box.Children.Add(Ui.Keys(row, () => NotePlay(at), NoteMedia.Clock(p.Time) + ", " + p.Text));
             }
-            if (points.Count == 0) list.Children.Add(Ui.Text("Nothing to index.", 14, C.Sub));
-            var hideIndex = Ui.Button("Hide index", () => { noteIndexShown.Remove(n.Id); Render(); });
-            hideIndex.Margin = new Thickness(0, 8, 0, 0);
-            hideIndex.HorizontalAlignment = HorizontalAlignment.Left;
-            list.Children.Add(hideIndex);
-            box.Children.Add(list);
+            var redo = Ui.Button("Redo", () => RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments)));
+            redo.Margin = new Thickness(0, 10, 0, 0);
+            box.Children.Add(redo);
         }
-        return box;
+        return Ui.Card(box, 22);
+    }
+
+    // ---------- the player ----------
+
+    /** What playback jumps over: stretches with no voice and "um"s, as switched on in the ⋮ menu. */
+    private void NoteRecut() =>
+        noteCuts = NoteMedia.Merge((S.NoteSkipSilence ? noteSilence ?? new List<NoteMedia.Cut>() : new List<NoteMedia.Cut>())
+            .Concat(S.NoteSkipUms ? NoteMedia.FillerCuts(noteWords) : new List<NoteMedia.Cut>()));
+
+    private static string SpeedLabel(double v) => v.ToString("0.##", CultureInfo.InvariantCulture) + "×";
+
+    /** Play, a position bar, the time and the speed. */
+    private UIElement NotePlayerBar()
+    {
+        var playing = NotePlayer.Playing && NotePlayer.File == noteFile;
+        var play = Ui.Button("", NoteToggle, filled: true, icon: playing ? "pause" : "play");
+        var slider = noteSlider = new Slider
+        {
+            Minimum = 0, Maximum = Math.Max(0.1, noteDuration), IsMoveToPointEnabled = true, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 14, 0), Value = NotePlayer.File == noteFile ? NotePlayer.Position : 0,
+        };
+        slider.ValueChanged += (_, e) =>
+        {
+            if (noteSliderSetting) return;
+            if (NotePlayer.File == noteFile) NotePlayer.Seek(e.NewValue);
+            noteResumeAt = e.NewValue;
+            NoteShow(e.NewValue);
+        };
+        noteClock = Ui.Text("", 13.5, C.Sub);
+        noteClock.VerticalAlignment = VerticalAlignment.Center;
+        var speed = Ui.Button(SpeedLabel(S.NoteSpeed), () =>
+        {
+            var i = Array.FindIndex(Sync.NoteSpeeds, v => Math.Abs(v - S.NoteSpeed) < 0.001);
+            S.NoteSpeed = Sync.NoteSpeeds[(i + 1) % Sync.NoteSpeeds.Length];
+            S.Save();
+            NotePlayer.SetSpeed(S.NoteSpeed);
+            playerHost.Child = NotePlayerBar();
+        });
+        speed.Margin = new Thickness(12, 0, 0, 0);
+        var g = new Grid { Margin = new Thickness(24, 10, 24, 12) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.Children.Add(play);
+        Grid.SetColumn(slider, 1); g.Children.Add(slider);
+        Grid.SetColumn(noteClock, 2); g.Children.Add(noteClock);
+        Grid.SetColumn(speed, 3); g.Children.Add(speed);
+        NoteShow(slider.Value);
+        return new Border { Background = C.Card, BorderBrush = C.Line, BorderThickness = new Thickness(0, 1, 0, 0), Child = g };
+    }
+
+    /** Where Play starts when nothing is loaded yet: the start, or wherever the bar was dragged. */
+    private double noteResumeAt;
+
+    private void NoteToggle()
+    {
+        if (noteFile == null) return;
+        if (NotePlayer.Playing && NotePlayer.File == noteFile) NotePlayer.Pause();
+        else NotePlay(NotePlayer.File == noteFile ? NotePlayer.Position : noteResumeAt);
+    }
+
+    private void NotePlay(double from)
+    {
+        if (noteFile == null) return;
+        NotePlayer.Play(noteFile, from, S.NoteSpeed);
+    }
+
+    private void NotePlayerChanged() => Dispatcher.BeginInvoke(() =>
+    {
+        if (NotePlayer.Error is { } err) Toast("Windows can't play this recording: " + err);
+        if (NotePlayer.Playing) noteTimer.Start(); else noteTimer.Stop();
+        if (openNoteId != null && noteFile != null && playerHost.Visibility == Visibility.Visible) playerHost.Child = NotePlayerBar();
+    });
+
+    /** About 20 times a second while playing: jumps over a cut, moves the bar and lights up the word being said. */
+    private void NoteTick()
+    {
+        if (!NotePlayer.Playing || NotePlayer.File != noteFile) { noteTimer.Stop(); return; }
+        var at = NotePlayer.Position;
+        if (NoteMedia.SkipTo(noteCuts, at) is { } to)
+        {
+            if (to >= noteDuration - 0.05) { NotePlayer.Pause(); NotePlayer.Seek(0); NoteShow(0); return; }
+            NotePlayer.Seek(to);
+            at = to;
+        }
+        NoteShow(at);
+    }
+
+    private void NoteShow(double at)
+    {
+        if (noteSlider != null) { noteSliderSetting = true; noteSlider.Value = at; noteSliderSetting = false; }
+        if (noteClock != null) noteClock.Text = NoteMedia.Clock(at) + " / " + NoteMedia.Clock(noteDuration);
+        var i = NotePlayer.File == noteFile ? NoteMedia.WordAt(noteWords, at + 0.02) : -1;
+        if (i == noteLit) return;
+        if (noteLit >= 0 && noteLit < noteRuns.Count) noteRuns[noteLit].Background = null;
+        noteLit = i;
+        if (i >= 0 && i < noteRuns.Count) noteRuns[i].Background = new SolidColorBrush(Color.FromArgb(0x55, 0x6E, 0xA8, 0xFE));
     }
 
     // ---------- Snippets ----------

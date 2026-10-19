@@ -35,7 +35,6 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     private var seek: SeekBar? = null
     private var clock: TextView? = null
     private var duration = 0.0
-    private val opts by lazy { a.getSharedPreferences("note_player", 0) }
 
     private var silenceCuts: List<ClosedFloatingPointRange<Double>> = emptyList()
     private var folded = true
@@ -116,18 +115,18 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             val items = mutableListOf<Pair<String, () -> Unit>>(
                 "Summary length: ${NoteMedia.LEVEL_NAMES[summaryLevel() - 1]}" to {
                     choose("Summary length", NoteMedia.LEVEL_NAMES.toList(), summaryLevel() - 1) { i ->
-                        opts.edit().putInt("level", i + 1).apply()
+                        prefs.noteSummaryLevel = i + 1
                         summaryLevelChanged?.invoke()
                     }
                     Unit
                 },
             )
             if (voice) {
-                items += "Skip silence: ${if (opts.getBoolean("silence", true)) "on" else "off"}" to {
-                    opts.edit().putBoolean("silence", !opts.getBoolean("silence", true)).apply(); recut()
+                items += "Skip silence: ${if (prefs.noteSkipSilence) "on" else "off"}" to {
+                    prefs.noteSkipSilence = !prefs.noteSkipSilence; recut()
                 }
-                items += "Skip ums: ${if (opts.getBoolean("ums", true)) "on" else "off"}" to {
-                    opts.edit().putBoolean("ums", !opts.getBoolean("ums", true)).apply(); recut()
+                items += "Skip ums: ${if (prefs.noteSkipUms) "on" else "off"}" to {
+                    prefs.noteSkipUms = !prefs.noteSkipUms; recut()
                 }
             }
             items += "Copy text" to { copy(note.text) }
@@ -155,20 +154,20 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
         }
     }
 
-    private fun summaryLevel() = opts.getInt("level", 3).coerceIn(1, 5)
+    private fun summaryLevel() = a.prefs.noteSummaryLevel
 
     /** What playback jumps over: stretches with no voice (heard in the recording itself) and "um"s, as switched on. */
     private fun recut() {
-        cuts = NoteMedia.merge((if (opts.getBoolean("silence", true)) silenceCuts else emptyList()) +
-            (if (opts.getBoolean("ums", true)) NoteMedia.fillerCuts(words) else emptyList()))
+        cuts = NoteMedia.merge((if (a.prefs.noteSkipSilence) silenceCuts else emptyList()) +
+            (if (a.prefs.noteSkipUms) NoteMedia.fillerCuts(words) else emptyList()))
     }
 
     // ---------- the player ----------
 
-    private val speeds = floatArrayOf(1f, 1.25f, 1.5f, 2f)
+    private val speeds = NOTE_SPEEDS
     private var speedLabelView: TextView? = null
 
-    private fun speed() = opts.getFloat("speed", 1f).takeIf { it in speeds } ?: 1f
+    private fun speed() = a.prefs.noteSpeed
 
     private fun speedLabel() = speed().let { if (it == it.toInt().toFloat()) "${it.toInt()}×" else "$it×" }
 
@@ -188,7 +187,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
         }
         val speedPill = pill(speedLabel(), desc = "Playback speed") {
             val next = speeds[(speeds.indexOf(speed()) + 1) % speeds.size]
-            opts.edit().putFloat("speed", next).apply()
+            a.prefs.noteSpeed = next
             speedLabelView?.text = speedLabel()
             applySpeed()
         }
