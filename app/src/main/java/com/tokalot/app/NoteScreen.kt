@@ -69,17 +69,34 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             }, lp().margins(this, b = 12))
         }
 
-        col.addView(summaryCard(note.text, file != null), lp().margins(this, b = 12))
+        // The summary and timeline stay out of the way: a small button each under the note, opened on a tap.
+        val summary = summaryCard(note.text, file != null).apply { visibility = View.GONE }
         val segments = info?.segments.orEmpty()
-        if (file != null && segments.size >= 2) col.addView(indexCard(segments), lp().margins(this, b = 12))
-        col.addView(row(
+        val timeline = if (file != null && segments.size >= 2) indexCard(segments).apply { visibility = View.GONE } else null
+        fun toggle(v: View, open: () -> Unit) {
+            v.visibility = if (v.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            if (v.visibility == View.VISIBLE) open()
+        }
+        val actions = mutableListOf<View>(pill("Summary") { toggle(summary) { summaryOpened?.invoke() } })
+        if (timeline != null) actions += listOf(spacer(wDp = 8), pill("Timeline") { toggle(timeline) { indexOpened?.invoke() } })
+        actions += listOf(
             weightSpacer(),
             iconButton(R.drawable.ic_copy, "Copy note", 20, C.SUB) { copy(note.text) },
-            pill("Share") {
+            iconButton(R.drawable.ic_share, "Share note", 20, C.SUB) {
                 startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
                     .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, note.text), "Share note"))
             },
-        ))
+            iconButton(R.drawable.ic_delete, "Delete note", 20, C.SUB) {
+                confirm(if (file != null) "Delete this note and its recording? The text stays in history." else "Delete this note? It stays in history.", "Delete") {
+                    release()
+                    if (runCatching { Notes.delete(this, id) }.isFailure) toast("Couldn't delete the note")
+                    @Suppress("DEPRECATION") onBackPressed()
+                }
+            },
+        )
+        col.addView(row(*actions.toTypedArray()).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this, b = 12))
+        col.addView(summary, lp().margins(this, b = 12))
+        timeline?.let { col.addView(it, lp().margins(this, b = 12)) }
         scroll(col)
     }
 
@@ -234,7 +251,11 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             levels.removeAllViews()
             NoteMedia.LEVEL_NAMES.forEachIndexed { i, name ->
                 if (i > 0) levels.addView(spacer(wDp = 6))
-                levels.addView(pill(name, filled = level == i + 1) { level = i + 1; opts.edit().putInt("level", level).apply(); fill() })
+                levels.addView(pill(name, filled = level == i + 1) {
+                    level = i + 1
+                    opts.edit().putInt("level", level).apply()
+                    if (!busy && NoteImport.info(this, id)?.summary(level) == null) summarize(level) else fill()
+                })
             }
             body.removeAllViews()
             val saved = NoteImport.info(this, id)?.summary(level)
@@ -250,6 +271,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
                 else -> body.addView(row(pill("Summarize", filled = true) { summarize(level) }))
             }
         }
+        // Opening it asks for a summary at the chosen length if there isn't one yet.
+        summaryOpened = { if (!busy && NoteImport.info(this, id)?.summary(level) == null) summarize(level) }
         // Kept here so fill() and the call share the same busy flag.
         runner = { lv ->
             busy = true
@@ -276,13 +299,15 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     }
 
     private var runner: ((Int) -> Unit)? = null
+    private var summaryOpened: (() -> Unit)? = null
+    private var indexOpened: (() -> Unit)? = null
     private fun summarize(level: Int) { runner?.invoke(level) }
 
     // ---------- the index ----------
 
     private fun indexCard(segments: List<NoteMedia.Segment>): View = with(a) {
         val c = card(18)
-        c.addView(text("Index", 16f, bold = true))
+        c.addView(text("Timeline", 16f, bold = true))
         c.addView(text("Every point in the order it was said. Tap one to hear it.", 14f, C.SUB), lp().margins(this, t = 2, b = 8))
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         c.addView(body)
@@ -290,8 +315,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             body.removeAllViews()
             val points = NoteImport.info(this, id)?.index
             when {
-                busy -> body.addView(text("Making the index…", 15f, C.SUB))
-                points == null -> body.addView(row(pill("Make an index", filled = true) { make(segments, ::fill) }))
+                busy -> body.addView(text("Making the timeline…", 15f, C.SUB))
+                points == null -> body.addView(row(pill("Make the timeline", filled = true) { make(segments, ::fill) }))
                 points.isEmpty() -> body.addView(text("Nothing to index.", 15f, C.SUB))
                 else -> {
                     var heading = ""
@@ -317,6 +342,13 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             }
         }
         fill(false)
+        var making = false
+        indexOpened = {
+            if (!making && NoteImport.info(this, id)?.index == null) {
+                making = true
+                make(segments) { b -> if (!b) making = false; fill(b) }
+            }
+        }
         c
     }
 
@@ -333,7 +365,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             }
             runOnUiThread {
                 if (released) return@runOnUiThread
-                result.exceptionOrNull()?.let { toast("Couldn't make the index: ${it.message}") }
+                result.exceptionOrNull()?.let { toast("Couldn't make the timeline: ${it.message}") }
                 fill(false)
             }
         }.start()

@@ -146,3 +146,45 @@ public static class Player
         if (notify && was != null) Changed?.Invoke();
     }
 }
+
+/** Plays a voice note's recording from any point, for the note page (tap a word to hear it from there). */
+public static class NotePlayer
+{
+    private static WaveOutEvent? output;
+    private static WaveStream? reader;
+    public static string? File { get; private set; }
+    public static bool Playing => output != null;
+    /** Where playback is now, in seconds. */
+    public static double Position => reader?.CurrentTime.TotalSeconds ?? 0;
+    /** Playback stopped or reached the end. Raised on a worker thread. */
+    public static event Action? Changed;
+
+    /** Plays [file] from [from] seconds. False if Windows can't decode it (some .opus or .ogg files without the codec). */
+    public static bool Play(string file, double from)
+    {
+        Stop(false);
+        Player.Stop();
+        try
+        {
+            reader = file.EndsWith(".wav") ? new WaveFileReader(file) : new MediaFoundationReader(file);
+            if (from > 0) reader.CurrentTime = TimeSpan.FromSeconds(Math.Min(from, Math.Max(0, reader.TotalTime.TotalSeconds - 0.1)));
+            var o = output = new WaveOutEvent();
+            o.Init(reader);
+            o.PlaybackStopped += (_, _) => { if (ReferenceEquals(output, o)) Stop(); };
+            o.Play();
+            File = file;
+            return true;
+        }
+        catch { Stop(false); return false; }
+    }
+
+    public static void Stop(bool notify = true)
+    {
+        var o = output; var r = reader;
+        output = null; reader = null;
+        try { o?.Stop(); } catch { }
+        o?.Dispose(); r?.Dispose();
+        File = null;
+        if (notify) Changed?.Invoke();
+    }
+}

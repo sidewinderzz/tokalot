@@ -141,6 +141,82 @@ object NoteMedia {
         return merge(cuts)
     }
 
+    // ---------- voice detection, for skipping silence ----------
+
+    /** Each loudness value covers this many seconds of the recording. */
+    const val FRAME = 0.02
+    /** Kept around speech so a jump never clips a soft start or a trailing word. */
+    private const val HANGOVER = 0.25
+    /** Stretches without speech shorter than this are left in. */
+    const val MIN_SILENCE = 0.6
+
+    /**
+     * Which frames hold speech, from their loudness in dB. The noise floor is measured from the recording itself
+     * (its quietest stretches), so a steady background (an engine, wind, a fan) counts as silence and only what
+     * stands clearly above it counts as speech. Short dips inside speech and the edges around it are kept.
+     */
+    fun speechFrames(db: FloatArray): BooleanArray {
+        val n = db.size
+        if (n == 0) return BooleanArray(0)
+        val sorted = db.sortedArray()
+        val floor = sorted[(n * 0.10).toInt().coerceIn(0, n - 1)]
+        val loud = sorted[(n * 0.90).toInt().coerceIn(0, n - 1)]
+        // Speech has to clear the floor by a margin that grows with how much louder the loud parts are.
+        val threshold = floor + maxOf(6f, (loud - floor) * 0.35f)
+        val raw = BooleanArray(n) { db[it] > threshold }
+        val out = raw.copyOf()
+        val pad = (HANGOVER / FRAME).toInt()
+        for (i in 0 until n) if (raw[i]) for (k in maxOf(0, i - pad)..minOf(n - 1, i + pad)) out[k] = true
+        return out
+    }
+
+    /**
+     * The stretches to skip as silence: no speech heard in the audio and no word placed there by the transcript.
+     * Requiring both keeps every word even where the word times are off or the detector misses a quiet one.
+     */
+    fun silenceCuts(speech: BooleanArray, words: List<Word>, duration: Double): List<ClosedFloatingPointRange<Double>> {
+        val quiet = ArrayList<ClosedFloatingPointRange<Double>>()
+        var i = 0
+        while (i < speech.size) {
+            if (speech[i]) { i++; continue }
+            val start = i
+            while (i < speech.size && !speech[i]) i++
+            quiet.add(start * FRAME..minOf(i * FRAME, if (duration > 0) duration else i * FRAME))
+        }
+        val spoken = words.map { maxOf(0.0, it.start - PAD)..(it.end + PAD) }.sortedBy { it.start }
+        val cuts = ArrayList<ClosedFloatingPointRange<Double>>()
+        for (q in quiet) {
+            var from = q.start
+            for (w in spoken) {
+                if (w.endInclusive <= from) continue
+                if (w.start >= q.endInclusive) break
+                if (w.start > from) cuts.add(from..w.start)
+                from = maxOf(from, w.endInclusive)
+            }
+            if (from < q.endInclusive) cuts.add(from..q.endInclusive)
+        }
+        return merge(cuts.filter { it.endInclusive - it.start >= MIN_SILENCE })
+    }
+
+    /** Loudness in dB of each [FRAME] of mono 16-bit samples, after a gentle high-pass that drops rumble below speech. */
+    fun frameLoudness(samples: ShortArray, count: Int, rate: Int, state: FloatArray, out: MutableList<Float>) {
+        // state: [previous input, previous output, running sum of squares, samples in the current frame]
+        val per = (rate * FRAME).toInt().coerceAtLeast(1)
+        val a = (1.0 / (1.0 + 2 * Math.PI * 150.0 / rate)).toFloat() // one-pole high-pass at about 150 Hz
+        var px = state[0]; var py = state[1]; var sum = state[2]; var got = state[3].toInt()
+        for (k in 0 until count) {
+            val x = samples[k] / 32768f
+            val y = a * (py + x - px)
+            px = x; py = y
+            sum += y * y
+            if (++got >= per) {
+                out.add((10 * Math.log10((sum / got).toDouble() + 1e-10)).toFloat())
+                sum = 0f; got = 0
+            }
+        }
+        state[0] = px; state[1] = py; state[2] = sum; state[3] = got.toFloat()
+    }
+
     fun fillerCuts(words: List<Word>): List<ClosedFloatingPointRange<Double>> =
         merge(fillerIndices(words).sorted().map { maxOf(0.0, words[it].start - 0.02)..(words[it].end + 0.02) }, minLength = 0.03)
 

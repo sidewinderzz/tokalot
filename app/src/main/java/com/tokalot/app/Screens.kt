@@ -363,40 +363,32 @@ class NotesScreen(private val a: MainActivity) {
             })
             return scroll(col)
         }
-        // Grouped by day, newest first, each note with Copy, Share and Delete.
+        // A plain list grouped by day, newest first: tap a note to open it (its player, summary, timeline, copy and delete).
         notes.groupBy { dayLabel(it.time) }.forEach { (label, group) ->
             col.addView(text(label.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply { letterSpacing = 0.08f },
                 lp().margins(this, t = 12, b = 8, l = 4))
             val c = card()
             group.forEachIndexed { i, n ->
                 if (i > 0) c.addView(divider())
-                val box = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(20), dp(14), dp(12), dp(6))
-                }
                 val media = NoteImport.info(this, n.id)
                 val voice = media?.audio != null
                 val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
-                box.addView(text(if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}" else time, 13f, C.SUB))
-                // A long voice note shows its start; the whole thing is a tap away.
-                val shown = if (voice && n.text.length > 280) n.text.take(280).trimEnd() + "…" else n.text
-                box.addView(text(shown, 16f).apply { if (!voice) setTextIsSelectable(true) }, lp().margins(this, t = 2, r = 8))
-                box.addView(row(
-                    pill(if (voice) "Play" else "Open", iconRes = if (voice) R.drawable.ic_play else null) { openNote(n.id) },
-                    weightSpacer(),
-                    iconButton(R.drawable.ic_copy, "Copy note", 20, C.SUB) { copy(n.text) },
-                    pill("Share") {
-                        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, n.text), "Share note"))
-                    },
-                    spacer(wDp = 4),
-                    iconButton(R.drawable.ic_close, "Delete note", 20, C.SUB) {
-                        confirm("Delete this note? It stays in history.", "Delete") {
-                            if (runCatching { Notes.delete(this, n.id) }.isFailure) toast("Couldn't delete the note")
-                            render()
-                        }
-                    },
-                ))
-                c.addView(box)
+                val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}" else time
+                val preview = n.text.trim().replace(Regex("\\s+"), " ")
+                c.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(20), dp(14), dp(16), dp(14))
+                    minimumHeight = dp(TOUCH_DP)
+                    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
+                        android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
+                    addView(text(preview, 16f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+                    addView(row(
+                        if (voice) icon(R.drawable.ic_play, 14, C.SUB).apply { setPadding(0, 0, dp(4), 0) } else spacer(wDp = 0),
+                        text(meta, 13f, C.SUB),
+                    ).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this@with, t = 4))
+                    contentDescription = "$meta. $preview"
+                    setOnClickListener { openNote(n.id) }
+                })
             }
             col.addView(c)
         }
