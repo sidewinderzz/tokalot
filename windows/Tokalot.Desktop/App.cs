@@ -36,6 +36,9 @@ public sealed class App : Application
             return;
         }
 
+        // "Tokalot.exe --mcp": an AI assistant on this PC reading the voice notes (see NotesMcp). Runs beside the tray app.
+        if (args.Contains(NotesMcp.Arg)) { NotesMcp.Run(); return; }
+
         using var single = new Mutex(true, "Tokalot.Desktop.SingleInstance" + Instance, out var first);
         if (!first)
         {

@@ -36,6 +36,9 @@ public sealed partial class App : Application
         // "Tokalot --diagnose" prints what this Mac lets Tokalot do (keyboard, paste, microphone…) and exits.
         if (args.Contains("--diagnose")) { Diagnose(args.Contains("--download-model")); return 0; }
 
+        // "Tokalot --mcp": an AI assistant on this Mac reading the voice notes (see NotesMcp). Runs beside the tray app.
+        if (args.Contains(NotesMcp.Arg)) return NotesMcp.Run();
+
         // Developer and CI check of the native pieces (Keychain, clipboard, keyboard tap, microphone…). Prints PASS/FAIL lines.
         if (args.Contains("--selftest")) return SelfTest.Run(args);
 

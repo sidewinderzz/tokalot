@@ -36,6 +36,9 @@ public sealed partial class App : Application
         // "Tokalot --diagnose" prints what this computer lets Tokalot do (keyboard, paste, microphone…) and exits.
         if (args.Contains("--diagnose")) { Diagnose(args.Contains("--download-model")); return 0; }
 
+        // "Tokalot --mcp": an AI assistant on this computer reading the voice notes (see NotesMcp). Runs beside the tray app.
+        if (args.Contains(NotesMcp.Arg)) return NotesMcp.Run();
+
         // Developer tool: "Tokalot --screenshots <folder>" renders every page to PNGs with sample data. Needs no display.
         if (args.Length >= 2 && args[0] == "--screenshots")
         {

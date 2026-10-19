@@ -144,6 +144,15 @@ A port of the Linux app for Macs with Apple silicon (M1 or newer) on macOS 15 or
 > [!WARNING]
 > The Mac build has only been run on GitHub's build machines, never by a person on a real Mac. The shortcut, the microphone, pasting, the permission prompts, the menu-bar icon and the recording indicator have not been tried by hand and may need fixes. If you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6) with your Mac, macOS version and the output of `Tokalot --diagnose`.
 
+## Let Claude read your notes (optional)
+
+The Windows, Linux and Mac apps can act as an MCP server, so an AI assistant on the same computer (Claude Desktop, Claude Code, or any app that speaks MCP) can list, search and read your voice notes, with their summaries and index. It's read-only and off by default. Turn on **Settings › AI assistants › Let AI assistants read my notes**, then press **Copy setup**:
+
+- **Claude Desktop:** Settings › Developer › Edit Config, paste it into `claude_desktop_config.json` (merge it with anything already under `mcpServers`) and restart Claude.
+- **Claude Code:** `claude mcp add tokalot-notes -- "<path to Tokalot>" --mcp`
+
+Notes from your phone are included once they sync to that computer. Turning the switch off cuts access straight away, even for an assistant that is already connected.
+
 ## What it costs
 
 Tokalot is free. You pay your AI providers directly, at their rates:
@@ -163,6 +172,7 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 - History, recordings, settings and keys live only on your device. Backups leave out your API keys unless you choose to include them.
 - Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into, your dictionary words and, on Android, whether the cursor is in the middle of a sentence (never the text around it), so the model can match the style, spelling and capitals. With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
 - Sync is optional and off by default. It works through one small file that you keep in a folder you already sync (Google Drive, OneDrive, Dropbox, Syncthing); there is no Tokalot account or server. Recordings are never put in it; API keys and dictation history (the newest 1,000 dictations, as text) only if you turn those on. Settings sync too, except the few that belong to one device (the on-device model, how long recordings are kept, where the indicator sits). Each device adds its own word, dictation and clean-up counts per month (under a random id and the device's name), so every app can show the total across all your devices.
+- Letting AI assistants read your notes is optional and off by default. Only apps on that computer can use it, it can only read notes (never change them), and what the assistant does with them is up to that assistant and its provider.
 - The apps check GitHub for new releases. There are no Tokalot servers, accounts or tracking.
 
 <details>
