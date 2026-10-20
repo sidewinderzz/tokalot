@@ -97,11 +97,15 @@ public static class Notes
     /** The notes as the sync file holds them; null if the file is there but can't be read, so a sync never takes that for "no notes". */
     public static List<Sync.SyncNote>? ForSync()
     {
+        List<Note> l;
         lock (Gate)
         {
-            var l = Load();
-            return unread ? null : l.Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text)).ToList();
+            l = Load();
+            if (unread) return null;
+            l = l.ToList();
         }
+        // Titles live with the media, outside the lock: NoteImport takes its own, and asks for the notes while holding it.
+        return l.Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text, NoteImport.SyncTitle(n.Id))).ToList();
     }
 
     /** Stores a sync's result, unless a note was added or deleted here since [before] was read. */
@@ -110,13 +114,21 @@ public static class Notes
         HashSet<long> ids;
         lock (Gate)
         {
-            if (unread || !Load().Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text)).SequenceEqual(before)) return false;
+            if (unread || !Load().Select(n => (n.Id, n.Time, n.Text)).SequenceEqual(before.Select(n => (n.Id, n.Time, n.Text)))) return false;
             cache = after.Select(n => new Note { Id = n.Id, Time = n.Time, Text = n.Text }).ToList();
             Save();
             ids = cache.Select(n => n.Id).ToHashSet();
         }
         // Outside the lock: NoteImport takes its own, and asks for the notes while holding it.
         try { NoteImport.Prune(ids); } catch { }
+        // A title that came from another device, unless it changed here meanwhile.
+        var had = new Dictionary<long, string?>(); foreach (var n in before) had.TryAdd(n.Id, n.Title);
+        foreach (var n in after)
+        {
+            had.TryGetValue(n.Id, out var was);
+            if (n.Title == null || n.Title == was || NoteImport.SyncTitle(n.Id) != was) continue;
+            try { NoteImport.SetTitle(n.Id, n.Title); } catch { }
+        }
         return true;
     }
 

@@ -113,4 +113,12 @@ class NoteMediaTest {
         val speech = BooleanArray(100) { it !in 40 until 60 } // a 0.4 s pause
         assertTrue(NoteMedia.silenceCuts(speech, emptyList(), 2.0).isEmpty())
     }
+
+    @Test fun titlesAreCleanedUp() {
+        assertEquals("Hose for the 4020", NoteMedia.cleanTitle("\"Hose for the 4020.\"\n"))
+        assertEquals("Grab the hose", NoteMedia.cleanTitle("Title: Grab the hose"))
+        assertEquals(80, NoteMedia.cleanTitle("x".repeat(200))!!.length)
+        assertNull(NoteMedia.cleanTitle("  \"\" "))
+        assertTrue(NoteMedia.titleUser("a".repeat(5000)).contains("<note>\n" + "a".repeat(4000) + "\n</note>"))
+    }
 }

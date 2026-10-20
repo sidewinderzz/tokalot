@@ -259,6 +259,26 @@ public static class NoteMedia
 
     public static string SummaryUser(string text) => "Summarize this:\n\n<note>\n" + text + "\n</note>";
 
+    // ---------- the title ----------
+
+    public static string TitleSystem() =>
+        "Write a short title, 3 to 7 words, for this note. Reply with the title only: no quotes, no trailing period.";
+
+    public static string TitleUser(string text) => "Title this:\n\n<note>\n" + (text.Length > 4000 ? text[..4000] : text) + "\n</note>";
+
+    /** The model's reply as a title: its first line, without quotes, a "Title:" label or a closing period, at most 80 characters. Null if nothing's left. */
+    public static string? CleanTitle(string raw)
+    {
+        var t = raw.Split('\n').FirstOrDefault(l => l.Trim().Length > 0)?.Trim();
+        if (t == null) return null;
+        if (t.StartsWith("Title:", StringComparison.OrdinalIgnoreCase)) t = t[6..];
+        t = t.Trim().Trim('"', '\'', '“', '”', '‘', '’', '*', '`').Trim();
+        if (t.EndsWith('.') && !t.EndsWith("..")) t = t[..^1].TrimEnd();
+        if (t.Length > 80) t = t[..80];
+        t = t.Trim();
+        return t.Length > 0 ? t : null;
+    }
+
     // ---------- the index ----------
 
     public const int MaxPoints = 40;

@@ -1,5 +1,16 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.11.0
+
+- Notes get a short title, written by the AI when a note is made or first opened. It shows on the note and in the list. Rename it from the **⋮** menu.
+- While a recording plays, the page follows the word being said. Scroll yourself and it stops; **Back to playing** brings it back. The Timeline marks the point being played.
+- A one-time tip says you can click any word to play from there.
+- The summary length is now a small label on the Summary card. Click it to pick another length.
+- Quieter Summary and Timeline buttons, a cleaner position bar with the time played and left under it, and placeholder lines while a summary is being made.
+- Deleting a note no longer asks first: a bar shows **Undo** for a few seconds instead.
+- Screen readers read a note's text as one block.
+- If ffmpeg isn't installed, the player says so: it is needed to jump to a word and skip silence.
+
 ## New in 0.10.1
 
 - On a note, the **Summary** and **Timeline** buttons are now at the top, above the text, and open right there.

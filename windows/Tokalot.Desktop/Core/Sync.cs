@@ -64,8 +64,18 @@ public static class Sync
         }
     }
 
-    /** One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one. */
-    public sealed record SyncNote(long Id, long Time, string Text);
+    /**
+     * One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one.
+     * Title: null when the note has none, "" when it was cleared on purpose (so no device makes a new one).
+     */
+    public sealed record SyncNote(long Id, long Time, string Text, string? Title = null);
+
+    private static JsonNode? NoteJson(SyncNote n)
+    {
+        var o = new JsonObject { ["id"] = n.Id, ["time"] = n.Time, ["text"] = n.Text };
+        if (n.Title != null) o["title"] = n.Title;
+        return o;
+    }
 
     /** One month of one device's counts, as the sync file holds them: words, dictations, clean-ups and on-device dictations. */
     public sealed record UsageMonth(long Words, long Dictations, long Fillers = 0, long Corrections = 0, long Offline = 0);
@@ -333,7 +343,8 @@ public static class Sync
 
     /**
      * Notes match by id. One that a side had at the last sync and no longer has was deleted there; a text
-     * changed since the last sync wins over the unchanged one. Newest first.
+     * changed since the last sync wins over the unchanged one, and so does a title, on its own. A side that doesn't
+     * know titles (an older version) never clears one. Newest first.
      */
     private static List<SyncNote> MergeNotes(List<SyncNote> local, List<SyncNote>? remote, List<SyncNote> basis)
     {
@@ -345,7 +356,11 @@ public static class Sync
         foreach (var id in theirs.Keys.Concat(mine.Keys).Distinct())
         {
             mine.TryGetValue(id, out var here); theirs.TryGetValue(id, out var there); was.TryGetValue(id, out var b);
-            if (here != null && there != null) output.Add(b != null && here.Text == b.Text ? there : here);
+            if (here != null && there != null)
+            {
+                var title = here.Title != b?.Title ? here.Title ?? there.Title : there.Title ?? here.Title;
+                output.Add((b != null && here.Text == b.Text ? there : here) with { Title = title });
+            }
             else if (b == null) output.Add((here ?? there)!); // else: deleted on one side
         }
         return output.OrderByDescending(n => n.Time).ThenByDescending(n => n.Id).ToList();
@@ -419,7 +434,7 @@ public static class Sync
         var styles = (file["styles"] as JsonObject)?.Where(kv => kv.Value != null).ToDictionary(kv => kv.Key, kv => kv.Value!.ToString()) ?? new();
         var notes = (file["notes"] as JsonArray)?.OfType<JsonObject>()
             .Where(o => Num(o["id"]) != null && o["text"] is JsonValue)
-            .Select(o => { var id = Num(o["id"])!.Value; return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString()); })
+            .Select(o => { var id = Num(o["id"])!.Value; return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString(), o["title"] is JsonValue t ? t.ToString() : null); })
             .ToList();
         SortedDictionary<string, string>? settings = null;
         if (file["settings"] is JsonObject so)
@@ -513,7 +528,7 @@ public static class Sync
             ["snippets"] = new JsonArray(d.Snippets.Select(s => (JsonNode?)new JsonObject { ["trigger"] = s.Trigger, ["text"] = s.Text }).ToArray()),
             ["styles"] = new JsonObject(d.Styles.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, kv.Value))),
             ["instructions"] = d.Instructions,
-            ["notes"] = new JsonArray((d.Notes ?? new()).Select(n => (JsonNode?)new JsonObject { ["id"] = n.Id, ["time"] = n.Time, ["text"] = n.Text }).ToArray()),
+            ["notes"] = new JsonArray((d.Notes ?? new()).Select(NoteJson).ToArray()),
         };
         if (d.Settings != null)
             o["settings"] = new JsonObject(d.Settings.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, JsonNode.Parse(kv.Value))));

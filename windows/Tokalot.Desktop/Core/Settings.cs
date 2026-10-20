@@ -99,6 +99,8 @@ public sealed class Settings
     public int NoteSummaryLevel { get; set; } = 3;
     /** Voice note playback speed: 1, 1.25, 1.5 or 2. */
     public double NoteSpeed { get; set; } = 1;
+    /** The "Click any word to play from there" hint on a voice note was closed or used. This PC only: not synced. */
+    public bool NoteWordHintSeen { get; set; }
     /** The Notes beta card was answered or closed. */
     public bool NotesFeedbackDone { get; set; }
     /** "Let AI assistants read my notes": whether "Tokalot --mcp" answers (see NotesMcp). Off unless turned on. This PC only: not synced. */

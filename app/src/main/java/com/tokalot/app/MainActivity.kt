@@ -56,6 +56,11 @@ class MainActivity : Activity() {
     /** The note opened from the Notes page, if any, and its screen (which owns a player to stop). */
     private var openNote: Long? = null
     private var noteScreen: NoteScreen? = null
+    /** A note deleted a moment ago: hidden, with "Note deleted · Undo" showing. It's really deleted when the bar goes. */
+    var pendingDelete: Long? = null
+        private set
+    private val deleteNow = Runnable { finishDelete() }
+    private val undoTimer = android.os.Handler(android.os.Looper.getMainLooper())
     private var historyLimit = 100
     private val expanded = HashSet<Long>()
     private val showOriginal = HashSet<Long>()
@@ -453,6 +458,7 @@ class MainActivity : Activity() {
         Sync.onDone = null
         stopPlayback(redraw = false)
         noteScreen?.pause()
+        finishDelete()
     }
 
     private fun play(id: Long) {
@@ -547,6 +553,47 @@ class MainActivity : Activity() {
         render()
     }
 
+    /** Deletes a note with no question asked: it's hidden at once, and Undo can bring it back for 6 seconds. */
+    fun deleteNote(id: Long) {
+        finishDelete() // a delete still waiting goes through now
+        pendingDelete = id
+        if (openNote == id) openNote = null
+        render()
+        content.announceForAccessibility("Note deleted")
+        undoTimer.postDelayed(deleteNow, 6000)
+    }
+
+    /** The real delete of the note waiting on Undo, if any: its text, its folder (recording, summaries) and sync. */
+    private fun finishDelete() {
+        undoTimer.removeCallbacks(deleteNow)
+        val id = pendingDelete ?: return
+        pendingDelete = null
+        if (runCatching { Notes.delete(this, id) }.isFailure) toast("Couldn't delete the note")
+        (content.findViewWithTag<View>(UNDO_TAG))?.let { content.removeView(it) }
+    }
+
+    /** The "Note deleted · Undo" bar, over the bottom of the page. */
+    private fun undoBar(): View = row(
+        text("Note deleted", 15f, C.CARD).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+        text("Undo", 15f, if (C.dark) 0xFF2F6FDB.toInt() else 0xFF6EA8FE.toInt(), bold = true).apply {
+            minHeight = dp(TOUCH_DP)
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), 0, dp(8), 0)
+            setOnClickListener {
+                undoTimer.removeCallbacks(deleteNow)
+                pendingDelete = null
+                render()
+            }
+        },
+    ).apply {
+        tag = UNDO_TAG
+        background = rounded(C.TEXT, 14)
+        elevation = dpf(6)
+        setPadding(dp(18), 0, dp(8), 0)
+        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
+            .apply { setMargins(dp(12), 0, dp(12), dp(12)) }
+    }
+
     fun openSettings(category: String? = null) {
         if (category != null) prefs.openSettings = prefs.openSettings + category
         inSettings = true
@@ -556,6 +603,7 @@ class MainActivity : Activity() {
     /** Rebuilds the visible screen. Screens are cheap to build, so we just redraw. */
     fun render() {
         if (tab == Tab.NOTES && !prefs.notesBeta) tab = Tab.HOME // the beta was switched off
+        if (inSettings || inStats || tab != Tab.NOTES) finishDelete() // left the notes: Undo goes with them
         logoBars?.accentColor = C.visible(prefs.accent) // follows the button color picked in Settings
         headerLeft.removeAllViews()
         val back = inSettings || inStats || openNote != null
@@ -591,6 +639,7 @@ class MainActivity : Activity() {
             Tab.NOTES -> NotesScreen(this).build()
         }
         content.addView(screen)
+        if (pendingDelete != null) content.addView(undoBar())
         if (prevScroll > 0 && screen is ScrollView) screen.post { screen.scrollTo(0, prevScroll) }
     }
 
@@ -1023,6 +1072,7 @@ class MainActivity : Activity() {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
         /** Which page to open (a [Tab] name). */
         const val EXTRA_TAB = "com.tokalot.app.TAB"
+        private const val UNDO_TAG = "undo-delete"
         private const val STUCK_GRACE_MS = 4000L // how long Android gets to start the accessibility service after the app
         private const val REQ_BACKUP = 41
         private const val REQ_RESTORE = 42

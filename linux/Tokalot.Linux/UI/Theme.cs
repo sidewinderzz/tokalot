@@ -445,6 +445,57 @@ public static class Ui
     }
 
     /**
+     * The voice note player's position bar: a thin 4px rounded track, the played part in [fill], and a round
+     * 12px knob that grows to 14px under the pointer. The stock Slider's parts, so clicking and dragging work as before.
+     */
+    public static ControlTheme SeekBarTheme(IBrush fill)
+    {
+        var theme = new ControlTheme(typeof(Slider));
+        theme.Setters.Add(new Setter(Layoutable.MinHeightProperty, 22.0));
+        theme.Setters.Add(new Setter(TemplatedControl.TemplateProperty, new FuncControlTemplate<Slider>((s, ns) =>
+        {
+            RepeatButton Part(string name, IBrush brush) => new()
+            {
+                Name = name, Focusable = false, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch,
+                Template = new FuncControlTemplate<RepeatButton>((_, _) => new Border
+                {
+                    Background = Brushes.Transparent,
+                    Child = new Border { Height = 4, CornerRadius = new CornerRadius(2), Background = brush, VerticalAlignment = VerticalAlignment.Center },
+                }),
+            };
+            var dec = Part("PART_DecreaseButton", fill);
+            var inc = Part("PART_IncreaseButton", C.Line);
+            var thumb = new Thumb
+            {
+                Width = 14, Height = 14,
+                Template = new FuncControlTemplate<Thumb>((t, _) =>
+                {
+                    var knob = new Border
+                    {
+                        Width = 12, Height = 12, CornerRadius = new CornerRadius(7), Background = fill,
+                        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                    };
+                    t.PointerEntered += (_, _) => knob.Width = knob.Height = 14;
+                    t.PointerExited += (_, _) => knob.Width = knob.Height = 12;
+                    return new Border { Background = Brushes.Transparent, Child = knob };
+                }),
+            };
+            var track = new Track
+            {
+                Name = "PART_Track", Orientation = Orientation.Horizontal, DecreaseButton = dec, IncreaseButton = inc, Thumb = thumb,
+                [!Track.MinimumProperty] = s[!RangeBase.MinimumProperty],
+                [!Track.MaximumProperty] = s[!RangeBase.MaximumProperty],
+                [!!Track.ValueProperty] = s[!!RangeBase.ValueProperty],
+            };
+            ns.Register("PART_Track", track);
+            ns.Register("PART_DecreaseButton", dec);
+            ns.Register("PART_IncreaseButton", inc);
+            return new Border { Background = Brushes.Transparent, Child = track };
+        })));
+        return theme;
+    }
+
+    /**
      * App-wide looks, on top of Avalonia's Fluent base templates: pop-up menus and tooltips as rounded
      * cards in the theme's colors, text boxes with no frame of their own (Field draws the rounded box), and
      * the slim scroll bar. Goes in the app's resources; rebuilt when the theme changes.

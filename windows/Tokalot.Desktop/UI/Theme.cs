@@ -89,9 +89,10 @@ public static class Ui
 
     /**
      * A small modal in the app's own style (the stock message box is white and square).
-     * Returns true for the main button. cancel: null shows a single button.
+     * Returns true for the main button. cancel: null shows a single button. input: a box under the message, which
+     * gets the focus and takes Enter for the main button.
      */
-    public static bool Dialog(Window? owner, string message, string ok = "OK", string? cancel = "Cancel", string? title = null)
+    public static bool Dialog(Window? owner, string message, string ok = "OK", string? cancel = "Cancel", string? title = null, (Border Box, TextBox Input)? input = null)
     {
         var result = false;
         var w = new Window
@@ -118,6 +119,13 @@ public static class Ui
             body.Children.Add(h);
         }
         body.Children.Add(Text(message, 15));
+        if (input is { } inp)
+        {
+            var (box, tb) = inp;
+            box.Margin = new Thickness(0, 14, 0, 0);
+            body.Children.Add(box);
+            tb.PreviewKeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; result = true; w.Close(); } };
+        }
         body.Children.Add(buttons);
         w.Content = new Border
         {
@@ -126,7 +134,7 @@ public static class Ui
             Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 18, ShadowDepth = 3, Opacity = 0.35 },
         };
         w.KeyDown += (_, e) => { if (e.Key == Key.Escape) w.Close(); };
-        w.Loaded += (_, _) => main.Focus();
+        w.Loaded += (_, _) => { if (input is { } f) { f.Input.Focus(); f.Input.SelectAll(); } else main.Focus(); };
         w.ShowDialog();
         return result;
     }
@@ -200,6 +208,13 @@ public static class Ui
         b.MouseLeave += (_, _) => b.Opacity = 1;
         b.MouseLeftButtonUp += (_, e) => { e.Handled = true; onClick(); };
         return Keys(b, onClick, label.Length > 0 ? label : icon);
+    }
+
+    /** A Dialog with a one-line box: what was typed, or null if it was cancelled. */
+    public static string? Prompt(Window? owner, string title, string message, string value, string ok = "Save")
+    {
+        var box = Field(value);
+        return Dialog(owner, message, ok, title: title, input: box) ? box.Input.Text : null;
     }
 
     /** Text field inside a rounded box. */
@@ -361,6 +376,52 @@ public static class Ui
       <Setter Property='MinHeight' Value='10'/>
     </Trigger>
   </Style.Triggers>
+</Style>");
+    }
+
+    /** A slim seek bar: a thin rounded track, the played part in [fill], and a round thumb that grows under the pointer. */
+    public static Style SliderStyle(Brush fill)
+    {
+        string Hex(Brush b) => ((SolidColorBrush)b).Color.ToString();
+        string accent = Hex(fill), track = Hex(C.Pill);
+        string Part(string command, string color) => $@"
+            <RepeatButton Command='{command}' Focusable='False' IsTabStop='False'>
+              <RepeatButton.Template>
+                <ControlTemplate TargetType='RepeatButton'>
+                  <Grid Background='Transparent'><Border Height='4' CornerRadius='2' Background='{color}' VerticalAlignment='Center'/></Grid>
+                </ControlTemplate>
+              </RepeatButton.Template>
+            </RepeatButton>";
+        return (Style)XamlReader.Parse($@"
+<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' TargetType='Slider'>
+  <Setter Property='MinHeight' Value='20'/>
+  <Setter Property='Template'>
+    <Setter.Value>
+      <ControlTemplate TargetType='Slider'>
+        <Grid Background='Transparent'>
+          <Track x:Name='PART_Track'>
+            <Track.DecreaseRepeatButton>{Part("{x:Static Slider.DecreaseLarge}", accent)}</Track.DecreaseRepeatButton>
+            <Track.IncreaseRepeatButton>{Part("{x:Static Slider.IncreaseLarge}", track)}</Track.IncreaseRepeatButton>
+            <Track.Thumb>
+              <Thumb Focusable='False'>
+                <Thumb.Template>
+                  <ControlTemplate TargetType='Thumb'>
+                    <Grid Width='14' Height='14' Background='Transparent'>
+                      <Ellipse x:Name='dot' Width='12' Height='12' Fill='{accent}'/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='dot' Property='Width' Value='14'/><Setter TargetName='dot' Property='Height' Value='14'/></Trigger>
+                      <Trigger Property='IsDragging' Value='True'><Setter TargetName='dot' Property='Width' Value='14'/><Setter TargetName='dot' Property='Height' Value='14'/></Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
+            </Track.Thumb>
+          </Track>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value>
+  </Setter>
 </Style>");
     }
 

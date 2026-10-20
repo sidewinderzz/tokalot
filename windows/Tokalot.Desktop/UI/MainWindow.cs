@@ -50,6 +50,8 @@ public sealed class MainWindow : Window
     private bool editingNew;
     private readonly Action onHistory, onPlayer, onNoteImport;
     private readonly Border playerHost = new() { Visibility = Visibility.Collapsed };
+    /** Floating over the bottom of the page: "Back to playing" on a note, "Note deleted · Undo" after a delete. */
+    private readonly Border followChip, undoBar;
     private readonly DispatcherTimer noteTimer;
     private readonly Action<bool> onSync;
 
@@ -125,6 +127,37 @@ public sealed class MainWindow : Window
         Grid.SetRow(playerHost, 1);
         contentGrid.Children.Add(playerHost);
         contentGrid.Children.Add(toast);
+        followChip = Ui.Stadium(new Border
+        {
+            Background = C.Text, Padding = new Thickness(16, 8, 16, 8), Cursor = Cursors.Hand, Visibility = Visibility.Collapsed,
+            Child = Ui.Text("Back to playing", 13.5, C.Card), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 16), Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, ShadowDepth = 2, Opacity = 0.3 },
+        });
+        followChip.MouseLeftButtonUp += (_, _) => NoteFollowAgain();
+        contentGrid.Children.Add(Ui.Keys(followChip, NoteFollowAgain, "Back to playing"));
+        var undo = Ui.Text("Undo", 13.5, C.Hex("#6EA8FE"), bold: true);
+        undo.Margin = new Thickness(18, 0, 0, 0);
+        undo.Cursor = Cursors.Hand;
+        undo.MouseLeftButtonUp += (_, _) => UndoDelete();
+        undoBar = Ui.Stadium(new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x1C, 0x1C, 0x1E)), Padding = new Thickness(18, 9, 18, 9), Visibility = Visibility.Collapsed,
+            Child = Ui.Row(Ui.Text("Note deleted", 13.5, Brushes.White), Ui.Keys(undo, UndoDelete, "Undo")),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 28),
+        });
+        contentGrid.Children.Add(undoBar);
+        // Scrolling by hand stops the note page following the word being played.
+        scroller.PreviewMouseWheel += (_, _) => NoteUnfollow();
+        scroller.PreviewTouchDown += (_, _) => NoteUnfollow();
+        scroller.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            for (var d = e.OriginalSource as DependencyObject; d != null && d != scroller; d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+                if (d is System.Windows.Controls.Primitives.ScrollBar) { NoteUnfollow(); return; }
+        };
+        scroller.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key is Key.PageUp or Key.PageDown or Key.Home or Key.End or Key.Up or Key.Down && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase) NoteUnfollow();
+        };
         Grid.SetColumn(contentGrid, 1);
         root.Children.Add(contentGrid);
         var caption = CaptionButtons();
@@ -148,7 +181,7 @@ public sealed class MainWindow : Window
         noteTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(50), DispatcherPriority.Normal, (_, _) => NoteTick(), Dispatcher);
         noteTimer.Stop();
         NotePlayer.Changed += NotePlayerChanged;
-        Closed += (_, _) => { NotePlayer.Changed -= NotePlayerChanged; NotePlayer.Stop(false); noteTimer.Stop(); };
+        Closed += (_, _) => { NotePlayer.Changed -= NotePlayerChanged; NotePlayer.Stop(false); noteTimer.Stop(); CommitDelete(); };
         Deactivated += (_, _) => SaveNow();
         SourceInitialized += (_, _) => DarkTitleBar();
         Activated += (_, _) => Sync.Queue();
@@ -208,7 +241,7 @@ public sealed class MainWindow : Window
 
     private UIElement Sidebar()
     {
-        var logo = new Bars { Width = 34, Height = 34, BarBrush = C.Text, AccentBrush = !C.Dark && S.Accent == 0xFFFFFFFF ? C.Text : C.Argb(S.Accent) };
+        var logo = new Bars { Width = 34, Height = 34, BarBrush = C.Text, AccentBrush = Accent };
         var title = new TextBlock { Text = "Tokalot", FontFamily = C.Sans, FontWeight = FontWeights.Bold, FontSize = 23, Foreground = C.Text, Margin = new Thickness(8, 0, 0, 1), VerticalAlignment = VerticalAlignment.Center };
         var head = Ui.Row(logo, title);
         head.Margin = new Thickness(22, 26, 0, 4);
@@ -310,6 +343,7 @@ public sealed class MainWindow : Window
     public void Go(Page p)
     {
         if (openNoteId != null) { NotePlayer.Stop(false); openNoteId = null; } // the sidebar's Notes goes back to the list too
+        if (p != Page.Notes) CommitDelete();
         if (p != CurrentPage) scroller.ScrollToTop();
         CurrentPage = p;
         Render();
@@ -337,6 +371,7 @@ public sealed class MainWindow : Window
         scroller.Content = wideLayout && !(CurrentPage == Page.Notes && openNoteId != null) ? TwoColumns(col) : StripMarkers(col);
         scroller.UpdateLayout();
         scroller.ScrollToVerticalOffset(offset);
+        NoteChip();
     }
 
     // ---------- two columns on wide windows ----------
@@ -902,15 +937,8 @@ public sealed class MainWindow : Window
             void Done() { S.NotesFeedbackDone = true; S.Save(); Render(); }
             var useful = Ui.Button("Useful", () => { Open(NotesFeedbackUrl("useful")); Done(); }, filled: true);
             useful.Margin = new Thickness(0, 0, 8, 0);
-            var close = new Border
-            {
-                Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Background = Brushes.Transparent, Cursor = Cursors.Hand,
-                Child = Icons.Get("close", 15, C.Sub), ToolTip = "Close", VerticalAlignment = VerticalAlignment.Top,
-            };
-            close.MouseEnter += (_, _) => close.Background = C.Hover;
-            close.MouseLeave += (_, _) => close.Background = Brushes.Transparent;
-            close.MouseLeftButtonUp += (_, _) => Done();
-            Ui.Keys(close, Done, "Close");
+            var close = CloseX(Done, "Close");
+            close.VerticalAlignment = VerticalAlignment.Top;
             col.Children.Add(Spaced(Ui.Card(Ui.Stack(
                 Spread(Ui.Text("Voice notes are a beta. Worth keeping?", 15.5, bold: true), close),
                 Spaced(Ui.Text("Opens a short form on GitHub (a free account is needed). It's public, so your notes aren't in it.", 13.5, C.Sub), 0, 2, 0, 10),
@@ -942,7 +970,7 @@ public sealed class MainWindow : Window
                 Spaced(Ui.Text(status, 13.5, running ? C.Sub : C.Amber), 0, 2, 0, actions.Count > 0 ? 10 : 0),
                 Ui.Row(actions.ToArray())), 20), 0, 0, 0, 16));
         }
-        var notes = Notes.All();
+        var notes = Notes.All().Where(n => n.Id != pendingDelete).ToList();
         if (notes.Count == 0)
         {
             col.Children.Add(Ui.Card(Ui.Text("No notes yet. Press Ctrl+Shift+Win, or New voice note in the tray menu, and talk.", 16, C.Sub), 24));
@@ -972,6 +1000,20 @@ public sealed class MainWindow : Window
             more.HorizontalAlignment = HorizontalAlignment.Center;
             col.Children.Add(Spaced(more, 0, 20, 0, 0));
         }
+    }
+
+    /** A small round ✕. */
+    private static Border CloseX(Action onClick, string tip)
+    {
+        var x = new Border
+        {
+            Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Background = Brushes.Transparent, Cursor = Cursors.Hand,
+            Child = Icons.Get("close", 15, C.Sub), ToolTip = tip,
+        };
+        x.MouseEnter += (_, _) => x.Background = C.Hover;
+        x.MouseLeave += (_, _) => x.Background = Brushes.Transparent;
+        x.MouseLeftButtonUp += (_, e) => { e.Handled = true; onClick(); };
+        return Ui.Keys(x, onClick, tip);
     }
 
     private void AddRecording()
@@ -1015,9 +1057,22 @@ public sealed class MainWindow : Window
     {
         var info = NoteImport.Get(n.Id);
         var voice = info?.Audio != null;
-        var preview = Ui.Text(System.Text.RegularExpressions.Regex.Replace(n.Text.Trim(), @"\s+", " "), 16.5);
-        preview.MaxHeight = 16.5 * 1.4 * 2;
-        preview.TextTrimming = TextTrimming.CharacterEllipsis;
+        // With a title: the title in bold, then the text's first line in grey. Without: the first lines of the text.
+        FrameworkElement preview;
+        if (info?.Title is { } title)
+        {
+            var head = Ui.Text(title, 16.5, bold: true);
+            var first = Ui.Text(n.Text.Trim().Split('\n')[0].Trim(), 14.5, C.Sub);
+            foreach (var t in new[] { head, first }) { t.TextWrapping = TextWrapping.NoWrap; t.TextTrimming = TextTrimming.CharacterEllipsis; }
+            preview = Ui.Stack(head, Spaced(first, 0, 2, 0, 0));
+        }
+        else
+        {
+            var text = Ui.Text(System.Text.RegularExpressions.Regex.Replace(n.Text.Trim(), @"\s+", " "), 16.5);
+            text.MaxHeight = 16.5 * 1.4 * 2;
+            text.TextTrimming = TextTrimming.CharacterEllipsis;
+            preview = text;
+        }
         var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("h:mm tt", CultureInfo.InvariantCulture);
         if (voice)
         {
@@ -1050,9 +1105,20 @@ public sealed class MainWindow : Window
     private double noteDuration;
     private readonly List<System.Windows.Documents.Run> noteRuns = new();
     private int noteLit = -1;
+    private TextBlock? noteText;
     private Slider? noteSlider;
-    private TextBlock? noteClock;
+    private TextBlock? noteElapsed, noteRemain;
     private bool noteSliderSetting;
+    /** The "Click any word" hint, hidden at once when it's used. */
+    private FrameworkElement? noteHint;
+    /** The timeline's points as shown, so playback can mark the one being played. */
+    private readonly List<(double Time, TextBlock Text, Border Bar)> notePoints = new();
+    private int noteNow = -1;
+    /** Notes asked for a title in this window already, so a failure isn't retried on every redraw. */
+    private readonly HashSet<long> titleTried = new();
+
+    /** The accent for marks on the page; the white accent would vanish on a light page, so it's the text colour there. */
+    private static Brush Accent => !C.Dark && S.Accent == 0xFFFFFFFF ? C.Text : C.Argb(S.Accent);
 
     private void OpenNote(long id)
     {
@@ -1060,6 +1126,7 @@ public sealed class MainWindow : Window
         noteSummaryShown = noteTimelineShown = false;
         noteSilence = null;
         noteResumeAt = 0;
+        noteFollow = true;
         NotePlayer.Stop(false);
         scroller.ScrollToTop();
         Render();
@@ -1074,14 +1141,14 @@ public sealed class MainWindow : Window
     }
 
     /**
-     * The note page, laid out like the phone's: the text first (a voice note's words can be clicked to play from
-     * there), Summary and Timeline as small buttons under it that open below it, the rest in the ⋮ menu, and a
-     * slim player along the bottom of the window.
+     * The note page, laid out like the phone's: the title, then Summary and Timeline as small buttons that open
+     * below them, then the text (a voice note's words can be clicked to play from there), the rest in the ⋮ menu,
+     * and a slim player along the bottom of the window.
      */
     private void BuildNote(StackPanel col, long id)
     {
         var back = Ui.Button("Notes", CloseNote, icon: "back");
-        var note = Notes.All().FirstOrDefault(x => x.Id == id);
+        var note = Notes.All().FirstOrDefault(x => x.Id == id && x.Id != pendingDelete);
         if (note == null)
         {
             col.Children.Add(back);
@@ -1112,26 +1179,13 @@ public sealed class MainWindow : Window
             }
         }
         NoteRecut();
+        // A note with no title gets one from the AI in the background; without a key or on a failure it just stays without.
+        if (info?.Title == null && info?.TitleOff != true && note.Text.Trim().Length >= 40 && titleTried.Add(id)) MakeTitle(note);
 
         // The ⋮ menu: what's set once and left alone, and the rarer actions.
         var menu = new ContextMenu();
         Border more = null!;
         more = Ui.Button("", () => { menu.PlacementTarget = more; menu.IsOpen = true; }, icon: "more");
-        var length = new MenuItem { Header = "Summary length" };
-        for (var l = 1; l <= 5; l++)
-        {
-            var lv = l;
-            var item = new MenuItem { Header = NoteMedia.LevelNames[l - 1], IsCheckable = true, IsChecked = S.NoteSummaryLevel == l };
-            item.Click += (_, _) =>
-            {
-                S.NoteSummaryLevel = lv;
-                S.Save();
-                if (noteSummaryShown && NoteImport.Get(id)?.Summary(lv) == null) Summarize(note, lv, voice, false);
-                else Render();
-            };
-            length.Items.Add(item);
-        }
-        menu.Items.Add(length);
         if (voice)
         {
             var silence = new MenuItem { Header = "Skip silence", IsCheckable = true, IsChecked = S.NoteSkipSilence };
@@ -1141,48 +1195,54 @@ public sealed class MainWindow : Window
             menu.Items.Add(silence);
             menu.Items.Add(ums);
         }
+        var rename = new MenuItem { Header = "Rename" };
+        rename.Click += (_, _) =>
+        {
+            // Saving it empty removes the title, and the AI doesn't make another for this note.
+            if (Ui.Prompt(this, "Rename", "Leave it empty for no title.", NoteImport.Get(id)?.Title ?? "") is not { } named) return;
+            NoteImport.SetTitle(id, named);
+            Render();
+        };
+        menu.Items.Add(rename);
         var copy = new MenuItem { Header = "Copy text" };
         copy.Click += (_, _) => { _ = TextInjector.Copy(note.Text); Toast("Copied"); };
         menu.Items.Add(copy);
         var delete = new MenuItem { Header = "Delete note" };
-        delete.Click += (_, _) =>
-        {
-            if (!Ui.Dialog(this, file != null ? "Delete this note and its recording? They can't be brought back." : "Delete this note? It can't be brought back.", "Delete")) return;
-            NotePlayer.Stop(false);
-            Notes.Delete(id);
-            CloseNote();
-        };
+        delete.Click += (_, _) => DeleteNote(id);
         menu.Items.Add(delete);
         more.ContextMenu = menu;
         col.Children.Add(Spread(back, more));
 
+        if (info?.Title is { } title) col.Children.Add(Spaced(Ui.Heading(title, 30), 4, 16, 0, 0));
         var stamp = DateTimeOffset.FromUnixTimeMilliseconds(note.Time).LocalDateTime.ToString("dddd, MMM d · h:mm tt", CultureInfo.InvariantCulture);
         if (info?.Source != null) stamp += " · from " + info.Source;
-        col.Children.Add(Spaced(Ui.Text(stamp, 13.5, C.Sub), 4, 16, 0, 10));
+        col.Children.Add(Spaced(Ui.Text(stamp, 13.5, C.Sub), 4, info?.Title != null ? 4 : 16, 0, 10));
 
         // Summary and Timeline: small buttons above the text, each opening right under them. They're reached for
         // instead of reading, so they come first and the text follows.
         var segments = info?.Segments ?? new();
-        var buttons = Ui.Row(Ui.Button("Summary", () =>
+        var buttons = Ui.Row(NotePill("≡", "Summary", noteSummaryShown, () =>
         {
             noteSummaryShown = !noteSummaryShown;
             if (noteSummaryShown && NoteImport.Get(id)?.Summary(S.NoteSummaryLevel) == null) Summarize(note, S.NoteSummaryLevel, voice, false);
             else Render();
-        }, filled: noteSummaryShown));
+        }));
         if (voice && segments.Count >= 2)
         {
-            var timeline = Ui.Button("Timeline", () =>
+            var timeline = NotePill("⏱", "Timeline", noteTimelineShown, () =>
             {
                 noteTimelineShown = !noteTimelineShown;
                 if (noteTimelineShown && NoteImport.Get(id)?.Index == null) RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments));
                 else Render();
-            }, filled: noteTimelineShown);
+            });
             timeline.Margin = new Thickness(8, 0, 0, 0);
             buttons.Children.Add(timeline);
         }
         col.Children.Add(Spaced(buttons, 0, 0, 0, 14));
 
         noteBusy.TryGetValue(id, out var busy);
+        notePoints.Clear();
+        noteNow = -1;
         if (noteError.TryGetValue(id, out var err)) col.Children.Add(Spaced(Ui.Text("Couldn't do that: " + err, 14, C.Amber), 4, 0, 0, 12));
         if (noteSummaryShown) col.Children.Add(Spaced(SummaryPanel(note, info, voice, busy), 0, 0, 0, 14));
         if (noteTimelineShown && voice) col.Children.Add(Spaced(TimelinePanel(id, info, segments, busy), 0, 0, 0, 14));
@@ -1191,19 +1251,25 @@ public sealed class MainWindow : Window
         FrameworkElement body;
         noteRuns.Clear();
         noteLit = -1;
+        noteText = null;
+        noteHint = null;
         if (voice)
         {
-            var t = new TextBlock { FontSize = 16.5, FontFamily = C.Sans, Foreground = C.Text, TextWrapping = TextWrapping.Wrap, LineHeight = 16.5 * 1.5 };
+            var t = noteText = new TextBlock { FontSize = 16.5, FontFamily = C.Sans, Foreground = C.Text, TextWrapping = TextWrapping.Wrap, LineHeight = 16.5 * 1.5 };
+            // Screen readers get the text as one block; the words are only for the mouse and stay out of the Tab order.
+            System.Windows.Automation.AutomationProperties.SetName(t, note.Text);
             for (var i = 0; i < noteWords.Count; i++)
             {
                 if (i > 0) t.Inlines.Add(new System.Windows.Documents.Run(noteWords[i].Start - noteWords[i - 1].End >= 2.0 ? "\n\n" : " "));
-                var run = new System.Windows.Documents.Run(noteWords[i].Text) { Cursor = Cursors.Hand };
+                var run = new System.Windows.Documents.Run(noteWords[i].Text) { Cursor = Cursors.Hand, Focusable = false };
                 var at = noteWords[i].Start;
-                run.MouseLeftButtonUp += (_, e) => { e.Handled = true; NotePlay(at); };
+                run.MouseLeftButtonUp += (_, e) => { e.Handled = true; NoteHintSeen(); NotePlay(at); };
                 t.Inlines.Add(run);
                 noteRuns.Add(run);
             }
             body = t;
+            if (!S.NoteWordHintSeen)
+                col.Children.Add(noteHint = Spaced(Spread(Ui.Text("Click any word to play from there", 13.5, C.Sub), CloseX(NoteHintSeen, "Hide this tip")), 4, 0, 0, 8));
         }
         else body = new TextBox
         {
@@ -1216,6 +1282,89 @@ public sealed class MainWindow : Window
         if (voice) { playerHost.Child = NotePlayerBar(); playerHost.Visibility = Visibility.Visible; }
     }
 
+    private async void MakeTitle(Note n)
+    {
+        if (await NoteImport.MakeTitle(S, n.Id, n.Text) != null && CurrentPage == Page.Notes) Render();
+    }
+
+    /** The word hint goes for good once a word is clicked or it's closed. */
+    private void NoteHintSeen()
+    {
+        if (noteHint != null) noteHint.Visibility = Visibility.Collapsed;
+        if (S.NoteWordHintSeen) return;
+        S.NoteWordHintSeen = true;
+        S.Save();
+    }
+
+    /** Summary and Timeline: quiet outlined pills with a small glyph, filled while their card is open. */
+    private static Border NotePill(string glyph, string label, bool open, Action onClick)
+    {
+        var fg = open ? C.Card : C.Text;
+        var b = Ui.Stadium(new Border
+        {
+            Background = open ? C.Text : Brushes.Transparent, BorderBrush = open ? C.Text : C.Pill, BorderThickness = new Thickness(1),
+            Padding = new Thickness(12, 0, 14, 0), MinHeight = 32, Cursor = Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Left,
+            Child = Ui.Row(Spaced(Ui.Text(glyph, 13, fg), 0, 0, 6, 0), Ui.Text(label, 13.5, fg)),
+        });
+        b.MouseEnter += (_, _) => b.Opacity = 0.82;
+        b.MouseLeave += (_, _) => b.Opacity = 1;
+        b.MouseLeftButtonUp += (_, e) => { e.Handled = true; onClick(); };
+        return Ui.Keys(b, onClick, label);
+    }
+
+    /** Three grey bars that pulse gently while a summary or the timeline is being made. */
+    private static FrameworkElement Skeleton(string what)
+    {
+        var box = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+        foreach (var w in new[] { 1.0, 0.8, 0.55 })
+        {
+            var g = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - w, GridUnitType.Star) });
+            g.Children.Add(new Border { Height = 12, CornerRadius = new CornerRadius(6), Background = C.Pill });
+            box.Children.Add(g);
+        }
+        System.Windows.Automation.AutomationProperties.SetName(box, what);
+        box.BeginAnimation(OpacityProperty, new DoubleAnimation(0.75, 0.3, TimeSpan.FromMilliseconds(900)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+        return box;
+    }
+
+    // ---------- deleting, with Undo ----------
+
+    /** The note deleted a moment ago: hidden, and really deleted once the Undo bar goes. */
+    private long? pendingDelete;
+    private DispatcherTimer? undoTimer;
+
+    private void DeleteNote(long id)
+    {
+        CommitDelete(); // an earlier one can't be undone any more
+        NotePlayer.Stop(false);
+        pendingDelete = id;
+        undoTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(6), DispatcherPriority.Normal, (_, _) => CommitDelete(), Dispatcher);
+        undoTimer.Stop();
+        undoTimer.Start();
+        undoBar.Visibility = Visibility.Visible;
+        if (openNoteId == id) CloseNote(); else Render();
+    }
+
+    /** The real delete of the note waiting on Undo, if there is one. */
+    private void CommitDelete()
+    {
+        undoTimer?.Stop();
+        undoBar.Visibility = Visibility.Collapsed;
+        if (pendingDelete is not { } id) return;
+        pendingDelete = null;
+        Notes.Delete(id);
+    }
+
+    private void UndoDelete()
+    {
+        undoTimer?.Stop();
+        undoBar.Visibility = Visibility.Collapsed;
+        pendingDelete = null;
+        Render();
+    }
+
     private void Summarize(Note n, int level, bool voice, bool redo)
     {
         if (!redo && NoteImport.Get(n.Id)?.Summary(level) != null) { Render(); return; }
@@ -1225,9 +1374,32 @@ public sealed class MainWindow : Window
     private Border SummaryPanel(Note n, NoteImport.Info? info, bool voice, string? busy)
     {
         var level = S.NoteSummaryLevel;
-        var box = Ui.Stack(Ui.Text("Summary", 15.5, bold: true),
-            Spaced(Ui.Text(NoteMedia.LevelNames[level - 1] + " · change the length in the ⋮ menu", 13, C.Sub), 0, 2, 0, 10));
-        if (busy == "Summarizing…") box.Children.Add(Ui.Text(busy, 14.5, C.Sub));
+        // The length, as a small label that opens a chooser of the five.
+        var lengths = new ContextMenu();
+        for (var l = 1; l <= 5; l++)
+        {
+            var lv = l;
+            var item = new MenuItem { Header = NoteMedia.LevelNames[l - 1], IsCheckable = true, IsChecked = level == l };
+            item.Click += (_, _) =>
+            {
+                S.NoteSummaryLevel = lv;
+                S.Save();
+                if (NoteImport.Get(n.Id)?.Summary(lv) == null) Summarize(n, lv, voice, false);
+                else Render();
+            };
+            lengths.Items.Add(item);
+        }
+        var length = Ui.Stadium(new Border
+        {
+            Background = Brushes.Transparent, Padding = new Thickness(8, 2, 8, 3), Cursor = Cursors.Hand, ContextMenu = lengths,
+            Child = Ui.Text(NoteMedia.LevelNames[level - 1] + " ▾", 13, C.Sub), Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+        });
+        void Choose() { lengths.PlacementTarget = length; lengths.IsOpen = true; }
+        length.MouseEnter += (_, _) => length.Background = C.Hover;
+        length.MouseLeave += (_, _) => length.Background = Brushes.Transparent;
+        length.MouseLeftButtonUp += (_, _) => Choose();
+        var box = Ui.Stack(Spaced(Ui.Row(Ui.Text("Summary", 15.5, bold: true), Ui.Keys(length, Choose, "Summary length: " + NoteMedia.LevelNames[level - 1])), 0, 0, 0, 10));
+        if (busy == "Summarizing…") box.Children.Add(Skeleton(busy));
         else if (info?.Summary(level) is { } summary)
         {
             box.Children.Add(new TextBox
@@ -1250,7 +1422,7 @@ public sealed class MainWindow : Window
         var box = Ui.Stack(Ui.Text("Timeline", 15.5, bold: true),
             Spaced(Ui.Text("Every point in the order it was said. Click one to hear it.", 13, C.Sub), 0, 2, 0, 8));
         var points = info?.Index;
-        if (busy == "Making the timeline…") box.Children.Add(Ui.Text(busy, 14.5, C.Sub));
+        if (busy == "Making the timeline…") box.Children.Add(Skeleton(busy));
         else if (points == null)
             box.Children.Add(Ui.Button("Make the timeline", () => RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments)), filled: true));
         else if (points.Count == 0) box.Children.Add(Ui.Text("Nothing to put on it.", 14, C.Sub));
@@ -1262,13 +1434,18 @@ public sealed class MainWindow : Window
                 if (p.Topic.Length > 0 && !p.Topic.Equals(lastTopic, StringComparison.OrdinalIgnoreCase))
                     box.Children.Add(Spaced(Ui.Text(p.Topic.ToUpperInvariant(), 11.5, C.Sub, bold: true), 0, 10, 0, 2));
                 lastTopic = p.Topic;
+                // An accent bar at the left marks the point being played (see NoteShow).
+                var bar = new Border { Width = 3, CornerRadius = new CornerRadius(1.5), Background = Accent, Margin = new Thickness(0, 2, 8, 2), Visibility = Visibility.Hidden };
+                DockPanel.SetDock(bar, Dock.Left);
                 var time = Ui.Text(NoteMedia.Clock(p.Time), 14, C.Link);
                 time.Width = 52;
                 DockPanel.SetDock(time, Dock.Left);
                 var text = Ui.Text(p.Text, 14.5);
                 var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+                row.Children.Add(bar);
                 row.Children.Add(time);
                 row.Children.Add(text);
+                notePoints.Add((p.Time, text, bar));
                 var at = p.Time;
                 row.MouseLeftButtonUp += (_, _) => NotePlay(at);
                 box.Children.Add(Ui.Keys(row, () => NotePlay(at), NoteMedia.Clock(p.Time) + ", " + p.Text));
@@ -1289,15 +1466,15 @@ public sealed class MainWindow : Window
 
     private static string SpeedLabel(double v) => v.ToString("0.##", CultureInfo.InvariantCulture) + "×";
 
-    /** Play, a position bar, the time and the speed. */
+    /** Play, a position bar with the time gone and the time left under its ends, and the speed. */
     private UIElement NotePlayerBar()
     {
         var playing = NotePlayer.Playing && NotePlayer.File == noteFile;
         var play = Ui.Button("", NoteToggle, filled: true, icon: playing ? "pause" : "play");
         var slider = noteSlider = new Slider
         {
-            Minimum = 0, Maximum = Math.Max(0.1, noteDuration), IsMoveToPointEnabled = true, VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(14, 0, 14, 0), Value = NotePlayer.File == noteFile ? NotePlayer.Position : 0,
+            Minimum = 0, Maximum = Math.Max(0.1, noteDuration), IsMoveToPointEnabled = true, Style = Ui.SliderStyle(Accent),
+            Value = NotePlayer.File == noteFile ? NotePlayer.Position : 0,
         };
         slider.ValueChanged += (_, e) =>
         {
@@ -1306,8 +1483,15 @@ public sealed class MainWindow : Window
             noteResumeAt = e.NewValue;
             NoteShow(e.NewValue);
         };
-        noteClock = Ui.Text("", 13.5, C.Sub);
-        noteClock.VerticalAlignment = VerticalAlignment.Center;
+        noteElapsed = Ui.Text("", 12, C.Sub);
+        noteRemain = Ui.Text("", 12, C.Sub);
+        noteRemain.HorizontalAlignment = HorizontalAlignment.Right;
+        var times = new Grid { Margin = new Thickness(0, -2, 0, 0) };
+        times.Children.Add(noteElapsed);
+        times.Children.Add(noteRemain);
+        var middle = Ui.Stack(slider, times);
+        middle.Margin = new Thickness(14, 0, 14, 0);
+        middle.VerticalAlignment = VerticalAlignment.Center;
         var speed = Ui.Button(SpeedLabel(S.NoteSpeed), () =>
         {
             var i = Array.FindIndex(Sync.NoteSpeeds, v => Math.Abs(v - S.NoteSpeed) < 0.001);
@@ -1316,16 +1500,13 @@ public sealed class MainWindow : Window
             NotePlayer.SetSpeed(S.NoteSpeed);
             playerHost.Child = NotePlayerBar();
         });
-        speed.Margin = new Thickness(12, 0, 0, 0);
         var g = new Grid { Margin = new Thickness(24, 10, 24, 12) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.Children.Add(play);
-        Grid.SetColumn(slider, 1); g.Children.Add(slider);
-        Grid.SetColumn(noteClock, 2); g.Children.Add(noteClock);
-        Grid.SetColumn(speed, 3); g.Children.Add(speed);
+        Grid.SetColumn(middle, 1); g.Children.Add(middle);
+        Grid.SetColumn(speed, 2); g.Children.Add(speed);
         NoteShow(slider.Value);
         return new Border { Background = C.Card, BorderBrush = C.Line, BorderThickness = new Thickness(0, 1, 0, 0), Child = g };
     }
@@ -1351,12 +1532,20 @@ public sealed class MainWindow : Window
         if (NotePlayer.Error is { } err) Toast("Windows can't play this recording: " + err);
         if (NotePlayer.Playing) noteTimer.Start(); else noteTimer.Stop();
         if (openNoteId != null && noteFile != null && playerHost.Visibility == Visibility.Visible) playerHost.Child = NotePlayerBar();
+        NoteChip();
     });
 
     /** About 20 times a second while playing: jumps over a cut, moves the bar and lights up the word being said. */
     private void NoteTick()
     {
         if (!NotePlayer.Playing || NotePlayer.File != noteFile) { noteTimer.Stop(); return; }
+        // Following the word: an easing step toward where the page should be.
+        if (noteScrollTo is { } target)
+        {
+            var gap = target - scroller.VerticalOffset;
+            scroller.ScrollToVerticalOffset(Math.Abs(gap) < 1 ? target : scroller.VerticalOffset + gap * 0.25);
+            if (Math.Abs(gap) < 1) noteScrollTo = null;
+        }
         var at = NotePlayer.Position;
         if (NoteMedia.SkipTo(noteCuts, at) is { } to)
         {
@@ -1370,13 +1559,71 @@ public sealed class MainWindow : Window
     private void NoteShow(double at)
     {
         if (noteSlider != null) { noteSliderSetting = true; noteSlider.Value = at; noteSliderSetting = false; }
-        if (noteClock != null) noteClock.Text = NoteMedia.Clock(at) + " / " + NoteMedia.Clock(noteDuration);
+        if (noteElapsed != null && noteRemain != null)
+        {
+            noteElapsed.Text = NoteMedia.Clock(at);
+            noteRemain.Text = "-" + NoteMedia.Clock(Math.Max(0, noteDuration - at));
+        }
+        // The timeline point being played: the last one at or before the position.
+        var now = NotePlayer.File == noteFile ? notePoints.FindLastIndex(p => p.Time <= at + 0.02) : -1;
+        if (now != noteNow)
+        {
+            if (noteNow >= 0 && noteNow < notePoints.Count) { notePoints[noteNow].Bar.Visibility = Visibility.Hidden; notePoints[noteNow].Text.FontWeight = FontWeights.Normal; }
+            noteNow = now;
+            if (now >= 0) { notePoints[now].Bar.Visibility = Visibility.Visible; notePoints[now].Text.FontWeight = FontWeights.SemiBold; }
+        }
         var i = NotePlayer.File == noteFile ? NoteMedia.WordAt(noteWords, at + 0.02) : -1;
         if (i == noteLit) return;
         if (noteLit >= 0 && noteLit < noteRuns.Count) noteRuns[noteLit].Background = null;
         noteLit = i;
         if (i >= 0 && i < noteRuns.Count) noteRuns[i].Background = new SolidColorBrush(Color.FromArgb(0x55, 0x6E, 0xA8, 0xFE));
+        if (noteFollow && NotePlayer.Playing) NoteScrollToWord(false);
     }
+
+    // ---------- following the word being played ----------
+
+    /** Playback keeps the lit word in view until the page is scrolled by hand; "Back to playing" turns it on again. */
+    private bool noteFollow = true;
+    private double? noteScrollTo;
+
+    /**
+     * Aims the page so the lit word sits about a third of the way down: only once it has left a comfortable band
+     * (always, when [now]), and smoothly, a step on each tick.
+     */
+    private void NoteScrollToWord(bool now)
+    {
+        if (noteText == null || noteLit < 0 || noteLit >= noteRuns.Count) return;
+        try
+        {
+            var r = noteRuns[noteLit].ContentStart.GetCharacterRect(System.Windows.Documents.LogicalDirection.Forward);
+            if (r.IsEmpty) return;
+            var y = noteText.TransformToVisual(scroller).Transform(r.TopLeft).Y;
+            var h = scroller.ViewportHeight;
+            if (!now && y > h * 0.12 && y + r.Height < h * 0.65) return;
+            noteScrollTo = Math.Clamp(scroller.VerticalOffset + y - h / 3, 0, scroller.ScrollableHeight);
+        }
+        catch (InvalidOperationException) { } // not laid out yet
+    }
+
+    private void NoteUnfollow()
+    {
+        if (openNoteId == null || !noteFollow || !NotePlayer.Playing) return; // scrolling while paused leaves it on for the next play
+        noteFollow = false;
+        noteScrollTo = null;
+        NoteChip();
+    }
+
+    private void NoteFollowAgain()
+    {
+        noteFollow = true;
+        NoteChip();
+        NoteScrollToWord(true);
+    }
+
+    /** "Back to playing" shows only while a note plays and the page isn't following it. */
+    private void NoteChip() =>
+        followChip.Visibility = openNoteId != null && noteFile != null && !noteFollow && NotePlayer.Playing && NotePlayer.File == noteFile
+            ? Visibility.Visible : Visibility.Collapsed;
 
     // ---------- Snippets ----------
 

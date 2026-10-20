@@ -77,17 +77,34 @@ object Notes {
         Sync.changed(ctx)
     }
 
-    /** The notes as the sync file holds them. Throws if the file is there but can't be read, so a sync never takes that for "no notes". */
     @Synchronized
-    fun forSync(ctx: Context): List<SyncNote> {
+    private fun texts(ctx: Context): List<SyncNote> {
         val f = file(ctx)
         return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text) } else emptyList()
     }
 
+    /**
+     * The notes as the sync file holds them. Throws if the file is there but can't be read, so a sync never takes that for
+     * "no notes". Titles live with the media and are read outside this lock: NoteImport takes its own, and asks for the notes while holding it.
+     */
+    fun forSync(ctx: Context): List<SyncNote> = texts(ctx).map { it.copy(title = NoteImport.syncTitle(ctx, it.id)) }
+
     /** Stores a sync's result, unless a note was added or deleted here since [before] was read (the caller then syncs again). */
-    @Synchronized
     fun applySynced(ctx: Context, before: List<SyncNote>, after: List<SyncNote>): Boolean {
-        if (forSync(ctx) != before) return false
+        if (!store(ctx, before, after)) return false
+        // A title that came from another device, unless it changed here meanwhile.
+        val had = before.associate { it.id to it.title }
+        for (n in after) {
+            val was = had[n.id]
+            if (n.title == null || n.title == was || NoteImport.syncTitle(ctx, n.id) != was) continue
+            runCatching { NoteImport.setTitle(ctx, n.id, n.title, sync = false) }
+        }
+        return true
+    }
+
+    @Synchronized
+    private fun store(ctx: Context, before: List<SyncNote>, after: List<SyncNote>): Boolean {
+        if (texts(ctx) != before.map { it.copy(title = null) }) return false
         save(ctx, after.map { Note(it.id, it.time, it.text) })
         return true
     }
