@@ -200,6 +200,7 @@ class Prefs(ctx: Context) {
             "keyboardDoubleSpace" to "kb_double_space", "keyboardLearn" to "kb_learn", "keyboardNumberRow" to "kb_number_row",
             "keyboardSymbolHints" to "kb_symbol_hints", "keyboardSound" to "kb_sound", "keyboardVibrate" to "kb_vibrate",
             "keyboardPopup" to "kb_popup", "keyboardClipboard" to "kb_clipboard", "keyboardClipSuggest" to "kb_clip_suggest",
+            "keyboardScreenshots" to "kb_screenshots", "keyboardCodes" to "kb_codes",
         )
 
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
@@ -428,6 +429,8 @@ class Prefs(ctx: Context) {
             "keyboardPopup" to kbPopup,
             "keyboardClipboard" to kbClipboard,
             "keyboardClipSuggest" to kbClipSuggest,
+            "keyboardScreenshots" to kbScreenshots,
+            "keyboardCodes" to kbCodes,
             "keyboardTheme" to kbTheme,
             "keyboardStyle" to kbStyle,
             "keyboardAccent" to (kbAccent.toLong() and 0xFFFFFFFFL),
@@ -622,6 +625,14 @@ class Prefs(ctx: Context) {
     var kbClipSuggest: Boolean
         get() = sp.safeBoolean("kb_clip_suggest", true)
         set(v) = sp.edit().putBoolean("kb_clip_suggest", v).apply()
+    /** A screenshot just taken shows on the bar, ready to paste (needs access to photos). */
+    var kbScreenshots: Boolean
+        get() = sp.safeBoolean("kb_screenshots", true)
+        set(v) = sp.edit().putBoolean("kb_screenshots", v).apply()
+    /** A sign-in code that just came in a text shows on the bar (needs notification access; see CodeListener). */
+    var kbCodes: Boolean
+        get() = sp.safeBoolean("kb_codes", true)
+        set(v) = sp.edit().putBoolean("kb_codes", v).apply()
     /** "auto" follows the phone's dark mode; "light" or "dark" always. */
     var kbTheme: String
         get() = sp.safeString("kb_theme", "auto")?.takeIf { it in KB_THEMES } ?: "auto"

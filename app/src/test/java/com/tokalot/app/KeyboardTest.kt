@@ -244,4 +244,17 @@ class KeyboardTest {
         // Plain numbers and dates aren't phone numbers.
         assertEquals(listOf("Bale count 240 on 10/20"), ClipHistory.smart("Bale count 240 on 10/20"))
     }
+
+    @Test fun codesFromTexts() {
+        assertEquals("123456", CodeFinder.find("Your Google verification code is 123456"))
+        assertEquals("482913", CodeFinder.find("G-482913 is your Google verification code."))
+        assertEquals("7731", CodeFinder.find("Use 7731 to log in to Deere Operations Center"))
+        assertEquals("123456", CodeFinder.find("Your one-time passcode: 123 456. Don't share it."))
+        assertEquals("90210", CodeFinder.find("Chase: 90210 is your security code. Expires in 10 min"))
+        // Messages that don't talk about a code, and numbers that aren't one, are left alone.
+        assertNull(CodeFinder.find("Meet at 1234 Main St at 5"))
+        assertNull(CodeFinder.find("Your order total is $1234.56, code-free shipping"))
+        assertNull(CodeFinder.find("Your code expires in 2026"))
+        assertNull(CodeFinder.find(null))
+    }
 }

@@ -669,6 +669,15 @@ class SettingsScreen(private val a: MainActivity) {
             if (!TokalotKeyboard.isEnabled(this)) startActivity(android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
             else getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showInputMethodPicker()
         }
+        // Optional extras for the bar, each needing one permission: a screenshot just taken, ready to paste,
+        // and a sign-in code that just came in a text.
+        val photos = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+        kbRow("Paste new screenshots", checkSelfPermission(photos) == android.content.pm.PackageManager.PERMISSION_GRANTED, "Allowed", "Allow") {
+            askPermission(photos, 3)
+        }
+        kbRow("Codes from texts", CodeListener.allowed(this), "Allowed", "Allow") {
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
         col.addView(kbSetup)
         col.addView(text("A keyboard in the style of Gboard, with autocorrect and swipe typing. The mic on its bar dictates like the floating button, and ✨ fixes what you typed with your AI cleanup (the selected text, or the whole box). The floating button hides while it's up. Hold the space bar to switch keyboards, or the comma to come back here.", 13f, C.SUB), lp().margins(this, t = 8))
         val kb = card()
@@ -690,6 +699,8 @@ class SettingsScreen(private val a: MainActivity) {
             prefs.kbClipboard = it
             if (!it) TokalotKeyboard.clearClips(this)
         }
+        kbSwitch("Offer new screenshots", "A screenshot you just took shows on the bar as a small picture; tap it to paste it into apps that take pictures, like texting apps. Needs Paste new screenshots above.", prefs.kbScreenshots) { prefs.kbScreenshots = it }
+        kbSwitch("Offer codes from texts", "A sign-in code that just came in a text shows on the bar for a few minutes, ready to paste. Needs Codes from texts above. Tokalot only looks for the code, keeps nothing and sends nothing.", prefs.kbCodes) { prefs.kbCodes = it }
         kbSwitch("Suggest what I copied", "Something you just copied shows on the bar, ready to paste. A link, email address or phone number in it gets its own button.", prefs.kbClipSuggest) { prefs.kbClipSuggest = it }
         col.addView(kb)
 

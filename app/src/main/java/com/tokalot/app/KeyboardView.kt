@@ -66,6 +66,8 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         const val SLOT_MESSAGE = -3
         const val SLOT_CANCEL = -4
         private const val TOOL = -10
+        /** A chip that pastes a picture: drawn as [chipThumb] instead of text. */
+        const val IMAGE_CHIP = "\u0001image"
         private const val LONG_PRESS_MS = 380L
         private const val REPEAT_START_MS = 400L
         private const val REPEAT_MS = 55L
@@ -97,8 +99,11 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         set(v) { field = v; invalidate() }
     var cancelable = false
         set(v) { field = v; invalidate() }
-    /** The suggestions are things copied to the clipboard, drawn as chips. */
+    /** The suggestions are things to paste (copied, a texted code, a new screenshot), drawn as chips. */
     var chips = false
+        set(v) { field = v; invalidate() }
+    /** The picture an [IMAGE_CHIP] shows. */
+    var chipThumb: android.graphics.Bitmap? = null
         set(v) { field = v; invalidate() }
     /** The toolbar's buttons in the user's order (see [KeyboardToolbar]). */
     var toolbar: List<String> = KeyboardToolbar.DEFAULT
@@ -336,6 +341,26 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                         rect.set(p.left + dp(3f), cy - dp(15f), p.right - dp(3f), cy + dp(15f))
                         fill.color = if (t.borderless) t.keyPressed else t.key
                         canvas.drawRoundRect(rect, dp(15f), dp(15f), fill)
+                        val thumb = chipThumb
+                        if (word == IMAGE_CHIP && thumb != null) {
+                            // A tiny picture of it, cropped to fit the pill.
+                            val h = rect.height() - dp(6f)
+                            val w = minOf(rect.width() - dp(12f), h * 1.6f)
+                            val src = android.graphics.Rect(0, 0, thumb.width, thumb.height)
+                            val want = w / h
+                            if (thumb.width.toFloat() / thumb.height > want) {
+                                val cw = (thumb.height * want).toInt(); src.left = (thumb.width - cw) / 2; src.right = src.left + cw
+                            } else {
+                                val ch = (thumb.width / want).toInt(); src.top = (thumb.height - ch) / 2; src.bottom = src.top + ch
+                            }
+                            val dst = RectF(mid - w / 2, cy - h / 2, mid + w / 2, cy + h / 2)
+                            canvas.save()
+                            val clipPath = android.graphics.Path().apply { addRoundRect(dst, dp(6f), dp(6f), android.graphics.Path.Direction.CW) }
+                            canvas.clipPath(clipPath)
+                            canvas.drawBitmap(thumb, src, dst, null)
+                            canvas.restore()
+                            continue
+                        }
                         drawIcon(canvas, R.drawable.ic_kb_clipboard, rect.left + dp(14f), cy, dp(14f), t.accentText)
                         val room = rect.width() - dp(32f)
                         canvas.drawText(ellipsize(word.replace('\n', ' '), room), rect.left + dp(26f) + room / 2, baseline(), text)

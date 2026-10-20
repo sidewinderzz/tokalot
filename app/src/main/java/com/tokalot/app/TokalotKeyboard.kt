@@ -2,11 +2,15 @@ package com.tokalot.app
 
 import android.Manifest
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.net.Uri
+import android.provider.MediaStore
 import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
 import android.os.Handler
@@ -54,6 +58,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         private const val HISTORY_FILE = "typing_history.txt"
         /** The clipboard list: kept out of backups (see [ClipHistory]). */
         private const val CLIPS_FILE = "keyboard_clips.json"
+        /** How long a new screenshot or copied picture is offered on the bar. */
+        private const val IMAGE_FRESH_MS = 2 * 60 * 1000L
         private const val RECENT_MAX = 32
         /** Typed after a word, these end it and let autocorrect fix it. */
         private const val CORRECT_AFTER = ".,!?;:)]}\"\n"
@@ -155,6 +161,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         load()
         clips = runCatching { File(noBackupFilesDir, CLIPS_FILE).takeIf { it.exists() }?.readText()?.let { ClipHistory.parse(it) } }.getOrNull() ?: ClipHistory()
         runCatching { getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener) }
+        runCatching { contentResolver.registerContentObserver(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, imagesChanged) }
     }
 
     override fun onDestroy() {
@@ -164,6 +171,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         fixCall?.cancel()
         saveHistory()
         runCatching { getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener) }
+        runCatching { contentResolver.unregisterContentObserver(imagesChanged) }
         super.onDestroy()
     }
 
@@ -289,6 +297,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         addUserWords()
         load()
         captureClip()
+        findScreenshot()
         updateShift()
         showStrip()
     }
@@ -468,7 +477,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         }
         lastCorrection = null
         autoSpaced = false
-        if (k.chips) dismissedClip = lastCopy?.text // typing on: the copied thing leaves the bar, as on Gboard
+        if (k.chips) dismissChips() // typing on: the things to paste leave the bar, as on Gboard
         val ch = if (k.shift != KeyboardView.Shift.OFF && c.isLetter()) c.uppercaseChar() else c
         if (k.shift == KeyboardView.Shift.ON) k.shift = KeyboardView.Shift.OFF
         if (!predictive) {
@@ -718,10 +727,10 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val s = k.suggestions.getOrNull(slot) ?: return
         dropNotice()
         if (k.chips) {
-            // Something copied: pasted as it is.
-            dismissedClip = lastCopy?.text
-            ic.commitText(s, 1)
+            // Something to paste: a texted code, a picture, or something copied, as it is.
+            val act = chipActions.getOrNull(slot) ?: return
             lastCorrection = null; autoSpaced = false; phantomSpace = false
+            act()
             updateShift()
             showStrip()
             return
@@ -758,13 +767,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         k.message = null
         k.cancelable = false
         k.chips = false
-        // Something just copied goes on the bar, ready to paste, until it's used or typing starts.
-        val copied = lastCopy
-        if (word.isEmpty() && copied != null && !password && prefs.kbClipSuggest && copied.text != dismissedClip &&
-            System.currentTimeMillis() - copied.time in 0..ClipHistory.FRESH_MS
-        ) {
+        // Things to paste go on the bar until used or typing starts: a code that just came in a text, a new
+        // screenshot or copied picture, and something just copied.
+        val paste = if (word.isEmpty() && !password) pasteChips() else emptyList()
+        if (paste.isNotEmpty()) {
             k.chips = true
-            k.suggestions = ClipHistory.smart(copied.text)
+            k.chipThumb = image?.thumb
+            k.suggestions = paste.map { it.first }
+            chipActions = paste.map { it.second }
             k.boldSlot = -1
             return
         }
@@ -1068,6 +1078,117 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     override fun onMenuClose() = closeMenu()
 
+    // ------------------------------------------------------------------ things to paste on the bar
+
+    private var chipActions: List<() -> Unit> = emptyList()
+    private var dismissedCode: String? = null
+
+    /** A picture to offer: a screenshot just taken, or a picture just copied, with its thumbnail. */
+    private class Picture(val uri: Uri, val time: Long, val mime: String, val thumb: Bitmap?)
+    private var image: Picture? = null
+    private var dismissedImage: Uri? = null
+
+    /** What the bar offers to paste right now, best first: (what the chip shows, what tapping it does). */
+    private fun pasteChips(): List<Pair<String, () -> Unit>> {
+        val out = ArrayList<Pair<String, () -> Unit>>()
+        val now = System.currentTimeMillis()
+        val code = CodeListener.fresh(now)?.takeIf { prefs.kbCodes && it != dismissedCode }
+        if (code != null) out += "Code $code" to { dismissedCode = code; currentInputConnection?.commitText(code, 1); Unit }
+        val pic = image?.takeIf { it.uri != dismissedImage && now - it.time in 0..IMAGE_FRESH_MS }
+        if (pic != null) out += KeyboardView.IMAGE_CHIP to { dismissedImage = pic.uri; pastePicture(pic) }
+        val copied = lastCopy?.takeIf { p -> prefs.kbClipSuggest && p.text != dismissedClip && now - p.time in 0..ClipHistory.FRESH_MS }
+        if (copied != null) for (t in ClipHistory.smart(copied.text)) out += t to { dismissedClip = copied.text; currentInputConnection?.commitText(t, 1); Unit }
+        return out.take(3)
+    }
+
+    private fun dismissChips() {
+        dismissedClip = lastCopy?.text
+        dismissedCode = CodeListener.code
+        dismissedImage = image?.uri
+    }
+
+    /** A code came in a text (from [CodeListener], on its own thread). */
+    fun codeArrived() {
+        main.post { if (shown && word.isEmpty() && !busy() && notice == null && emojiMode == EmojiMode.OFF) showStrip() }
+    }
+
+    private val imagesChanged = object : android.database.ContentObserver(main) {
+        override fun onChange(selfChange: Boolean) { if (shown) findScreenshot() }
+    }
+
+    private fun canSeePhotos() = checkSelfPermission(
+        if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+    ) == PackageManager.PERMISSION_GRANTED
+
+    /** Looks for a screenshot taken in the last couple of minutes (off the main thread; it reads the photo library). */
+    private fun findScreenshot() {
+        if (!prefs.kbScreenshots || !canSeePhotos()) return
+        val app = applicationContext
+        val since = (System.currentTimeMillis() - IMAGE_FRESH_MS) / 1000
+        Thread {
+            val found = runCatching {
+                val cols = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.MIME_TYPE,
+                    if (android.os.Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA)
+                app.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cols,
+                    "${MediaStore.Images.Media.DATE_ADDED} >= ?", arrayOf(since.toString()),
+                    "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { c ->
+                    var hit: Picture? = null
+                    while (hit == null && c.moveToNext()) {
+                        if (!c.getString(3).orEmpty().contains("screenshot", ignoreCase = true)) continue
+                        val uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0))
+                        hit = Picture(uri, c.getLong(1) * 1000, c.getString(2) ?: "image/png", thumbnail(app, uri))
+                    }
+                    hit
+                }
+            }.getOrNull() ?: return@Thread
+            main.post {
+                if (image?.uri == found.uri) return@post
+                image = found
+                if (shown && word.isEmpty() && !busy() && notice == null && emojiMode == EmojiMode.OFF) showStrip()
+            }
+        }.start()
+    }
+
+    /** A copied picture (from [captureClip]): offered like a screenshot. */
+    private fun pictureCopied(uri: Uri, mime: String, time: Long) {
+        val app = applicationContext
+        Thread {
+            val thumb = thumbnail(app, uri)
+            main.post {
+                image = Picture(uri, time, mime, thumb)
+                if (shown && word.isEmpty() && !busy() && notice == null && emojiMode == EmojiMode.OFF) showStrip()
+            }
+        }.start()
+    }
+
+    private fun thumbnail(ctx: Context, uri: Uri): Bitmap? = runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= 29) ctx.contentResolver.loadThumbnail(uri, android.util.Size(240, 240), null)
+        else ctx.contentResolver.openInputStream(uri)?.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 })
+        }
+    }.getOrNull()
+
+    /**
+     * Puts the picture into the text box the way Gboard does, for apps that take pictures from the keyboard
+     * (most messaging apps). It's copied into Tokalot's own cache first so the app can be let read just that.
+     */
+    private fun pastePicture(pic: Picture) {
+        val ic = currentInputConnection ?: return
+        val ei = currentInputEditorInfo
+        val takes = ei?.contentMimeTypes?.any { ClipDescription.compareMimeTypes(pic.mime, it) } == true
+        if (!takes) { notice("This app doesn't take pictures from the keyboard", 3000); return }
+        val app = applicationContext
+        Thread {
+            val shared = runCatching { KeyboardImages.share(app, pic.uri, pic.mime) }.getOrNull()
+            main.post {
+                if (shared == null) { notice("Couldn't paste that picture", 3000); return@post }
+                val info = android.view.inputmethod.InputContentInfo(shared, ClipDescription("Picture", arrayOf(pic.mime)))
+                val ok = currentInputConnection?.commitContent(info, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null) == true
+                if (!ok) notice("This app didn't take the picture", 3000)
+            }
+        }.start()
+    }
+
     // ------------------------------------------------------------------ clipboard
 
     private lateinit var clips: ClipHistory
@@ -1091,6 +1212,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         // Passwords and the like: Android 13 marks them, and some apps mark them earlier the same way.
         if (d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return
         if (shown && password) return
+        val item = runCatching { clip.getItemAt(0) }.getOrNull() ?: return
+        val uri = item.uri
+        val mime = d?.let { desc -> (0 until desc.mimeTypeCount).map { desc.getMimeType(it) }.firstOrNull { it.startsWith("image/") } }
+        if (uri != null && mime != null) {
+            val time = d.timestamp.takeIf { it > 0 } ?: System.currentTimeMillis()
+            if (image?.uri != uri && p.kbClipSuggest) pictureCopied(uri, mime, time)
+            return
+        }
         val text = runCatching { clip.getItemAt(0)?.coerceToText(this)?.toString() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return
         val time = d?.timestamp?.takeIf { it > 0 } ?: System.currentTimeMillis()
         val last = lastCopy
