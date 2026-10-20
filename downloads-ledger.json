@@ -1216,7 +1216,7 @@
    "release": "mac-v0.8.0"
   },
   "657256421": {
-   "count": 2,
+   "count": 3,
    "name": "Tokalot-v1.39.apk",
    "release": "v1.39"
   },
@@ -1321,7 +1321,7 @@
    "release": "desktop"
   },
   "657264014": {
-   "count": 9,
+   "count": 11,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -1339,8 +1339,88 @@
    "count": 0,
    "name": "RELEASES-win-arm64",
    "release": "desktop"
+  },
+  "657855977": {
+   "count": 2,
+   "name": "Tokalot-v1.40.apk",
+   "release": "v1.40"
+  },
+  "657900899": {
+   "count": 0,
+   "name": "Tokalot-linux-arm64-0.10.1.tar.gz",
+   "release": "linux-v0.10.1"
+  },
+  "657900902": {
+   "count": 0,
+   "name": "Tokalot-linux-x64-0.10.1.tar.gz",
+   "release": "linux-v0.10.1"
+  },
+  "657903931": {
+   "count": 0,
+   "name": "Tokalot-v1.41.apk",
+   "release": "v1.41"
+  },
+  "657907592": {
+   "count": 0,
+   "name": "Tokalot-1.15.2-full.nupkg",
+   "release": "desktop-v1.15.2"
+  },
+  "657907594": {
+   "count": 0,
+   "name": "RELEASES-win-arm64",
+   "release": "desktop-v1.15.2"
+  },
+  "657907598": {
+   "count": 0,
+   "name": "Tokalot-1.15.2-win-arm64-full.nupkg",
+   "release": "desktop-v1.15.2"
+  },
+  "657907599": {
+   "count": 0,
+   "name": "Tokalot-win-Portable.zip",
+   "release": "desktop-v1.15.2"
+  },
+  "657907605": {
+   "count": 0,
+   "name": "RELEASES",
+   "release": "desktop-v1.15.2"
+  },
+  "657907620": {
+   "count": 0,
+   "name": "Tokalot-win-arm64-Portable.zip",
+   "release": "desktop-v1.15.2"
+  },
+  "657907634": {
+   "count": 0,
+   "name": "TokalotSetup-arm64.exe",
+   "release": "desktop-v1.15.2"
+  },
+  "657907714": {
+   "count": 0,
+   "name": "TokalotSetup.exe",
+   "release": "desktop-v1.15.2"
+  },
+  "657907732": {
+   "count": 0,
+   "name": "assets.win-arm64.json",
+   "release": "desktop-v1.15.2"
+  },
+  "657907742": {
+   "count": 0,
+   "name": "assets.win.json",
+   "release": "desktop-v1.15.2"
+  },
+  "657907744": {
+   "count": 0,
+   "name": "releases.win-arm64.json",
+   "release": "desktop-v1.15.2"
+  },
+  "657907754": {
+   "count": 0,
+   "name": "releases.win.json",
+   "release": "desktop-v1.15.2"
   }
  },
- "total": 167,
- "updated": "2026-10-19T23:43:49Z"
+ "total": 172,
+ "updated": "2026-10-20T01:15:19Z"
 }
