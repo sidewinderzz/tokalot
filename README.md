@@ -99,7 +99,7 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
   <tr>
     <td valign="top">
       <b>A keyboard too (Android)</b><br>
-      Optional Tokalot Keyboard in the style of Gboard: autocorrect, next-word suggestions, swipe typing, emoji with search, and the mic and an AI fix button on its bar.
+      Optional Tokalot Keyboard in the style of Gboard: autocorrect, next-word suggestions, swipe typing, emoji with search, a clipboard, light and dark themes, and the mic and an AI fix button on its bar.
     </td>
     <td valign="top">
       <b>Learns your words</b><br>
@@ -185,7 +185,7 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 
 - **Android:** the accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to put your words into that text box. Tokalot doesn't read your messages or notifications, and it skips password fields.
 - **Windows:** the Ctrl+Win listener only watches for that shortcut; it never records your typing. API keys are encrypted with your Windows account. Dictated text is kept out of Windows clipboard history, and whatever you had copied before is put back after the paste.
-- **Android keyboard:** Tokalot Keyboard keeps what it learns from your typing (which words you use, and what follows what) on the phone only, never in sync or backups, and learns nothing in password fields or incognito tabs. Typed text only leaves the phone when you tap ✨ to fix it, and then only to your cleanup service. A word it learns goes into your dictionary, which syncs like any other dictionary word.
+- **Android keyboard:** Tokalot Keyboard keeps what it learns from your typing (which words you use, and what follows what) on the phone only, never in sync or backups, and learns nothing in password fields or incognito tabs. Its clipboard list stays on the phone too, keeps unpinned items for an hour, and skips anything copied from a password box or marked private. Typed text only leaves the phone when you tap ✨ to fix it, and then only to your cleanup service. A word it learns goes into your dictionary, which syncs like any other dictionary word.
 - History, recordings, settings and keys live only on your device. Backups leave out your API keys unless you choose to include them.
 - Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into, your dictionary words and, on Android, whether the cursor is in the middle of a sentence (never the text around it), so the model can match the style, spelling and capitals. With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
 - Sync is optional and off by default. It works through one small file that you keep in a folder you already sync (Google Drive, OneDrive, Dropbox, Syncthing); there is no Tokalot account or server. Recordings are never put in it; API keys and dictation history (the newest 1,000 dictations, as text) only if you turn those on. Settings sync too, except the few that belong to one device (the on-device model, how long recordings are kept, where the indicator sits). Each device adds its own word, dictation and clean-up counts per month (under a random id and the device's name), so every app can show the total across all your devices.

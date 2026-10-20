@@ -117,6 +117,8 @@ object Accents {
 /** Pre-filled "Your instructions" for a fresh install; users can edit or clear it. */
 /** Playback speeds a voice note offers, in the order the speed button steps through them. */
 val NOTE_SPEEDS = floatArrayOf(1f, 1.25f, 1.5f, 2f)
+/** The keyboard's light and dark choices: "auto" follows the phone. */
+val KB_THEMES = listOf("auto", "light", "dark")
 
 const val DEFAULT_INSTRUCTIONS = "Always write \"lol\" in lowercase."
 
@@ -195,13 +197,13 @@ class Prefs(ctx: Context) {
             "keyboardAutocorrect" to "kb_autocorrect", "keyboardSwipe" to "kb_swipe", "keyboardAutoCaps" to "kb_autocap",
             "keyboardDoubleSpace" to "kb_double_space", "keyboardLearn" to "kb_learn", "keyboardNumberRow" to "kb_number_row",
             "keyboardSymbolHints" to "kb_symbol_hints", "keyboardSound" to "kb_sound", "keyboardVibrate" to "kb_vibrate",
-            "keyboardPopup" to "kb_popup",
+            "keyboardPopup" to "kb_popup", "keyboardClipboard" to "kb_clipboard", "keyboardClipSuggest" to "kb_clip_suggest",
         )
 
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
         fun synced(key: String) = key in BOOLEANS.values || key in setOf(
             "stt", "cleanup", "theme", "accent", "sound_set", "note_phrases", "learned_words", "dismissed_words",
-            "note_level", "note_speed",
+            "note_level", "note_speed", "kb_theme", "kb_style", "kb_accent",
         ) || key.startsWith("sttmodel_") || key.startsWith("model_") || key.startsWith("app_")
 
         /** Whether a synced setting's value from the file is one this version can use. */
@@ -215,7 +217,9 @@ class Prefs(ctx: Context) {
                 "theme" -> v is String && v in setOf("system", "light", "dark")
                 "soundSet" -> v is String && Sounds.valid(v) == v
                 "notePhrases" -> v is String
-                "accent" -> v is Number && v.toLong() in 0L..0xFFFFFFFFL
+                "accent", "keyboardAccent" -> v is Number && v.toLong() in 0L..0xFFFFFFFFL
+                "keyboardTheme" -> v is String && v in KB_THEMES
+                "keyboardStyle" -> v is String && v in KeyboardTheme.STYLES
                 "sttModels", "cleanupModels" -> strings()
                 "androidAppOverrides" -> strings { c -> AppCategory.values().any { it.name == c } }
                 "noteSummaryLevel" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 1..5
@@ -418,6 +422,11 @@ class Prefs(ctx: Context) {
             "keyboardSound" to kbSound,
             "keyboardVibrate" to kbVibrate,
             "keyboardPopup" to kbPopup,
+            "keyboardClipboard" to kbClipboard,
+            "keyboardClipSuggest" to kbClipSuggest,
+            "keyboardTheme" to kbTheme,
+            "keyboardStyle" to kbStyle,
+            "keyboardAccent" to (kbAccent.toLong() and 0xFFFFFFFFL),
             "noteSummaryLevel" to noteSummaryLevel,
             "noteSpeed" to noteSpeed.toDouble(),
             "notePhrases" to notePhrases,
@@ -460,6 +469,9 @@ class Prefs(ctx: Context) {
             "cleanupModels" -> overrides("model_", v as JSONObject)
             "androidAppOverrides" -> overrides("app_", v as JSONObject)
             "accent" -> ed.putInt("accent", (v as Number).toLong().toInt())
+            "keyboardAccent" -> ed.putInt("kb_accent", (v as Number).toLong().toInt())
+            "keyboardTheme" -> ed.putString("kb_theme", v as String)
+            "keyboardStyle" -> ed.putString("kb_style", v as String)
             "noteSummaryLevel" -> ed.putInt("note_level", (v as Number).toInt())
             "noteSpeed" -> ed.putInt("note_speed", Math.round((v as Number).toDouble() * 100).toInt())
             "learnedWords" -> ed.putString("learned_words", strings(v as JSONArray))
@@ -593,6 +605,27 @@ class Prefs(ctx: Context) {
     var kbPopup: Boolean
         get() = sp.safeBoolean("kb_popup", true)
         set(v) = sp.edit().putBoolean("kb_popup", v).apply()
+
+    /** Things copied are kept in the keyboard's clipboard list (on this phone only). */
+    var kbClipboard: Boolean
+        get() = sp.safeBoolean("kb_clipboard", true)
+        set(v) = sp.edit().putBoolean("kb_clipboard", v).apply()
+    /** Something just copied shows on the suggestion bar, ready to paste. */
+    var kbClipSuggest: Boolean
+        get() = sp.safeBoolean("kb_clip_suggest", true)
+        set(v) = sp.edit().putBoolean("kb_clip_suggest", v).apply()
+    /** "auto" follows the phone's dark mode; "light" or "dark" always. */
+    var kbTheme: String
+        get() = sp.safeString("kb_theme", "auto")?.takeIf { it in KB_THEMES } ?: "auto"
+        set(v) = sp.edit().putString("kb_theme", v).apply()
+    /** How keys look: one of [KeyboardTheme.STYLES]. */
+    var kbStyle: String
+        get() = sp.safeString("kb_style", KeyboardTheme.CLASSIC)?.takeIf { it in KeyboardTheme.STYLES } ?: KeyboardTheme.CLASSIC
+        set(v) = sp.edit().putString("kb_style", v).apply()
+    /** The keyboard's accent colour; 0 = the same as the app's. */
+    var kbAccent: Int
+        get() = sp.safeInt("kb_accent", 0)
+        set(v) = sp.edit().putInt("kb_accent", v).apply()
 
     /** Which Sounds style plays (soft, chime, retro, bubble). */
     var soundSet: String

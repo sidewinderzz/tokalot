@@ -33,7 +33,7 @@ import java.util.zip.GZIPInputStream
  * The word being typed is kept as "composing" text (underlined in most apps) until a space or punctuation
  * ends it, so autocorrect can still replace it. Everything else goes straight into the text box.
  */
-class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.Listener {
+class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.Listener, ClipboardPanel.Listener {
 
     companion object {
         @Volatile var instance: TokalotKeyboard? = null
@@ -51,6 +51,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         private val userWords = HashSet<String>()
 
         private const val HISTORY_FILE = "typing_history.txt"
+        /** The clipboard list: kept out of backups (see [ClipHistory]). */
+        private const val CLIPS_FILE = "keyboard_clips.json"
         private const val RECENT_MAX = 32
         /** Typed after a word, these end it and let autocorrect fix it. */
         private const val CORRECT_AFTER = ".,!?;:)]}\"\n"
@@ -63,6 +65,12 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         fun clearHistory(ctx: Context) {
             history?.clear()
             File(ctx.filesDir, HISTORY_FILE).delete()
+        }
+
+        /** Settings: the clipboard list was switched off, so what it kept goes. */
+        fun clearClips(ctx: Context) {
+            instance?.let { it.clips.items.clear(); it.lastCopy = null }
+            File(ctx.noBackupFilesDir, CLIPS_FILE).delete()
         }
 
         /** Whether Tokalot is the keyboard picked in Android's settings. */
@@ -81,6 +89,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private val main = Handler(Looper.getMainLooper())
     private var kv: KeyboardView? = null
     private var panel: EmojiPanel? = null
+    private var clipPanel: ClipboardPanel? = null
     private lateinit var prefs: Prefs
 
     private var ac: Autocorrect? = null
@@ -90,6 +99,10 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     /** Suggestions and autocorrect: ordinary text, not passwords, addresses or numbers. */
     private var predictive = false
+    /** A password box: nothing typed here is remembered, and the clipboard isn't offered. */
+    private var password = false
+    /** Swipe typing: any text box but a password one (where it isn't predictive, the top word goes straight in). */
+    private var swipe = false
     /** Typing may be remembered (not a password, not an incognito tab). */
     private var personal = false
     private var autocorrect = true
@@ -97,6 +110,12 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private var sound = false
 
     // ------------------------------------------------------------------ the word being typed
+
+    /**
+     * Goes up with every new text box (or the same one restarted by its app), so a dictation or AI fix that
+     * finishes later can tell the text it was for is gone.
+     */
+    private var session = 0
 
     private val word = StringBuilder()
     /** Where each letter was touched, in key widths and rows ([Autocorrect]'s units); NaN when not tapped. */
@@ -130,6 +149,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         instance = this
         prefs = Prefs(this)
         load()
+        clips = runCatching { File(noBackupFilesDir, CLIPS_FILE).takeIf { it.exists() }?.readText()?.let { ClipHistory.parse(it) } }.getOrNull() ?: ClipHistory()
+        runCatching { getSystemService(ClipboardManager::class.java)?.addPrimaryClipChangedListener(clipListener) }
     }
 
     override fun onDestroy() {
@@ -138,6 +159,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         cancelMic()
         fixCall?.cancel()
         saveHistory()
+        runCatching { getSystemService(ClipboardManager::class.java)?.removePrimaryClipChangedListener(clipListener) }
         super.onDestroy()
     }
 
@@ -147,11 +169,13 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onCreateInputView(): View {
         val k = KeyboardView(this, this)
         val e = EmojiPanel(this, this).apply { visibility = View.GONE }
-        kv = k; panel = e
+        val c = ClipboardPanel(this, this).apply { visibility = View.GONE }
+        kv = k; panel = e; clipPanel = c
         emoji?.let { e.data = it }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(e, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(c, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(k, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
     }
@@ -165,7 +189,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         Thread {
             val w = runCatching {
                 app.assets.open("keyboard/en_US.txt.gz").use { KeyboardWords.load(GZIPInputStream(it).bufferedReader()) }
-            }.getOrNull()
+            }.onFailure { android.util.Log.e("TokalotKeyboard", "word list didn't load", it) }.getOrNull()
             val h = runCatching {
                 File(app.filesDir, HISTORY_FILE).takeIf { it.exists() }?.readText()?.let { TypingHistory.parse(it) }
             }.getOrNull() ?: TypingHistory()
@@ -200,6 +224,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        session++
+        endSlides()
         resetWord()
         lastCorrection = null; keepAsTyped = null
         autoSpaced = false; phantomSpace = false
@@ -215,7 +241,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val type = info.inputType
         val cls = type and InputType.TYPE_MASK_CLASS
         val variation = type and InputType.TYPE_MASK_VARIATION
-        val password = (cls == InputType.TYPE_CLASS_TEXT && variation in setOf(
+        password = (cls == InputType.TYPE_CLASS_TEXT && variation in setOf(
             InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
             InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
         )) || (cls == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
@@ -223,19 +249,23 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
             InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_FILTER,
         ) && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
+        // Gboard swipes in any text box but a password one: a search box, an address bar, a chat app that
+        // turns suggestions off.
+        swipe = cls == InputType.TYPE_CLASS_TEXT && !password
         personal = !password && info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 && prefs.kbLearn
         autocorrect = prefs.kbAutocorrect
         vibrate = prefs.kbVibrate
         sound = prefs.kbSound
 
-        val dark = when (prefs.theme) {
+        val dark = when (prefs.kbTheme) {
             "dark" -> true
             "light" -> false
             else -> resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         }
-        val theme = if (dark) KeyboardTheme.dark(prefs.accent) else KeyboardTheme.light(prefs.accent)
+        val theme = KeyboardTheme.make(dark, prefs.kbStyle, prefs.kbAccent.takeIf { it != 0 } ?: prefs.accent)
         k.theme = theme
         panel?.theme = theme
+        clipPanel?.theme = theme
         window?.window?.let { w ->
             w.navigationBarColor = theme.background
             @Suppress("DEPRECATION")
@@ -245,8 +275,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         k.symbolHints = prefs.kbSymbolHints
         k.enterKind = enterKind(info)
 
-        if (!restarting || emojiMode != EmojiMode.OFF) {
+        if (!restarting || emojiMode != EmojiMode.OFF || clipOpen) {
             closeEmoji(show = false)
+            closeClipboard(show = false)
             lettersPage = null // the number row or symbol hints may have been switched in Settings
             k.shift = KeyboardView.Shift.OFF
             showPage(when (cls) {
@@ -260,6 +291,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         k.reset()
         addUserWords()
         load()
+        captureClip()
         updateShift()
         showStrip()
     }
@@ -271,6 +303,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         kv?.reset()
         if (micState == Mic.RECORDING) stopMic()
         commitWord() // or the app keeps the word underlined
+        endSlides()
         saveHistory()
     }
 
@@ -283,7 +316,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         val ic = currentInputConnection ?: return
-        if (slideAnchor >= 0) return
+        if (slideAnchor >= 0 || cursorSlide != null || cursorByKeys) return
         // These reports trail behind what was typed, so the text itself is checked before deciding the
         // cursor was moved away (a tap elsewhere in the text, or the app changing it).
         if (word.isNotEmpty()) {
@@ -320,7 +353,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private fun letters(): KeyboardPage =
         lettersPage ?: Layouts.letters(prefs.kbNumberRow, prefs.kbSymbolHints).also { lettersPage = it }
 
-    private fun canGlide() = kv?.page?.kind == PageKind.LETTERS && predictive && prefs.kbSwipe && emojiMode == EmojiMode.OFF
+    private fun canGlide() = kv?.page?.kind == PageKind.LETTERS && swipe && prefs.kbSwipe && emojiMode == EmojiMode.OFF
 
     private fun showPage(p: KeyboardPage) {
         val k = kv ?: return
@@ -416,6 +449,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         }
         lastCorrection = null
         autoSpaced = false
+        if (k.chips) dismissedClip = lastCopy?.text // typing on: the copied thing leaves the bar, as on Gboard
         val ch = if (k.shift != KeyboardView.Shift.OFF && c.isLetter()) c.uppercaseChar() else c
         if (k.shift == KeyboardView.Shift.ON) k.shift = KeyboardView.Shift.OFF
         if (!predictive) {
@@ -646,6 +680,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onStrip(slot: Int) {
         when (slot) {
             KeyboardView.SLOT_MIC -> if (emojiMode == EmojiMode.OFF) mic()
+            KeyboardView.SLOT_CLIPBOARD -> openClipboard()
             KeyboardView.SLOT_FIX -> fix()
             KeyboardView.SLOT_CANCEL -> when {
                 emojiMode == EmojiMode.SEARCH -> searchDone()
@@ -663,8 +698,18 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     private fun pick(slot: Int) {
         val ic = currentInputConnection ?: return
-        val s = kv?.suggestions?.getOrNull(slot) ?: return
+        val k = kv ?: return
+        val s = k.suggestions.getOrNull(slot) ?: return
         dropNotice()
+        if (k.chips) {
+            // Something copied: pasted as it is.
+            dismissedClip = lastCopy?.text
+            ic.commitText(s, 1)
+            lastCorrection = null; autoSpaced = false; phantomSpace = false
+            updateShift()
+            showStrip()
+            return
+        }
         if (word.isNotEmpty()) {
             if (glided) {
                 // Another of the swipe's words: swapped in, still waiting for what comes next.
@@ -696,6 +741,18 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (busy() || notice != null || emojiMode == EmojiMode.SEARCH) return
         k.message = null
         k.cancelable = false
+        k.clipButton = word.isEmpty()
+        k.chips = false
+        // Something just copied goes on the bar, ready to paste, until it's used or typing starts.
+        val copied = lastCopy
+        if (word.isEmpty() && copied != null && !password && prefs.kbClipSuggest && copied.text != dismissedClip &&
+            System.currentTimeMillis() - copied.time in 0..ClipHistory.FRESH_MS
+        ) {
+            k.chips = true
+            k.suggestions = ClipHistory.smart(copied.text)
+            k.boldSlot = -1
+            return
+        }
         val a = ac
         if (!predictive || a == null) { k.suggestions = emptyList(); k.boldSlot = -1; return }
         if (word.isNotEmpty()) {
@@ -756,6 +813,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val k = kv ?: return
         k.cancelable = false
         k.recording = false
+        k.working = false
         k.message = notice
         if (notice == null) showStrip()
     }
@@ -783,8 +841,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     override fun onGlideEnd() {
         val ic = currentInputConnection ?: return
-        val g = glide ?: return
         val k = kv ?: return
+        val g = glide
+        if (g == null) { notice("Swipe typing is still loading its words. Try again in a moment.", 2500); return }
         val prev = prevWord(ic.getTextBeforeCursor(64, 0))
         val found = g.words(5, prev, if (personal) history else null)
         if (found.isEmpty()) return
@@ -795,6 +854,13 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         }
         val list = found.map(case).distinct()
         if (glideSpace) ic.commitText(" ", 1)
+        if (!predictive) {
+            // A box without suggestions (a search box, an address bar): the best word goes straight in.
+            ic.commitText(list[0], 1)
+            phantomSpace = true
+            if (k.shift == KeyboardView.Shift.ON) k.shift = KeyboardView.Shift.OFF
+            return
+        }
         wordPrev = prev
         word.setLength(0); word.append(list[0])
         xs.clear(); ys.clear()
@@ -808,15 +874,66 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     // ------------------------------------------------------------------ cursor and word-delete slides
 
+    /**
+     * A space bar slide in progress: the text box's text, where the cursor is in it, and the selection it
+     * started from (for putting it back if the slide is abandoned). Null with [cursorByKeys]: the app
+     * doesn't share its text, so the cursor is moved with arrow keys instead.
+     */
+    private class CursorSlide(val base: Int, val text: String, var pos: Int, val fromStart: Int, val fromEnd: Int)
+    private var cursorSlide: CursorSlide? = null
+    private var cursorByKeys = false
+
     override fun onCursorSlide(steps: Int) {
-        commitWord()
-        autoSpaced = false; lastCorrection = null
-        val key = if (steps < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
-        repeat(kotlin.math.abs(steps)) { sendDownUpKeyEvents(key) }
+        val ic = currentInputConnection ?: return
+        if (cursorSlide == null && !cursorByKeys) {
+            commitWord()
+            autoSpaced = false; lastCorrection = null
+            val et = ic.getExtractedText(ExtractedTextRequest(), 0)
+            val text = et?.text?.toString()
+            if (et != null && text != null && et.selectionStart >= 0) {
+                val a = minOf(et.selectionStart, et.selectionEnd).coerceIn(0, text.length)
+                val b = maxOf(et.selectionStart, et.selectionEnd).coerceIn(0, text.length)
+                // A selection collapses towards the way the finger went.
+                cursorSlide = CursorSlide(et.startOffset, text, if (steps < 0) a else b, et.startOffset + a, et.startOffset + b)
+            } else {
+                cursorByKeys = true
+            }
+        }
+        if (steps == 0) return
+        val c = cursorSlide
+        if (c != null) {
+            // Whole characters: an emoji, a flag or an accented letter is one step.
+            c.pos = TextSteps.move(c.text, c.pos, steps)
+            ic.setSelection(c.base + c.pos, c.base + c.pos)
+        } else {
+            val key = if (steps < 0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT
+            repeat(kotlin.math.abs(steps)) { sendDownUpKeyEvents(key) }
+        }
     }
 
+    override fun onSlideEnd(cancelled: Boolean) {
+        val ic = currentInputConnection
+        if (cancelled && ic != null) {
+            cursorSlide?.let { ic.setSelection(it.fromStart, it.fromEnd) }
+            if (slideAnchor >= 0 && slideAnchor != Int.MAX_VALUE) ic.setSelection(slideFromStart, slideFromEnd)
+        }
+        endSlides()
+        updateShift()
+        showStrip()
+    }
+
+    /** Forgets any slide without touching the text (the text box is going away). */
+    private fun endSlides() {
+        cursorSlide = null
+        cursorByKeys = false
+        slideAnchor = -1
+    }
+
+    /** A backspace slide in progress: where it started, what's before that, and the selection it replaced. */
     private var slideAnchor = -1
     private var slideBefore = ""
+    private var slideFromStart = 0
+    private var slideFromEnd = 0
 
     override fun onDeleteSlide(words: Int, done: Boolean) {
         val ic = currentInputConnection ?: return
@@ -824,36 +941,130 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             commitWord()
             autoSpaced = false; lastCorrection = null
             val et = ic.getExtractedText(ExtractedTextRequest(), 0)
-            slideAnchor = if (et != null && et.selectionStart >= 0) et.startOffset + maxOf(et.selectionStart, et.selectionEnd) else 0
-            slideBefore = ic.getTextBeforeCursor(2000, 0)?.toString() ?: ""
-            if (et == null) slideAnchor = Int.MAX_VALUE // positions unknown: only the final delete is done
+            val text = et?.text?.toString()
+            if (et != null && text != null && et.selectionStart >= 0) {
+                val a = minOf(et.selectionStart, et.selectionEnd).coerceIn(0, text.length)
+                val b = maxOf(et.selectionStart, et.selectionEnd).coerceIn(0, text.length)
+                slideFromStart = et.startOffset + a
+                slideFromEnd = et.startOffset + b
+                slideAnchor = slideFromEnd
+                slideBefore = text.substring(maxOf(0, b - 2000), b)
+            } else {
+                // The app doesn't share its text's positions: nothing is shown selected, the words go on release.
+                slideAnchor = Int.MAX_VALUE
+                slideBefore = ic.getTextBeforeCursor(2000, 0)?.toString() ?: ""
+            }
         }
-        val n = wordsBack(slideBefore, words)
+        val n = TextSteps.wordsBack(slideBefore, words)
         val known = slideAnchor != Int.MAX_VALUE
         if (!done) {
             if (known) ic.setSelection(slideAnchor - n, slideAnchor)
             return
         }
-        if (known) {
-            ic.setSelection(slideAnchor - n, slideAnchor)
-            if (n > 0) ic.commitText("", 1)
-        } else if (n > 0) {
-            ic.deleteSurroundingText(n, 0)
+        when {
+            known && n > 0 -> { ic.setSelection(slideAnchor - n, slideAnchor); ic.commitText("", 1) }
+            known -> ic.setSelection(slideFromStart, slideFromEnd) // let go before a whole word: nothing deleted
+            n > 0 -> ic.deleteSurroundingText(n, 0)
         }
-        slideAnchor = -1
+        endSlides()
         updateShift()
         showStrip()
     }
 
-    /** How many characters the last [n] words of [t] take, with the spaces after them. */
-    private fun wordsBack(t: String, n: Int): Int {
-        var i = t.length
-        repeat(n) {
-            while (i > 0 && t[i - 1].isWhitespace()) i--
-            if (i > 0 && !t[i - 1].isLetterOrDigit()) { i--; return@repeat }
-            while (i > 0 && !t[i - 1].isWhitespace() && (t[i - 1].isLetterOrDigit() || t[i - 1] == '\'' || t[i - 1] == '’')) i--
+    // ------------------------------------------------------------------ clipboard
+
+    private lateinit var clips: ClipHistory
+    /** The last thing copied (kept even with the clipboard list off, for the bar). */
+    private var lastCopy: ClipHistory.Item? = null
+    /** The copied thing the bar no longer offers: it was pasted, or typing started. */
+    private var dismissedClip: String? = null
+    private var clipOpen = false
+
+    private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { main.post { captureClip() } }
+
+    /**
+     * Notes what's on the clipboard, if it's new. Android lets only the keyboard in use read it, so a copy made
+     * while another keyboard was up is picked up here when Tokalot's next opens (with the time it was copied).
+     */
+    private fun captureClip() {
+        val p = prefs
+        if (!p.kbClipboard && !p.kbClipSuggest) return
+        val clip = runCatching { getSystemService(ClipboardManager::class.java)?.primaryClip }.getOrNull() ?: return
+        val d = clip.description
+        // Passwords and the like: Android 13 marks them, and some apps mark them earlier the same way.
+        if (d?.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return
+        if (shown && password) return
+        val text = runCatching { clip.getItemAt(0)?.coerceToText(this)?.toString() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return
+        val time = d?.timestamp?.takeIf { it > 0 } ?: System.currentTimeMillis()
+        val last = lastCopy
+        if (last != null && last.text == text && last.time >= time) return
+        if (last == null && clips.items.firstOrNull()?.let { it.text == text && it.time >= time } == true) {
+            lastCopy = clips.items.first()
+            return
         }
-        return t.length - i
+        lastCopy = ClipHistory.Item(text, time, false)
+        if (p.kbClipboard && clips.add(text, time)) saveClips()
+        if (shown && !busy() && notice == null) showStrip()
+    }
+
+    private fun openClipboard() {
+        val k = kv ?: return
+        val c = clipPanel ?: return
+        commitWord()
+        closeEmoji(show = false)
+        clips.prune(System.currentTimeMillis())
+        if (clips.changed) saveClips()
+        c.panelHeight = k.height
+        c.show(clips.items.toList(), prefs.kbClipboard)
+        clipOpen = true
+        c.visibility = View.VISIBLE
+        k.visibility = View.GONE
+    }
+
+    /** Back to the letters ([show]: and show them; false when a new text box is about to set the page). */
+    private fun closeClipboard(show: Boolean = true) {
+        if (!clipOpen) return
+        clipOpen = false
+        clipPanel?.visibility = View.GONE
+        kv?.visibility = View.VISIBLE
+        if (show) { showPage(letters()); updateShift(); showStrip() }
+    }
+
+    override fun onClipPaste(text: String) {
+        val ic = currentInputConnection ?: return
+        if (phantomSpace) ic.commitText(" ", 1)
+        phantomSpace = false; autoSpaced = false; lastCorrection = null
+        dismissedClip = text
+        ic.commitText(text, 1)
+        closeClipboard()
+    }
+
+    override fun onClipPin(text: String, on: Boolean) {
+        clips.pin(text, on)
+        saveClips()
+        clipPanel?.show(clips.items.toList(), prefs.kbClipboard)
+    }
+
+    override fun onClipDelete(text: String) {
+        clips.remove(text)
+        if (lastCopy?.text == text) dismissedClip = text
+        saveClips()
+        clipPanel?.show(clips.items.toList(), prefs.kbClipboard)
+    }
+
+    override fun onClipClear() {
+        clips.clear()
+        lastCopy?.let { dismissedClip = it.text }
+        saveClips()
+        clipPanel?.show(clips.items.toList(), prefs.kbClipboard)
+    }
+
+    override fun onClipClose() = closeClipboard()
+
+    private fun saveClips() {
+        val text = clips.serialize()
+        val file = File(noBackupFilesDir, CLIPS_FILE)
+        Thread { runCatching { file.writeText(text) } }.start()
     }
 
     // ------------------------------------------------------------------ emoji
@@ -868,6 +1079,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val k = kv ?: return
         val e = panel ?: return
         commitWord()
+        closeClipboard(show = false)
         if (e.data == null) emoji?.let { e.data = it }
         val sp = emojiPrefs()
         e.recents = sp.getString("emoji_recent", "")!!.split('\n').filter { it.isNotEmpty() }
@@ -968,6 +1180,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     private enum class Mic { IDLE, RECORDING, WORKING }
     private var micState = Mic.IDLE
+    /** The text box the dictation was started in ([session]). */
+    private var micSession = 0
     private var recorder: Recorder? = null
     private val dictation by lazy { Dictation(applicationContext) }
     private val levelTick = object : Runnable {
@@ -1016,6 +1230,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         }
         recorder = r
         micState = Mic.RECORDING
+        micSession = session
         dictation.warmUp()
         Haptics.play(this, Haptics.Kind.START)
         k.recording = true
@@ -1033,7 +1248,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val taken = r.stopMic()
         RecordingService.stop(this)
         micState = Mic.WORKING
-        kv?.let { it.recording = false; it.message = "Transcribing…"; it.cancelable = true }
+        kv?.let { it.recording = false; it.working = true; it.message = "Transcribing…"; it.cancelable = true }
         // A long recording is put together off the main thread so the keys stay responsive.
         Thread {
             val audio = taken.audio()
@@ -1097,7 +1312,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     /** Types a dictation at the cursor, fitted to the sentence around it, or copies it if the text box is gone. */
     private fun typeDictation(text: String, fitted: Boolean) {
         val ic = currentInputConnection
-        if (ic == null || !shown) {
+        // The keyboard closed, or moved to another text box, while the words were being worked on.
+        if (ic == null || !shown || session != micSession) {
             getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText("Tokalot", text))
             Toast.makeText(this, "Copied: $text", Toast.LENGTH_SHORT).show()
             return
@@ -1110,8 +1326,10 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         t = TextTools.pad(t, before.lastOrNull(), after.firstOrNull())
         ic.commitText(t, 1)
         updateShift()
+        val typedIn = session
         notice("Typed ✓ · tap to undo", 5000) {
             val c = currentInputConnection ?: return@notice
+            if (session != typedIn) return@notice
             if (c.getTextBeforeCursor(t.length, 0)?.toString() == t) c.deleteSurroundingText(t.length, 0)
             updateShift(); showStrip()
         }
@@ -1147,7 +1365,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val fullLength = if (whole && et != null && et.startOffset == 0 && et.partialStartOffset < 0) et.text.length else -1
         val ei = currentInputEditorInfo
         val pkg = ei?.packageName
-        val field = ei?.fieldId
+        val asked = session
         val call = Call()
         fixCall = call
         k.message = "Fixing…"
@@ -1178,7 +1396,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
                 val fixed = out
                 when {
                     fixed == null -> { Haptics.play(this, Haptics.Kind.ERROR); notice(err ?: "AI fix failed", 4000) }
-                    currentInputEditorInfo?.fieldId != field || currentInputConnection == null -> {}
+                    session != asked || currentInputConnection == null -> {} // a different text box now
+                    !unchanged(text, whole, start) -> notice("You changed the text while it was being fixed, so the fix wasn't put in", 4000)
                     else -> putFix(text, keepSpaces(text, fixed), whole, start, fullLength)
                 }
             }
@@ -1190,6 +1409,19 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val lead = original.takeWhile { it.isWhitespace() }
         val trail = original.takeLastWhile { it.isWhitespace() }
         return lead + fixed.trim() + trail
+    }
+
+    /**
+     * Whether the text box still holds [text] where it was taken from: the whole box, or the selection that
+     * started at [start]. When the app doesn't share its text, there's no telling, and it's taken as unchanged.
+     */
+    private fun unchanged(text: String, whole: Boolean, start: Int): Boolean {
+        val et = currentInputConnection?.getExtractedText(ExtractedTextRequest(), 0) ?: return true
+        val now = et.text?.toString() ?: return true
+        if (whole) return et.startOffset != 0 || et.partialStartOffset >= 0 || now == text
+        if (start < 0) return currentInputConnection?.getSelectedText(0)?.toString()?.let { it == text } ?: true
+        val i = start - et.startOffset
+        return i >= 0 && i + text.length <= now.length && now.regionMatches(i, text, 0, text.length)
     }
 
     private fun putFix(original: String, fixed: String, whole: Boolean, start: Int, fullLength: Int) {
@@ -1207,7 +1439,10 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         }
         replace(original, fixed, whole, start)
         Haptics.play(this, Haptics.Kind.DONE)
+        val fixedIn = session
         notice("Fixed ✓ · tap to undo", 6000) {
+            // Only while the fixed text is still there untouched, so Undo never overwrites newer typing.
+            if (session != fixedIn || !unchanged(fixed, whole, start)) return@notice
             replace(fixed, original, whole, start)
             updateShift(); showStrip()
         }

@@ -159,4 +159,68 @@ class KeyboardTest {
         assertTrue(e.search("thumbs up").any { it.text == "👍" })
         assertTrue(e.groups.flatMap { it.emoji }.any { it.text == "#️⃣" })
     }
+
+    @Test fun cursorStepsOverWholeCharacters() {
+        val family = "👨‍👩‍👧"
+        val text = "a${family}b🇺🇸c👍🏽de\u0301f"
+        // Right from the start: a, the family, b, the flag, c, the thumb with its skin tone, d, é (e + accent), f.
+        val stops = ArrayList<Int>()
+        var pos = 0
+        while (true) { val next = TextSteps.move(text, pos, 1); if (next == pos) break; stops += next; pos = next }
+        assertEquals(listOf(1, 1 + family.length, 2 + family.length, 6 + family.length, 7 + family.length,
+            11 + family.length, 12 + family.length, 14 + family.length, 15 + family.length), stops)
+        // Back again lands on the same places, and several steps at once is the same as one at a time.
+        assertEquals(1 + family.length, TextSteps.move(text, 6 + family.length, -2))
+        assertEquals(0, TextSteps.move(text, 3, -5))
+        assertEquals(text.length, TextSteps.move(text, text.length, 3))
+        // A position inside an emoji moves to its edge, never further inside.
+        assertEquals(1 + family.length, TextSteps.move(text, 2, 1))
+    }
+
+    @Test fun deleteSlideWords() {
+        assertEquals("tractor ".length, TextSteps.wordsBack("the tractor ", 1))
+        assertEquals("the tractor ".length, TextSteps.wordsBack("the tractor ", 2))
+        assertEquals("tractor".length, TextSteps.wordsBack("the tractor", 1))
+        // Punctuation and emoji go as a word of their own, and an emoji is never cut in half.
+        assertEquals("!!".length, TextSteps.wordsBack("done!!", 1))
+        assertEquals("👍🏽 ".length, TextSteps.wordsBack("done 👍🏽 ", 1))
+        assertEquals("don't".length, TextSteps.wordsBack("I don't", 1))
+        assertEquals("I don't".length, TextSteps.wordsBack("I don't", 5))
+        assertEquals(0, TextSteps.wordsBack("hay", 0))
+    }
+
+    @Test fun clipboardList() {
+        val h = ClipHistory()
+        val hour = ClipHistory.KEEP_MS
+        h.add("first", 0)
+        h.add("second", 1000)
+        h.add("first", 2000) // copied again: back to the top, not twice
+        assertEquals(listOf("first", "second"), h.items.map { it.text })
+        h.pin("second", true)
+        h.prune(hour + 2001)
+        // Unpinned items go after an hour; pinned ones stay.
+        assertEquals(listOf("second"), h.items.map { it.text })
+        repeat(ClipHistory.MAX + 5) { h.add("item $it", hour + 3000L + it) }
+        assertEquals(ClipHistory.MAX + 1, h.items.size)
+        assertTrue(h.items.any { it.text == "second" && it.pinned })
+        assertFalse(h.add("   ", 0))
+        // Fresh only for a short while after copying.
+        val now = hour + 3000L + ClipHistory.MAX + 4
+        assertEquals("item ${ClipHistory.MAX + 4}", h.fresh(now)?.text)
+        assertNull(h.fresh(now + ClipHistory.FRESH_MS + 1))
+        val back = ClipHistory.parse(h.serialize())
+        assertEquals(h.items.map { it.text to it.pinned }, back.items.map { it.text to it.pinned })
+        back.clear()
+        assertEquals(listOf("second"), back.items.map { it.text })
+    }
+
+    @Test fun clipboardChips() {
+        assertEquals(listOf("https://deere.com/parts"), ClipHistory.smart("https://deere.com/parts"))
+        assertEquals(listOf("https://deere.com/parts", "Parts are at https://deere.com/parts."),
+            ClipHistory.smart("Parts are at https://deere.com/parts."))
+        assertEquals(listOf("shelby@example.com", "(555) 123-4567", "Call (555) 123-4567 or mail shelby@example.com"),
+            ClipHistory.smart("Call (555) 123-4567 or mail shelby@example.com"))
+        // Plain numbers and dates aren't phone numbers.
+        assertEquals(listOf("Bale count 240 on 10/20"), ClipHistory.smart("Bale count 240 on 10/20"))
+    }
 }

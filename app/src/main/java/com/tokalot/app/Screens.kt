@@ -676,17 +676,68 @@ class SettingsScreen(private val a: MainActivity) {
             if (kb.childCount > 0) kb.addView(divider())
             kb.addView(switchRow(title, note, on, set))
         }
+        kbSwitch("Number row", "A row of digits above the letters, always showing.", prefs.kbNumberRow) { prefs.kbNumberRow = it }
         kbSwitch("Autocorrect", "Fixes a mistyped word when you type a space or punctuation. Backspace straight after puts back what you typed.", prefs.kbAutocorrect) { prefs.kbAutocorrect = it }
         kbSwitch("Swipe typing", "Slide your finger from letter to letter instead of tapping.", prefs.kbSwipe) { prefs.kbSwipe = it }
         kbSwitch("Capitalize sentences", "A capital letter at the start of each sentence, where the app asks for one.", prefs.kbAutoCaps) { prefs.kbAutoCaps = it }
         kbSwitch("Double space for a period", "Two taps on the space bar type a period and a space.", prefs.kbDoubleSpace) { prefs.kbDoubleSpace = it }
         kbSwitch("Learn from my typing", "Remembers the words you use and what follows what, on this phone only, for better suggestions. A word the keyboard doesn't know goes into your dictionary once you've kept it twice, so it syncs.", prefs.kbLearn) { prefs.kbLearn = it }
-        kbSwitch("Number row", "Digits above the letters.", prefs.kbNumberRow) { prefs.kbNumberRow = it }
         kbSwitch("Symbols on letters", "Each letter shows the symbol a long press gives.", prefs.kbSymbolHints) { prefs.kbSymbolHints = it }
         kbSwitch("Show key on press", "The key pops up bigger above your finger.", prefs.kbPopup) { prefs.kbPopup = it }
         kbSwitch("Vibrate on key press", "", prefs.kbVibrate) { prefs.kbVibrate = it }
         kbSwitch("Sound on key press", "Follows your phone's touch sound volume.", prefs.kbSound) { prefs.kbSound = it }
+        kbSwitch("Clipboard", "Keeps what you copy for an hour (pin anything to keep it), on this phone only. Open it with the clipboard button on the bar. Nothing from password boxes, and nothing an app marks as private.", prefs.kbClipboard) {
+            prefs.kbClipboard = it
+            if (!it) TokalotKeyboard.clearClips(this)
+        }
+        kbSwitch("Suggest what I copied", "Something you just copied shows on the bar, ready to paste. A link, email address or phone number in it gets its own button.", prefs.kbClipSuggest) { prefs.kbClipSuggest = it }
         col.addView(kb)
+
+        // How the keyboard looks: light or dark, the key style, and its colour.
+        col.addView(text("Keyboard look", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
+        val look = card()
+        listOf("auto" to "Match phone", "light" to "Light", "dark" to "Dark").forEachIndexed { i, (id, label) ->
+            if (i > 0) look.addView(divider())
+            look.addView(choiceRow(label, if (id == "auto") "Light by day, dark when your phone is in dark mode." else "", prefs.kbTheme == id) {
+                if (prefs.kbTheme != id) { prefs.kbTheme = id; render() }
+            })
+        }
+        col.addView(look)
+        val styleCard = card()
+        listOf(
+            KeyboardTheme.CLASSIC to ("Classic" to "Grey keys, as on Gboard."),
+            KeyboardTheme.TINTED to ("Tinted" to "Keys and background tinted with the keyboard colour."),
+            KeyboardTheme.BORDERLESS to ("Borderless" to "Just the letters, no key shapes."),
+            KeyboardTheme.CONTRAST to ("High contrast" to "Pure black or white, easiest to read in sunlight."),
+        ).forEachIndexed { i, (id, t) ->
+            if (i > 0) styleCard.addView(divider())
+            styleCard.addView(choiceRow(t.first, t.second, prefs.kbStyle == id) {
+                if (prefs.kbStyle != id) { prefs.kbStyle = id; render() }
+            })
+        }
+        col.addView(styleCard, lp().margins(this, t = 8))
+        col.addView(text("Keyboard colour (enter key, mic, swipe trail)", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
+        val kbSwatches = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        (listOf("Same as the app" to 0) + Accents.all).forEach { (name, color) ->
+            val on = prefs.kbAccent == color
+            val disc = View(this).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    // "Same as the app": the app's colour as a ring.
+                    setColor(if (color == 0) android.graphics.Color.TRANSPARENT else color)
+                    setStroke(dp(if (on) 4 else if (color == 0) 3 else 1), if (on) C.TEXT else if (color == 0) prefs.accent else C.PILL)
+                }
+            }
+            kbSwatches.addView(FrameLayout(this).apply {
+                addView(disc, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
+                contentDescription = if (on) "$name, selected" else name
+                setOnClickListener { prefs.kbAccent = color; render() }
+            }, LinearLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP)))
+        }
+        col.addView(android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(kbSwatches)
+        }, lp())
         col.addView(row(
             text("Forget the words and phrases the keyboard learned from your typing (your dictionary stays).", 14f, C.SUB).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)

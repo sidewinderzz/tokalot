@@ -9,9 +9,11 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 ## 1.44 · 2026-10-20
 - New: Tokalot Keyboard, an optional keyboard in the style of Gboard. Turn it on in Settings › Keyboard.
 - It autocorrects as you type (teh becomes the, dont becomes don't), and a backspace straight after puts back what you typed. Three suggestions sit above the keys, and between words it guesses the next one.
-- Swipe typing: slide from letter to letter. Slide along the space bar to move the cursor, and left from backspace to delete whole words.
+- Swipe typing: slide from letter to letter, in any text box but a password one. Slide along the space bar to move the cursor (an emoji or accented letter is one step), and left from backspace to select whole words, which go when you let go (slide back to keep them).
 - Long-press a letter for its symbol or accents. There's a symbols page, a number pad in number fields, an optional number row, and an emoji page with search and skin tones.
-- The mic on the keyboard's bar dictates, the same as the floating button, which hides while the keyboard is up.
+- The mic on the keyboard's bar is Tokalot's own five bars, which bounce with your voice while it records and ripple while it transcribes. It dictates the same as the floating button, which hides while the keyboard is up.
+- A clipboard: the button next to ✨ opens what you copied in the last hour, and a long press pins one so it stays. Something you just copied shows on the bar, ready to paste, with a link, email address or phone number in it on its own button. It stays on this phone and skips passwords.
+- Themes: light, dark, or matching your phone, in four styles (Classic, Tinted, Borderless, High contrast) and your choice of colour, under Settings › Keyboard.
 - The ✨ button fixes what you typed with your AI cleanup: spelling, typos, capitals and punctuation. It works on the selected text, or the whole text box, and Undo puts it back.
 - Words the keyboard doesn't know, such as names and farm terms, go into your dictionary once you've kept them twice, so they sync and dictation spells them right too. What else it learns from your typing stays on this phone.
 - Light and dark to match the app, in your Tokalot color, with key sound and vibration switches. Its settings sync to your other devices.

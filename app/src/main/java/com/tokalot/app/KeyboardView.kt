@@ -42,11 +42,16 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         fun onGlideStart(x: Float, y: Float)
         fun onGlideMove(x: Float, y: Float)
         fun onGlideEnd()
-        /** Space bar slide: move the cursor [steps] characters (negative: left). */
+        /** Space bar slide: move the cursor [steps] more characters (negative: left). */
         fun onCursorSlide(steps: Int)
-        /** Delete slide: select [words] words back from the cursor; [done]: the finger lifted. */
+        /** Delete slide: select [words] words back from the cursor; [done]: the finger lifted, so delete them. */
         fun onDeleteSlide(words: Int, done: Boolean)
-        /** Suggestion bar: a suggestion's slot (0-2), [SLOT_FIX], [SLOT_MIC], [SLOT_MESSAGE] or [SLOT_CANCEL]. */
+        /**
+         * A cursor slide ended ([cancelled] false), or either slide was abandoned (the finger strayed off
+         * the row, or the touch was taken away): the cursor and selection go back to where they were.
+         */
+        fun onSlideEnd(cancelled: Boolean)
+        /** Suggestion bar: a suggestion's slot (0-2), [SLOT_FIX], [SLOT_MIC], [SLOT_MESSAGE], [SLOT_CANCEL] or [SLOT_CLIPBOARD]. */
         fun onStrip(slot: Int)
         /** A key went down: for the click and buzz. */
         fun onPress(code: Int)
@@ -59,9 +64,12 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         const val SLOT_MIC = -2
         const val SLOT_MESSAGE = -3
         const val SLOT_CANCEL = -4
+        const val SLOT_CLIPBOARD = -5
         private const val LONG_PRESS_MS = 380L
         private const val REPEAT_START_MS = 400L
         private const val REPEAT_MS = 55L
+        /** A slide along space or from backspace only starts this long after the touch, so a quick tap stays a tap. */
+        private const val SLIDE_DELAY_MS = 200L
     }
 
     // ------------------------------------------------------------------ what's shown
@@ -88,9 +96,21 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         set(v) { field = v; invalidate() }
     var cancelable = false
         set(v) { field = v; invalidate() }
-    /** The mic is recording: the mic button is lit and pulses with [level] (0-1). */
-    var recording = false
+    /** The suggestions are things copied to the clipboard, drawn as chips. */
+    var chips = false
         set(v) { field = v; invalidate() }
+    /** The clipboard button shows next to AI fix (between words; while typing the suggestions get the room). */
+    var clipButton = false
+        set(v) { if (field != v) { field = v; invalidate() } }
+
+    /**
+     * The mic is Tokalot's logo, five bars. Recording, it lights up and the bars follow the voice ([level],
+     * 0-1) as the floating button's do; while the words are worked on ([working]) they ripple.
+     */
+    var recording = false
+        set(v) { field = v; micFrom = System.nanoTime(); invalidate() }
+    var working = false
+        set(v) { field = v; micFrom = System.nanoTime(); invalidate() }
     var level = 0f
         set(v) { field = v; if (recording) invalidate() }
     var swipeTrail = true
@@ -103,6 +123,18 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 
     private val density = resources.displayMetrics.density
     private fun dp(v: Float) = v * density
+    private fun pt(v: Float) = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_PT, v, resources.displayMetrics)
+    private fun mm(v: Float) = android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_MM, v, resources.displayMetrics)
+
+    // Slide distances in physical units, so they feel the same on every screen: how far the finger must go
+    // before a slide starts, how far per character, how far for the first, second and each further word,
+    // and how far above or below the key it may stray before the slide is abandoned.
+    private val slideStart by lazy { pt(8f) }
+    private val cursorStep by lazy { pt(8f) }
+    private val deleteFirst by lazy { pt(23f) }
+    private val deleteSecond by lazy { pt(41f) }
+    private val deleteStep by lazy { pt(16f) }
+    private val slideSlack by lazy { mm(4f) }
     val stripHeight get() = dp(46f)
     private val gap get() = dp(5f)
     private val sidePad get() = dp(3f)
@@ -156,6 +188,10 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         val radius = dp(6f)
         for (k in page.keys) {
             val pressed = pointers.values.any { it.key === k && !it.gliding }
+            if (t.borderless && !pressed && k.code != KeyCode.ENTER) {
+                drawLabel(canvas, k, t.text)
+                continue
+            }
             val bg = when {
                 k.code == KeyCode.ENTER -> t.accent
                 k.isFunction -> if (pressed) t.keyPressed else t.functionKey
@@ -216,11 +252,13 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 
     // ---- the suggestion bar
 
-    /** Where the bar's parts are: fix button, three slots, mic button. */
+    /** Where the bar's parts start and end: AI fix, clipboard (none while typing), three slots, the mic. */
     private fun stripSlots(): FloatArray {
         val side = stripHeight * 1.15f
-        val mid = (width - 2 * side) / 3
-        return floatArrayOf(0f, side, side + mid, side + 2 * mid, width - side, width.toFloat())
+        val clip = if (clipButton) stripHeight else 0f
+        val mid = (width - 2 * side - clip) / 3
+        val start = side + clip
+        return floatArrayOf(0f, side, start, start + mid, start + 2 * mid, width - side, width.toFloat())
     }
 
     private fun drawStrip(canvas: Canvas) {
@@ -228,41 +266,91 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         val h = stripHeight
         val s = stripSlots()
         val cy = h / 2
-        // Left: AI fix, or cancel while something is running.
+        // Left: AI fix, or cancel while something is running; then the clipboard.
         val leftRes = if (cancelable) R.drawable.ic_close else R.drawable.ic_kb_sparkle
         drawIcon(canvas, leftRes, (s[0] + s[1]) / 2, cy, dp(22f), if (cancelable) t.text else t.accentText)
-        // Right: the mic.
-        val micX = (s[4] + s[5]) / 2
-        if (recording) {
-            fill.color = t.accent
-            val r = dp(17f) + dp(6f) * level.coerceIn(0f, 1f)
-            fill.alpha = 70
-            canvas.drawCircle(micX, cy, r, fill)
-            fill.alpha = 255
-            canvas.drawCircle(micX, cy, dp(17f), fill)
-        }
-        drawIcon(canvas, R.drawable.ic_mic, micX, cy, dp(22f), if (recording) t.onAccent else t.text)
+        if (clipButton && !cancelable) drawIcon(canvas, R.drawable.ic_kb_clipboard, (s[1] + s[2]) / 2, cy, dp(21f), t.text)
+        drawMic(canvas, (s[5] + s[6]) / 2, cy)
 
         val msg = message
         text.typeface = Typeface.DEFAULT
         if (msg != null) {
             text.color = t.text
             text.textSize = dp(15f)
-            canvas.drawText(ellipsize(msg, s[4] - s[1] - dp(16f)), (s[1] + s[4]) / 2, cy - (text.descent() + text.ascent()) / 2, text)
+            val from = if (cancelable) s[1] else s[2]
+            canvas.drawText(ellipsize(msg, s[5] - from - dp(16f)), (from + s[5]) / 2, cy - (text.descent() + text.ascent()) / 2, text)
             return
         }
         for (i in 0 until 3) {
             val word = suggestions.getOrNull(i) ?: continue
-            val left = s[1 + i]; val right = s[2 + i]
+            val chipW = (s[5] - s[2]) / maxOf(1, suggestions.size)
+            val left = if (chips) s[2] + i * chipW else s[2 + i]
+            val right = if (chips) left + chipW else s[3 + i]
             text.color = t.text
-            text.textSize = dp(16f)
+            text.textSize = dp(if (chips) 14f else 16f)
             text.typeface = if (i == boldSlot) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            if (chips) {
+                // A copied thing: a pill with the clipboard mark, tap to paste.
+                rect.set(left + dp(3f), cy - dp(15f), right - dp(3f), cy + dp(15f))
+                fill.color = if (t.borderless) t.keyPressed else t.key
+                canvas.drawRoundRect(rect, dp(15f), dp(15f), fill)
+                drawIcon(canvas, R.drawable.ic_kb_clipboard, rect.left + dp(14f), cy, dp(14f), t.accentText)
+                val room = rect.width() - dp(32f)
+                canvas.drawText(ellipsize(word.replace('\n', ' '), room), rect.left + dp(26f) + room / 2, cy - (text.descent() + text.ascent()) / 2, text)
+                continue
+            }
             canvas.drawText(ellipsize(word, right - left - dp(8f)), (left + right) / 2, cy - (text.descent() + text.ascent()) / 2, text)
             if (i > 0 && suggestions.getOrNull(i - 1) != null) {
                 fill.color = t.divider
                 canvas.drawRect(left - dp(0.5f), cy - dp(10f), left + dp(0.5f), cy + dp(10f), fill)
             }
         }
+    }
+
+    // ---- the mic: Tokalot's five bars, as on the app icon and the floating button
+
+    private val barBase = floatArrayOf(16f, 36f, 22f, 44f, 16f)
+    private val barGain = floatArrayOf(0.55f, 0.85f, 0.7f, 1f, 0.5f)
+    private val barNow = barBase.copyOf()
+    private var micFrom = System.nanoTime()
+    private var micLevel = 0f
+
+    private fun drawMic(canvas: Canvas, cx: Float, cy: Float) {
+        val t = theme
+        val active = recording || working
+        val size = dp(34f)
+        rect.set(cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
+        // The floating button's graphite square while it works; quiet the rest of the time.
+        if (active) {
+            fill.color = 0xFF2C2C2E.toInt()
+            canvas.drawRoundRect(rect, dp(10f), dp(10f), fill)
+        }
+        val time = (System.nanoTime() - micFrom) / 1e9f
+        if (recording) {
+            val raw = kotlin.math.sqrt((level * 6f).coerceIn(0f, 1f))
+            micLevel += (raw - micLevel) * 0.4f
+        }
+        val unit = size / 108f * 1.25f // the icon's 108-unit grid, its bars a little larger here
+        var moving = false
+        for (i in 0 until 5) {
+            val target = when {
+                recording -> 10f + micLevel * 52f * barGain[i] + 3f * kotlin.math.sin(time * 9f + i * 1.7f)
+                working -> 12f + 34f * (0.5f + 0.5f * kotlin.math.sin((time * 1.6f - i * 0.18f) * 2f * Math.PI.toFloat()))
+                else -> barBase[i]
+            }
+            barNow[i] += (target - barNow[i]) * 0.3f
+            if (abs(target - barNow[i]) > 0.3f) moving = true
+            val bh = barNow[i].coerceIn(6f, 64f) * unit
+            val bx = cx + (i - 2) * 11f * unit
+            fill.color = when {
+                recording -> t.accent
+                working -> 0xFFFFFFFF.toInt()
+                i == 3 -> t.accent
+                else -> t.text
+            }
+            canvas.drawRoundRect(bx - 3f * unit, cy - bh / 2, bx + 3f * unit, cy + bh / 2, 3f * unit, 3f * unit, fill)
+        }
+        if (active || moving) postInvalidateOnAnimation()
     }
 
     private fun ellipsize(s: String, maxW: Float): String {
@@ -357,6 +445,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         var deleteWords = 0
         var repeating = false
         var fired = false
+        var dead = false      // a slide was abandoned: lifting the finger does nothing
         val trail = ArrayList<Float>()
     }
 
@@ -397,6 +486,8 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                     handler.removeCallbacks(longPress)
                     handler.postDelayed(longPress, LONG_PRESS_MS)
                     if (key.code == KeyCode.DELETE) handler.postDelayed(repeat, REPEAT_START_MS)
+                    // A finger that moved before the slide delay and then stopped still gets its slide.
+                    if (key.code == KeyCode.DELETE || key.code == KeyCode.SPACE) handler.postDelayed(slideCheck, SLIDE_DELAY_MS + 1)
                 }
                 invalidate()
             }
@@ -419,11 +510,16 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 if (pointers.isEmpty()) {
                     handler.removeCallbacks(longPress)
                     handler.removeCallbacks(repeat)
+                    handler.removeCallbacks(slideCheck)
                 }
                 invalidate()
             }
             MotionEvent.ACTION_CANCEL -> {
-                pointers.values.forEach { if (it.gliding) listener.onGlideEnd() }
+                pointers.values.forEach {
+                    if (it.gliding) listener.onGlideEnd()
+                    if (it.sliding || it.deleting) listener.onSlideEnd(cancelled = true)
+                }
+                handler.removeCallbacks(slideCheck)
                 pointers.clear()
                 menu = null
                 stripDown = -1f
@@ -442,10 +538,13 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         val s = stripSlots()
         val slot = when {
             x < s[1] -> if (cancelable) SLOT_CANCEL else SLOT_FIX
-            x >= s[4] -> SLOT_MIC
+            x >= s[5] -> SLOT_MIC
             message != null -> SLOT_MESSAGE
-            x < s[2] -> 0
-            x < s[3] -> 1
+            x < s[2] -> SLOT_CLIPBOARD
+            // Copied things share the room between them.
+            chips && suggestions.isNotEmpty() -> ((x - s[2]) / ((s[5] - s[2]) / suggestions.size)).toInt().coerceIn(0, suggestions.size - 1)
+            x < s[3] -> 0
+            x < s[4] -> 1
             else -> 2
         }
         if (slot in 0..2 && suggestions.getOrNull(slot) == null) return
@@ -462,32 +561,39 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
             if (i != m.selected) { m.selected = i; invalidate() }
             return
         }
+        if (p.dead) return
         val dx = x - p.downX
         val dy = y - p.downY
+        val ready = SystemClock.uptimeMillis() - p.downAt >= SLIDE_DELAY_MS && abs(dx) >= slideStart && abs(dy) <= abs(dx)
         when {
             p.gliding -> {
                 p.trail += x; p.trail += y
                 listener.onGlideMove(toPageX(x), toPageY(y))
                 invalidate()
             }
+            (p.sliding || p.deleting) && strayed(key, y) -> abandon(p)
             p.sliding -> {
-                val steps = (dx / (unit * 0.45f)).toInt()
+                val steps = (dx / cursorStep).toInt()
                 if (steps != p.slideSteps) { listener.onCursorSlide(steps - p.slideSteps); p.slideSteps = steps }
             }
             p.deleting -> {
-                val words = max(0, (-dx / (unit * 0.9f)).toInt())
+                val words = deleteWords(-dx)
                 if (words != p.deleteWords) { p.deleteWords = words; listener.onDeleteSlide(words, false) }
             }
-            key.code == KeyCode.SPACE && abs(dx) > unit * 0.6f && !p.longDone -> {
+            key.code == KeyCode.SPACE && ready && !p.longDone -> {
                 p.sliding = true; p.fired = true
                 handler.removeCallbacks(longPress)
+                p.slideSteps = (dx / cursorStep).toInt()
+                listener.onCursorSlide(p.slideSteps)
                 invalidate()
             }
-            key.code == KeyCode.DELETE && dx < -unit * 0.8f && !p.repeating -> {
+            // Only once the finger has left the key, so a wobbly hold on backspace still repeats.
+            key.code == KeyCode.DELETE && ready && dx < 0 && x < pageX(key.x) && !p.repeating -> {
                 p.deleting = true; p.fired = true
                 handler.removeCallbacks(longPress); handler.removeCallbacks(repeat)
-                p.deleteWords = 1
-                listener.onDeleteSlide(1, false)
+                p.deleteWords = deleteWords(-dx)
+                listener.onDeleteSlide(p.deleteWords, false)
+                invalidate()
             }
             glideEnabled && key.isLetter && pointers.size == 1 && !p.longDone && hypot(dx, dy) > unit * 0.55f -> {
                 p.gliding = true; p.fired = true
@@ -510,7 +616,29 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         }
     }
 
+    /** Words a delete slide of [d] pixels to the left covers: one at 23 pt, two at 41 pt, then one per 16 pt. */
+    private fun deleteWords(d: Float): Int = when {
+        d < deleteFirst -> 0
+        d < deleteSecond -> 1
+        else -> 2 + ((d - deleteSecond) / deleteStep).toInt()
+    }
+
+    /** The finger went too far above or below the key's row for a slide to still count. */
+    private fun strayed(key: Key, y: Float) = y < pageY(key.y) - slideSlack || y > pageY(key.y + key.h) + slideSlack
+
+    private fun abandon(p: Pointer) {
+        p.sliding = false; p.deleting = false
+        p.dead = true; p.fired = true
+        listener.onSlideEnd(cancelled = true)
+        invalidate()
+    }
+
+    private val slideCheck = Runnable {
+        for (p in pointers.values.toList()) if (!p.fired && (p.key?.code == KeyCode.SPACE || p.key?.code == KeyCode.DELETE)) move(p, p.x, p.y)
+    }
+
     private fun up(p: Pointer) {
+        if (p.dead) return
         val m = menu
         when {
             m != null && m.key === p.key -> {
@@ -518,7 +646,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 listener.onText(m.items[m.selected])
             }
             p.gliding -> listener.onGlideEnd()
-            p.sliding -> {}
+            p.sliding -> listener.onSlideEnd(cancelled = false)
             p.deleting -> listener.onDeleteSlide(p.deleteWords, true)
             !p.fired && !p.longDone -> fire(p)
         }
@@ -571,30 +699,69 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     /** Forgets every touch (the keyboard was hidden or changed page mid-press). */
     fun reset() {
         pointers.clear(); menu = null; stripDown = -1f
-        handler.removeCallbacks(longPress); handler.removeCallbacks(repeat)
+        handler.removeCallbacks(longPress); handler.removeCallbacks(repeat); handler.removeCallbacks(slideCheck)
         invalidate()
     }
 }
 
-/** The keyboard's colours: Gboard-like greys, with the user's Tokalot accent on enter, the mic and swipe. */
+/**
+ * The keyboard's colours. [style]: "classic" (Gboard-like greys), "tinted" (keys tinted with the accent),
+ * "borderless" (no key shapes, only the letters) or "contrast" (pure black or pure white). The accent goes
+ * on enter, the mic, the swipe trail and the picked suggestion.
+ */
 class KeyboardTheme(
     val background: Int, val key: Int, val functionKey: Int, val keyPressed: Int, val text: Int, val hint: Int,
     val accent: Int, val onAccent: Int, val accentText: Int, val preview: Int, val divider: Int, val shadow: Int,
+    val dark: Boolean, val borderless: Boolean = false,
 ) {
     companion object {
-        fun light(accent: Int) = KeyboardTheme(
-            background = 0xFFE8EAED.toInt(), key = 0xFFFFFFFF.toInt(), functionKey = 0xFFCDD1D6.toInt(),
-            keyPressed = 0xFFBDC1C6.toInt(), text = 0xFF202124.toInt(), hint = 0xFF80868B.toInt(),
-            accent = accent, onAccent = onColor(accent), accentText = darkerFor(accent, light = true),
-            preview = 0xFFFFFFFF.toInt(), divider = 0xFFC4C7CC.toInt(), shadow = 0x22000000,
-        )
+        const val CLASSIC = "classic"
+        const val TINTED = "tinted"
+        const val BORDERLESS = "borderless"
+        const val CONTRAST = "contrast"
+        val STYLES = listOf(CLASSIC, TINTED, BORDERLESS, CONTRAST)
 
-        fun dark(accent: Int) = KeyboardTheme(
-            background = 0xFF1F1F21.toInt(), key = 0xFF3C3C40.toInt(), functionKey = 0xFF2C2C30.toInt(),
-            keyPressed = 0xFF55555B.toInt(), text = 0xFFE8EAED.toInt(), hint = 0xFF9AA0A6.toInt(),
-            accent = accent, onAccent = onColor(accent), accentText = darkerFor(accent, light = false),
-            preview = 0xFF4A4A50.toInt(), divider = 0xFF4A4A50.toInt(), shadow = 0x33000000,
-        )
+        fun light(accent: Int) = make(dark = false, style = CLASSIC, accent = accent)
+        fun dark(accent: Int) = make(dark = true, style = CLASSIC, accent = accent)
+
+        fun make(dark: Boolean, style: String, accent: Int): KeyboardTheme {
+            val accentText = darkerFor(accent, light = !dark)
+            fun t(bg: Long, key: Long, fn: Long, pressed: Long, text: Long, hint: Long, preview: Long, divider: Long, borderless: Boolean = false) =
+                KeyboardTheme(
+                    bg.toInt(), key.toInt(), fn.toInt(), pressed.toInt(), text.toInt(), hint.toInt(),
+                    accent, onColor(accent), accentText, preview.toInt(), divider.toInt(),
+                    if (dark) 0x33000000 else 0x22000000, dark, borderless,
+                )
+            return when (style) {
+                TINTED -> {
+                    val base = if (dark) 0xFF1F1F21.toInt() else 0xFFFFFFFF.toInt()
+                    KeyboardTheme(
+                        mix(accent, base, if (dark) 0.16f else 0.14f),
+                        mix(accent, if (dark) 0xFF3C3C40.toInt() else 0xFFFFFFFF.toInt(), if (dark) 0.10f else 0.03f),
+                        mix(accent, base, if (dark) 0.28f else 0.32f),
+                        mix(accent, base, 0.45f),
+                        if (dark) 0xFFE8EAED.toInt() else 0xFF202124.toInt(),
+                        if (dark) 0xFF9AA0A6.toInt() else 0xFF80868B.toInt(),
+                        accent, onColor(accent), accentText,
+                        if (dark) 0xFF4A4A50.toInt() else 0xFFFFFFFF.toInt(),
+                        mix(accent, base, 0.4f),
+                        if (dark) 0x33000000 else 0x22000000, dark,
+                    )
+                }
+                CONTRAST -> if (dark) t(0xFF000000, 0xFF1A1A1A, 0xFF0D0D0D, 0xFF333333, 0xFFFFFFFF, 0xFFA0A0A0, 0xFF2A2A2A, 0xFF333333)
+                    else t(0xFFFFFFFF, 0xFFF1F3F4, 0xFFDADCE0, 0xFFBDC1C6, 0xFF000000, 0xFF5F6368, 0xFFFFFFFF, 0xFFDADCE0)
+                BORDERLESS -> if (dark) t(0xFF1F1F21, 0xFF1F1F21, 0xFF1F1F21, 0xFF3C3C40, 0xFFE8EAED, 0xFF9AA0A6, 0xFF4A4A50, 0xFF4A4A50, borderless = true)
+                    else t(0xFFF1F3F4, 0xFFF1F3F4, 0xFFF1F3F4, 0xFFD5D8DC, 0xFF202124, 0xFF80868B, 0xFFFFFFFF, 0xFFC4C7CC, borderless = true)
+                else -> if (dark) t(0xFF1F1F21, 0xFF3C3C40, 0xFF2C2C30, 0xFF55555B, 0xFFE8EAED, 0xFF9AA0A6, 0xFF4A4A50, 0xFF4A4A50)
+                    else t(0xFFE8EAED, 0xFFFFFFFF, 0xFFCDD1D6, 0xFFBDC1C6, 0xFF202124, 0xFF80868B, 0xFFFFFFFF, 0xFFC4C7CC)
+            }
+        }
+
+        /** [a] mixed into [b]: [amount] 0 is all [b], 1 all [a]. */
+        fun mix(a: Int, b: Int, amount: Float): Int {
+            fun ch(shift: Int) = (((a shr shift) and 0xFF) * amount + ((b shr shift) and 0xFF) * (1 - amount)).toInt().coerceIn(0, 255)
+            return (0xFF shl 24) or (ch(16) shl 16) or (ch(8) shl 8) or ch(0)
+        }
 
         /** Black or white, whichever reads better on [c]. */
         private fun onColor(c: Int) = if (C.luminance(c) > 0.45) 0xFF1C1C1E.toInt() else 0xFFFFFFFF.toInt()
