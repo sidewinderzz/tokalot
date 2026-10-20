@@ -145,9 +145,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
                     sheet("Rename", f, positive = "Save") {
                         // An empty title removes it, and the AI leaves this note untitled from then on.
                         val t = f.text.toString().trim().take(80)
-                        NoteImport.update(this, id) { o ->
-                            if (t.isEmpty()) { o.remove("title"); o.put("titleOff", true) } else { o.put("title", t); o.remove("titleOff") }
-                        }
+                        NoteImport.setTitle(this, id, t)
                         showTitle(t.ifEmpty { null })
                     }
                     Unit

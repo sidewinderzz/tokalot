@@ -306,10 +306,14 @@ public static class NoteImport
             if (Get(id) is { } i && (i.Title != null || i.TitleOff) || text.Trim().Length < 40) return null;
             if (NoteMedia.CleanTitle(await Ask(s, NoteMedia.TitleSystem(), NoteMedia.TitleUser(text), 30)) is not { } title) return null;
             Update(id, o => { if ((string?)o["title"] is not { Length: > 0 } && (bool?)o["titleOff"] != true) o["title"] = title; });
+            Sync.Queue();
             return Get(id)?.Title;
         }
         catch { return null; }
     }
+
+    /** The title as sync carries it: null for none, "" for one cleared on purpose. */
+    public static string? SyncTitle(long id) => Get(id) is { } i ? i.TitleOff ? "" : i.Title : null;
 
     /** Rename: a new title, or none (empty), which also stops the AI making one for this note. */
     public static void SetTitle(long id, string? title)
@@ -320,6 +324,7 @@ public static class NoteImport
             if (title.Length == 0) { o.Remove("title"); o["titleOff"] = true; }
             else { o["title"] = title; o.Remove("titleOff"); }
         });
+        Sync.Queue();
     }
 
     /** Asks for and saves the index of a recording. */

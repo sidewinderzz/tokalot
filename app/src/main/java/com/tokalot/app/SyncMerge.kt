@@ -10,8 +10,11 @@ import org.json.JSONTokener
  * change nothing here without changing them too.
  */
 
-/** One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one. */
-data class SyncNote(val id: Long, val time: Long, val text: String)
+/**
+ * One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one.
+ * Title: null when the note has none, "" when it was cleared on purpose (so no device makes a new one).
+ */
+data class SyncNote(val id: Long, val time: Long, val text: String, val title: String? = null)
 
 /** One month of one device's counts, as the sync file holds them. */
 data class UsageMonth(
@@ -163,7 +166,7 @@ object SyncFormat {
                 val n = arr.optJSONObject(i) ?: return@mapNotNull null
                 val id = (n.opt("id") as? Number)?.toLong() ?: return@mapNotNull null
                 val t = n.opt("text") as? String ?: return@mapNotNull null
-                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t)
+                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t, n.opt("title") as? String)
             }
         }
         val settings = o.optJSONObject("settings")?.let { s ->
@@ -278,7 +281,9 @@ object SyncFormat {
         o.put("styles", JSONObject().also { s -> state.styles.forEach { (c, v) -> s.put(c, v) } })
         o.put("instructions", state.instructions)
         o.put("notes", JSONArray().also { arr ->
-            state.notes.forEach { arr.put(JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)) }
+            state.notes.forEach { n ->
+                arr.put(JSONObject().put("id", n.id).put("time", n.time).put("text", n.text).also { o -> n.title?.let { o.put("title", it) } })
+            }
         })
         state.settings?.let { s ->
             o.put("settings", JSONObject().also { j -> s.forEach { (k, v) -> value(v)?.let { j.put(k, it) } } })
@@ -424,7 +429,8 @@ object SyncMerge {
 
     /**
      * Notes match by id. One that a side had at the last sync and no longer has was deleted there; a text
-     * changed since the last sync wins over the unchanged one. Newest first.
+     * changed since the last sync wins over the unchanged one, and so does a title, on its own. A side that doesn't
+     * know titles (an older version) never clears one. Newest first.
      */
     private fun notes(l: List<SyncNote>, r: List<SyncNote>?, b: List<SyncNote>): List<SyncNote> {
         if (r == null) return l
@@ -437,7 +443,10 @@ object SyncMerge {
             val there = theirs[id]
             val was = base[id]
             when {
-                here != null && there != null -> out.add(if (was != null && here.text == was.text) there else here)
+                here != null && there != null -> {
+                    val title = if (here.title != was?.title) here.title ?: there.title else there.title ?: here.title
+                    out.add((if (was != null && here.text == was.text) there else here).copy(title = title))
+                }
                 here != null -> if (was == null) out.add(here) // else: deleted elsewhere
                 there != null -> if (was == null) out.add(there) // else: deleted here
             }

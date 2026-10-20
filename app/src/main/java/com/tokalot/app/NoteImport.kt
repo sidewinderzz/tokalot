@@ -355,10 +355,21 @@ object NoteImport {
             val title = NoteMedia.cleanTitle(ask(prefs, NoteMedia.titleSystem(), NoteMedia.titleUser(text), NoteMedia.TITLE_MAX_TOKENS)) ?: return null
             if (Notes.all(ctx).none { it.id == id }) return null // deleted meanwhile
             update(ctx, id) { it.put("title", title) }
+            main.post { Sync.changed(ctx) }
             title
         } catch (e: Exception) {
             null
         } finally { titling.remove(id) }
+    }
+
+    /** The title as sync carries it: null for none, "" for one cleared on purpose. */
+    fun syncTitle(ctx: Context, id: Long): String? = info(ctx, id)?.let { if (it.titleOff) "" else it.title }
+
+    /** Rename: a new title, or none (empty), which also stops the AI making one for this note. */
+    fun setTitle(ctx: Context, id: Long, title: String, sync: Boolean = true) {
+        val t = title.trim().take(80)
+        update(ctx, id) { o -> if (t.isEmpty()) { o.remove("title"); o.put("titleOff", true) } else { o.put("title", t); o.remove("titleOff") } }
+        if (sync) main.post { Sync.changed(ctx) }
     }
 
     /**
