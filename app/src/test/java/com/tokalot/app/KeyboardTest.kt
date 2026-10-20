@@ -135,6 +135,27 @@ class KeyboardTest {
         val withNumbers = Layouts.letters(numberRow = true, symbolHints = true)
         withNumbers.layout(1080f, 150f, 10f)
         assertEquals(0f, withNumbers.letterCenters().getValue('q')[1], 0.01f)
+        // The number row is shorter than a letter row, and touches still land on the right row.
+        assertEquals(150f * (4 + Layouts.NUMBER_ROW), withNumbers.height, 0.01f)
+        assertEquals('1'.code, withNumbers.keyAt(5f, 150f * Layouts.NUMBER_ROW - 1f)?.code)
+        assertEquals('q'.code, withNumbers.keyAt(5f, 150f * Layouts.NUMBER_ROW + 1f)?.code)
+        assertEquals(150f * Layouts.NUMBER_ROW, withNumbers.lettersTop, 0.01f)
+    }
+
+    @Test fun toolbar() {
+        val t = KeyboardToolbar
+        assertEquals(t.DEFAULT, t.parse(null))
+        // Unknown names dropped, duplicates once, and the mic is always there.
+        assertEquals(listOf("clipboard", "fix", "mic"), t.parse("clipboard,bogus,fix,clipboard"))
+        assertEquals(listOf("mic", "fix", "clipboard"), t.move(t.DEFAULT, "mic", -5))
+        assertEquals(t.DEFAULT, t.remove(t.DEFAULT, "mic"))
+        assertEquals(listOf("fix", "mic"), t.remove(t.DEFAULT, "clipboard"))
+        assertEquals(t.DEFAULT + "emoji", t.add(t.DEFAULT, "emoji"))
+        assertTrue(t.valid("mic") && !t.valid("fix") && !t.valid("mic,mic"))
+        // Clipboard sits in the middle by default, with the mic on the right beside suggestions.
+        assertEquals(1, t.DEFAULT.indexOf("clipboard"))
+        assertFalse(t.micOnLeft(t.DEFAULT))
+        assertTrue(t.micOnLeft(listOf("mic", "fix", "clipboard")))
     }
 
     @Test fun typingHistoryRoundTrips() {

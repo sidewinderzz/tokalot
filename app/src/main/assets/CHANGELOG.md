@@ -14,6 +14,8 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - The mic on the keyboard's bar is Tokalot's own five bars, which bounce with your voice while it records and ripple while it transcribes. It dictates the same as the floating button, which hides while the keyboard is up.
 - A clipboard: the button next to ✨ opens what you copied in the last hour, and a long press pins one so it stays. Something you just copied shows on the bar, ready to paste, with a link, email address or phone number in it on its own button. It stays on this phone and skips passwords.
 - Themes: light, dark, or matching your phone, in four styles (Classic, Tinted, Borderless, High contrast) and your choice of colour, under Settings › Keyboard.
+- The keyboard's own menu: tap the four-squares button at the left of its top bar to move, remove or add the bar's buttons (clipboard, AI fix, emoji, light/dark, number row, settings; the mic always stays), change the keyboard's height, switch its look, and flip the common settings.
+- Suggestions show in every text box but password ones, and the number row is shorter than the letter rows, as on Gboard.
 - The ✨ button fixes what you typed with your AI cleanup: spelling, typos, capitals and punctuation. It works on the selected text, or the whole text box, and Undo puts it back.
 - Words the keyboard doesn't know, such as names and farm terms, go into your dictionary once you've kept them twice, so they sync and dictation spells them right too. What else it learns from your typing stays on this phone.
 - Light and dark to match the app, in your Tokalot color, with key sound and vibration switches. Its settings sync to your other devices.

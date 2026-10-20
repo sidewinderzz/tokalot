@@ -119,6 +119,8 @@ object Accents {
 val NOTE_SPEEDS = floatArrayOf(1f, 1.25f, 1.5f, 2f)
 /** The keyboard's light and dark choices: "auto" follows the phone. */
 val KB_THEMES = listOf("auto", "light", "dark")
+/** The keyboard heights offered, in percent. */
+val KB_HEIGHTS = 80..130
 
 const val DEFAULT_INSTRUCTIONS = "Always write \"lol\" in lowercase."
 
@@ -203,7 +205,7 @@ class Prefs(ctx: Context) {
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
         fun synced(key: String) = key in BOOLEANS.values || key in setOf(
             "stt", "cleanup", "theme", "accent", "sound_set", "note_phrases", "learned_words", "dismissed_words",
-            "note_level", "note_speed", "kb_theme", "kb_style", "kb_accent",
+            "note_level", "note_speed", "kb_theme", "kb_style", "kb_accent", "kb_toolbar", "kb_height",
         ) || key.startsWith("sttmodel_") || key.startsWith("model_") || key.startsWith("app_")
 
         /** Whether a synced setting's value from the file is one this version can use. */
@@ -220,6 +222,8 @@ class Prefs(ctx: Context) {
                 "accent", "keyboardAccent" -> v is Number && v.toLong() in 0L..0xFFFFFFFFL
                 "keyboardTheme" -> v is String && v in KB_THEMES
                 "keyboardStyle" -> v is String && v in KeyboardTheme.STYLES
+                "keyboardToolbar" -> v is String && KeyboardToolbar.valid(v)
+                "keyboardHeight" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in KB_HEIGHTS
                 "sttModels", "cleanupModels" -> strings()
                 "androidAppOverrides" -> strings { c -> AppCategory.values().any { it.name == c } }
                 "noteSummaryLevel" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 1..5
@@ -427,6 +431,8 @@ class Prefs(ctx: Context) {
             "keyboardTheme" to kbTheme,
             "keyboardStyle" to kbStyle,
             "keyboardAccent" to (kbAccent.toLong() and 0xFFFFFFFFL),
+            "keyboardToolbar" to kbToolbar,
+            "keyboardHeight" to kbHeight,
             "noteSummaryLevel" to noteSummaryLevel,
             "noteSpeed" to noteSpeed.toDouble(),
             "notePhrases" to notePhrases,
@@ -472,6 +478,8 @@ class Prefs(ctx: Context) {
             "keyboardAccent" -> ed.putInt("kb_accent", (v as Number).toLong().toInt())
             "keyboardTheme" -> ed.putString("kb_theme", v as String)
             "keyboardStyle" -> ed.putString("kb_style", v as String)
+            "keyboardToolbar" -> ed.putString("kb_toolbar", v as String)
+            "keyboardHeight" -> ed.putInt("kb_height", (v as Number).toInt())
             "noteSummaryLevel" -> ed.putInt("note_level", (v as Number).toInt())
             "noteSpeed" -> ed.putInt("note_speed", Math.round((v as Number).toDouble() * 100).toInt())
             "learnedWords" -> ed.putString("learned_words", strings(v as JSONArray))
@@ -622,6 +630,14 @@ class Prefs(ctx: Context) {
     var kbStyle: String
         get() = sp.safeString("kb_style", KeyboardTheme.CLASSIC)?.takeIf { it in KeyboardTheme.STYLES } ?: KeyboardTheme.CLASSIC
         set(v) = sp.edit().putString("kb_style", v).apply()
+    /** The keyboard's key height, in percent of the usual (80-130). */
+    var kbHeight: Int
+        get() = sp.safeInt("kb_height", 100).coerceIn(KB_HEIGHTS)
+        set(v) = sp.edit().putInt("kb_height", v.coerceIn(KB_HEIGHTS)).apply()
+    /** The keyboard's top bar buttons, in order (see [KeyboardToolbar]). */
+    var kbToolbar: String
+        get() = KeyboardToolbar.format(KeyboardToolbar.parse(sp.safeString("kb_toolbar", null)))
+        set(v) = sp.edit().putString("kb_toolbar", v).apply()
     /** The keyboard's accent colour; 0 = the same as the app's. */
     var kbAccent: Int
         get() = sp.safeInt("kb_accent", 0)

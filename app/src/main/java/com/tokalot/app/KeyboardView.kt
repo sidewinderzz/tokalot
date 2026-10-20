@@ -19,8 +19,8 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * The keyboard on screen: the suggestion bar along the top (AI fix on the left, three suggestions, the mic
- * on the right) and the keys below it, drawn straight onto a canvas. It reports what the finger did to
+ * The keyboard on screen: the bar along the top (the menu button, then the user's toolbar, or three
+ * suggestions with the mic beside them while there's something to suggest) and the keys below it, drawn straight onto a canvas. It reports what the finger did to
  * [listener] and keeps no typing state of its own: [TokalotKeyboard] decides what each touch means for
  * the text.
  *
@@ -51,8 +51,10 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
          * the row, or the touch was taken away): the cursor and selection go back to where they were.
          */
         fun onSlideEnd(cancelled: Boolean)
-        /** Suggestion bar: a suggestion's slot (0-2), [SLOT_FIX], [SLOT_MIC], [SLOT_MESSAGE], [SLOT_CANCEL] or [SLOT_CLIPBOARD]. */
+        /** The bar: a suggestion's slot (0-2), [SLOT_MENU], [SLOT_MESSAGE] or [SLOT_CANCEL]. */
         fun onStrip(slot: Int)
+        /** A toolbar button on the bar (one of [KeyboardToolbar]'s). */
+        fun onTool(item: String)
         /** A key went down: for the click and buzz. */
         fun onPress(code: Int)
         /** The keys moved (new page or size): key centres for autocorrect and swipe changed. */
@@ -60,11 +62,10 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     }
 
     companion object {
-        const val SLOT_FIX = -1
-        const val SLOT_MIC = -2
+        const val SLOT_MENU = -1
         const val SLOT_MESSAGE = -3
         const val SLOT_CANCEL = -4
-        const val SLOT_CLIPBOARD = -5
+        private const val TOOL = -10
         private const val LONG_PRESS_MS = 380L
         private const val REPEAT_START_MS = 400L
         private const val REPEAT_MS = 55L
@@ -99,8 +100,8 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     /** The suggestions are things copied to the clipboard, drawn as chips. */
     var chips = false
         set(v) { field = v; invalidate() }
-    /** The clipboard button shows next to AI fix (between words; while typing the suggestions get the room). */
-    var clipButton = false
+    /** The toolbar's buttons in the user's order (see [KeyboardToolbar]). */
+    var toolbar: List<String> = KeyboardToolbar.DEFAULT
         set(v) { if (field != v) { field = v; invalidate() } }
 
     /**
@@ -144,14 +145,13 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         get() {
             val land = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
             val base = if (land) 40f else 54f
-            // A taller page (number pad, number row) gets slightly shorter rows so the keyboard doesn't grow much.
-            val rows = page.rows.size
-            return dp(if (rows > 4 && page.kind == PageKind.LETTERS && rows == 6) base * 0.9f else if (page.kind == PageKind.NUMBERS || page.kind == PageKind.PHONE) base * 1.1f else base)
+            // The number pad's keys are a little taller; the number row's are shorter (see Layouts.NUMBER_ROW).
+            return dp(heightScale * if (page.kind == PageKind.NUMBERS || page.kind == PageKind.PHONE) base * 1.1f else base)
         }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        val h = (stripHeight + rowHeight * page.rows.size + dp(6f)).toInt()
+        val h = (stripHeight + page.heightFor(rowHeight) + dp(6f)).toInt()
         setMeasuredDimension(w, h)
     }
 
@@ -250,59 +250,102 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 
     var symbolHints = true
 
+    /** The keys' height against the usual (Settings' keyboard height, 0.8-1.3). */
+    var heightScale = 1f
+        set(v) { if (field != v) { field = v; requestLayout(); invalidate() } }
+
     // ---- the suggestion bar
 
-    /** Where the bar's parts start and end: AI fix, clipboard (none while typing), three slots, the mic. */
-    private fun stripSlots(): FloatArray {
+    /** A part of the bar: [kind] is a SLOT_ constant, a suggestion's index, or [TOOL] with its [item]. */
+    private class Part(val left: Float, val right: Float, val kind: Int, val item: String? = null)
+
+    /**
+     * The bar's parts, left to right. The menu (cancel while something runs) always comes first. With nothing
+     * to suggest or say, the toolbar's buttons share the rest; otherwise the suggestions (or the message) take
+     * the middle and the mic stays on its side.
+     */
+    private fun stripParts(): List<Part> {
         val side = stripHeight * 1.15f
-        val clip = if (clipButton) stripHeight else 0f
-        val mid = (width - 2 * side - clip) / 3
-        val start = side + clip
-        return floatArrayOf(0f, side, start, start + mid, start + 2 * mid, width - side, width.toFloat())
+        val w = width.toFloat()
+        val out = ArrayList<Part>()
+        out += Part(0f, side, if (cancelable) SLOT_CANCEL else SLOT_MENU)
+        if (message == null && suggestions.isEmpty()) {
+            val each = (w - side) / toolbar.size.coerceAtLeast(1)
+            toolbar.forEachIndexed { i, item -> out += Part(side + i * each, side + (i + 1) * each, TOOL, item) }
+            return out
+        }
+        val micLeft = KeyboardToolbar.micOnLeft(toolbar)
+        val from = if (micLeft) 2 * side else side
+        val to = if (micLeft) w else w - side
+        if (micLeft) out += Part(side, 2 * side, TOOL, KeyboardToolbar.MIC)
+        when {
+            message != null -> out += Part(from, to, SLOT_MESSAGE)
+            chips -> {
+                // Copied things share the room between them.
+                val each = (to - from) / suggestions.size
+                suggestions.indices.forEach { out += Part(from + it * each, from + (it + 1) * each, it) }
+            }
+            else -> {
+                val each = (to - from) / 3
+                for (i in 0 until 3) out += Part(from + i * each, from + (i + 1) * each, i)
+            }
+        }
+        if (!micLeft) out += Part(w - side, w, TOOL, KeyboardToolbar.MIC)
+        return out
+    }
+
+    private fun toolIcon(item: String) = when (item) {
+        KeyboardToolbar.FIX -> R.drawable.ic_kb_sparkle
+        KeyboardToolbar.CLIPBOARD -> R.drawable.ic_kb_clipboard
+        KeyboardToolbar.EMOJI -> R.drawable.ic_kb_emoji
+        KeyboardToolbar.THEME -> R.drawable.ic_kb_theme
+        KeyboardToolbar.NUMBERS -> R.drawable.ic_kb_numbers
+        KeyboardToolbar.SETTINGS -> R.drawable.ic_kb_settings
+        else -> 0
     }
 
     private fun drawStrip(canvas: Canvas) {
         val t = theme
-        val h = stripHeight
-        val s = stripSlots()
-        val cy = h / 2
-        // Left: AI fix, or cancel while something is running; then the clipboard.
-        val leftRes = if (cancelable) R.drawable.ic_close else R.drawable.ic_kb_sparkle
-        drawIcon(canvas, leftRes, (s[0] + s[1]) / 2, cy, dp(22f), if (cancelable) t.text else t.accentText)
-        if (clipButton && !cancelable) drawIcon(canvas, R.drawable.ic_kb_clipboard, (s[1] + s[2]) / 2, cy, dp(21f), t.text)
-        drawMic(canvas, (s[5] + s[6]) / 2, cy)
-
-        val msg = message
-        text.typeface = Typeface.DEFAULT
-        if (msg != null) {
-            text.color = t.text
-            text.textSize = dp(15f)
-            val from = if (cancelable) s[1] else s[2]
-            canvas.drawText(ellipsize(msg, s[5] - from - dp(16f)), (from + s[5]) / 2, cy - (text.descent() + text.ascent()) / 2, text)
-            return
-        }
-        for (i in 0 until 3) {
-            val word = suggestions.getOrNull(i) ?: continue
-            val chipW = (s[5] - s[2]) / maxOf(1, suggestions.size)
-            val left = if (chips) s[2] + i * chipW else s[2 + i]
-            val right = if (chips) left + chipW else s[3 + i]
-            text.color = t.text
-            text.textSize = dp(if (chips) 14f else 16f)
-            text.typeface = if (i == boldSlot) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            if (chips) {
-                // A copied thing: a pill with the clipboard mark, tap to paste.
-                rect.set(left + dp(3f), cy - dp(15f), right - dp(3f), cy + dp(15f))
-                fill.color = if (t.borderless) t.keyPressed else t.key
-                canvas.drawRoundRect(rect, dp(15f), dp(15f), fill)
-                drawIcon(canvas, R.drawable.ic_kb_clipboard, rect.left + dp(14f), cy, dp(14f), t.accentText)
-                val room = rect.width() - dp(32f)
-                canvas.drawText(ellipsize(word.replace('\n', ' '), room), rect.left + dp(26f) + room / 2, cy - (text.descent() + text.ascent()) / 2, text)
-                continue
-            }
-            canvas.drawText(ellipsize(word, right - left - dp(8f)), (left + right) / 2, cy - (text.descent() + text.ascent()) / 2, text)
-            if (i > 0 && suggestions.getOrNull(i - 1) != null) {
-                fill.color = t.divider
-                canvas.drawRect(left - dp(0.5f), cy - dp(10f), left + dp(0.5f), cy + dp(10f), fill)
+        val cy = stripHeight / 2
+        val baseline = { cy - (text.descent() + text.ascent()) / 2 }
+        for (p in stripParts()) {
+            val mid = (p.left + p.right) / 2
+            when (p.kind) {
+                SLOT_MENU -> drawIcon(canvas, R.drawable.ic_kb_grid, mid, cy, dp(19f), t.hint)
+                SLOT_CANCEL -> drawIcon(canvas, R.drawable.ic_close, mid, cy, dp(22f), t.text)
+                SLOT_MESSAGE -> {
+                    text.color = t.text
+                    text.typeface = Typeface.DEFAULT
+                    text.textSize = dp(15f)
+                    canvas.drawText(ellipsize(message ?: "", p.right - p.left - dp(16f)), mid, baseline(), text)
+                }
+                TOOL -> when (p.item) {
+                    KeyboardToolbar.MIC -> drawMic(canvas, mid, cy)
+                    KeyboardToolbar.FIX -> drawIcon(canvas, R.drawable.ic_kb_sparkle, mid, cy, dp(22f), t.accentText)
+                    else -> drawIcon(canvas, toolIcon(p.item ?: ""), mid, cy, dp(21f), t.text)
+                }
+                else -> {
+                    val i = p.kind
+                    val word = suggestions.getOrNull(i) ?: continue
+                    text.color = t.text
+                    text.textSize = dp(if (chips) 14f else 16f)
+                    text.typeface = if (i == boldSlot) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    if (chips) {
+                        // A copied thing: a pill with the clipboard mark, tap to paste.
+                        rect.set(p.left + dp(3f), cy - dp(15f), p.right - dp(3f), cy + dp(15f))
+                        fill.color = if (t.borderless) t.keyPressed else t.key
+                        canvas.drawRoundRect(rect, dp(15f), dp(15f), fill)
+                        drawIcon(canvas, R.drawable.ic_kb_clipboard, rect.left + dp(14f), cy, dp(14f), t.accentText)
+                        val room = rect.width() - dp(32f)
+                        canvas.drawText(ellipsize(word.replace('\n', ' '), room), rect.left + dp(26f) + room / 2, baseline(), text)
+                        continue
+                    }
+                    canvas.drawText(ellipsize(word, p.right - p.left - dp(8f)), mid, baseline(), text)
+                    if (i > 0 && suggestions.getOrNull(i - 1) != null) {
+                        fill.color = t.divider
+                        canvas.drawRect(p.left - dp(0.5f), cy - dp(10f), p.left + dp(0.5f), cy + dp(10f), fill)
+                    }
+                }
             }
         }
     }
@@ -535,20 +578,12 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 
     private fun stripTap(x: Float, y: Float) {
         if (y > keysTop) return
-        val s = stripSlots()
-        val slot = when {
-            x < s[1] -> if (cancelable) SLOT_CANCEL else SLOT_FIX
-            x >= s[5] -> SLOT_MIC
-            message != null -> SLOT_MESSAGE
-            x < s[2] -> SLOT_CLIPBOARD
-            // Copied things share the room between them.
-            chips && suggestions.isNotEmpty() -> ((x - s[2]) / ((s[5] - s[2]) / suggestions.size)).toInt().coerceIn(0, suggestions.size - 1)
-            x < s[3] -> 0
-            x < s[4] -> 1
-            else -> 2
+        val part = stripParts().firstOrNull { x >= it.left && x < it.right } ?: return
+        when {
+            part.kind == TOOL -> listener.onTool(part.item ?: return)
+            part.kind >= 0 && suggestions.getOrNull(part.kind) == null -> {}
+            else -> listener.onStrip(part.kind)
         }
-        if (slot in 0..2 && suggestions.getOrNull(slot) == null) return
-        listener.onStrip(slot)
     }
 
     private fun move(p: Pointer, x: Float, y: Float) {

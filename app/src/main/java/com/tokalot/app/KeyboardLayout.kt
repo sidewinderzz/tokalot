@@ -38,7 +38,8 @@ class Key(
     val isFunction get() = code < 0 || code == '\n'.code
 }
 
-class KeyRow(val keys: List<Key>, val padLeft: Float = 0f, val padRight: Float = 0f)
+/** [heightScale]: the row's height against an ordinary row's (the number row above the letters is shorter). */
+class KeyRow(val keys: List<Key>, val padLeft: Float = 0f, val padRight: Float = 0f, val heightScale: Float = 1f)
 
 enum class PageKind { LETTERS, SYMBOLS, MORE_SYMBOLS, NUMBERS, PHONE }
 
@@ -52,17 +53,27 @@ class KeyboardPage(val kind: PageKind, val rows: List<KeyRow>) {
         private set
     var rowHeight = 0f
         private set
+    /** Each row's top edge, then the bottom of the last. */
+    private var rowTops = FloatArray(0)
+    /** The top of the first row of letters (below the number row, if there is one). */
+    val lettersTop: Float
+        get() = rowTops.getOrElse(rows.indexOfFirst { row -> row.keys.any { it.isLetter } }.coerceAtLeast(0)) { 0f }
+
+    /** The page's height for rows [rowHeight] high, before [layout]. */
+    fun heightFor(rowHeight: Float) = rowHeight * rows.sumOf { it.heightScale.toDouble() }.toFloat()
 
     val keys get() = rows.flatMap { it.keys }
 
     /**
-     * Places every key in a [width] × (rows × [rowHeight]) area. [gap] is the space between keys; each
+     * Places every key in a [width] × [heightFor] area, ordinary rows [rowHeight] high. [gap] is the space between keys; each
      * key's touch area takes in half the gap around it, so there is no dead space between keys.
      */
     fun layout(width: Float, rowHeight: Float, gap: Float) {
         this.width = width
         this.rowHeight = rowHeight
-        height = rowHeight * rows.size
+        height = heightFor(rowHeight)
+        rowTops = FloatArray(rows.size + 1)
+        for (r in rows.indices) rowTops[r + 1] = rowTops[r] + rowHeight * rows[r].heightScale
         val units = rows.maxOf { r -> r.padLeft + r.padRight + r.keys.sumOf { it.width.toDouble() }.toFloat() }
         unit = width / units
         rows.forEachIndexed { r, row ->
@@ -73,7 +84,7 @@ class KeyboardPage(val kind: PageKind, val rows: List<KeyRow>) {
             row.keys.forEachIndexed { i, k ->
                 val kw = k.width * unit
                 k.x = x + gap / 2; k.w = kw - gap
-                k.y = r * rowHeight + gap / 2; k.h = rowHeight - gap
+                k.y = rowTops[r] + gap / 2; k.h = rowHeight * row.heightScale - gap
                 k.hitLeft = if (i == 0) 0f else x
                 k.hitRight = if (i == row.keys.size - 1) width else x + kw
                 x += kw
@@ -84,8 +95,8 @@ class KeyboardPage(val kind: PageKind, val rows: List<KeyRow>) {
     /** The key under a touch at ([x], [y]), or null below or above the keys. */
     fun keyAt(x: Float, y: Float): Key? {
         if (rows.isEmpty() || rowHeight <= 0f) return null
-        val r = (y / rowHeight).toInt()
-        if (y < 0 || r >= rows.size) return null
+        if (y < 0 || y >= height) return null
+        val r = (rows.indices).lastOrNull { rowTops[it] <= y } ?: return null
         return rows[r].keys.firstOrNull { x >= it.hitLeft && x < it.hitRight } ?: rows[r].keys.lastOrNull()
     }
 
@@ -93,8 +104,8 @@ class KeyboardPage(val kind: PageKind, val rows: List<KeyRow>) {
     fun letterCenters(): Map<Char, FloatArray> {
         val out = HashMap<Char, FloatArray>()
         if (unit <= 0f) return Qwerty.centers
-        val firstLetterRow = rows.indexOfFirst { row -> row.keys.any { it.isLetter } }.coerceAtLeast(0)
-        for (k in keys) if (k.isLetter) out[k.code.toChar()] = floatArrayOf(k.cx / unit, k.cy / rowHeight - firstLetterRow - 0.5f)
+        val top = lettersTop
+        for (k in keys) if (k.isLetter) out[k.code.toChar()] = floatArrayOf(k.cx / unit, (k.cy - top) / rowHeight - 0.5f)
         return out
     }
 
@@ -104,6 +115,8 @@ class KeyboardPage(val kind: PageKind, val rows: List<KeyRow>) {
 }
 
 object Layouts {
+    /** The number row's height against a letter row's. */
+    const val NUMBER_ROW = 0.78f
     private val ACCENTS = mapOf(
         'a' to "àáâäæãåā", 'c' to "çćč", 'e' to "èéêëēęė", 'i' to "ìíîïīį", 'n' to "ñń",
         'o' to "òóôöõœøō", 's' to "ßśš", 'u' to "ùúûüū", 'y' to "ÿý", 'z' to "žźż", 'l' to "ł",
@@ -145,7 +158,8 @@ object Layouts {
     /** [symbolHints]: show and offer each letter's symbol on long press (the top row's digits always). */
     fun letters(numberRow: Boolean, symbolHints: Boolean): KeyboardPage {
         val rows = ArrayList<KeyRow>()
-        if (numberRow) rows += KeyRow(chars("1234567890"))
+        // Shorter than the letter rows, as on Gboard; it stays in proportion when the keyboard's height changes.
+        if (numberRow) rows += KeyRow(chars("1234567890"), heightScale = NUMBER_ROW)
         rows += KeyRow(Qwerty.rows[0].map { letter(it, symbolHints).let { k -> if (numberRow) Key(k.code, k.label, popup = k.popup.filter { p -> !p[0].isDigit() }) else k } })
         rows += KeyRow(Qwerty.rows[1].map { letter(it, symbolHints) }, 0.5f, 0.5f)
         rows += KeyRow(listOf(Key(KeyCode.SHIFT, "shift", 1.5f)) + Qwerty.rows[2].map { letter(it, symbolHints) } + Key(KeyCode.DELETE, "delete", 1.5f))

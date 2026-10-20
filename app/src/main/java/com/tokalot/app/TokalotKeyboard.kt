@@ -33,7 +33,8 @@ import java.util.zip.GZIPInputStream
  * The word being typed is kept as "composing" text (underlined in most apps) until a space or punctuation
  * ends it, so autocorrect can still replace it. Everything else goes straight into the text box.
  */
-class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.Listener, ClipboardPanel.Listener {
+class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.Listener, ClipboardPanel.Listener,
+    KeyboardMenuPanel.Listener {
 
     companion object {
         @Volatile var instance: TokalotKeyboard? = null
@@ -90,6 +91,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private var kv: KeyboardView? = null
     private var panel: EmojiPanel? = null
     private var clipPanel: ClipboardPanel? = null
+    private var menuPanel: KeyboardMenuPanel? = null
     private lateinit var prefs: Prefs
 
     private var ac: Autocorrect? = null
@@ -106,6 +108,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     /** Typing may be remembered (not a password, not an incognito tab). */
     private var personal = false
     private var autocorrect = true
+    /** Not a web or email address, nor a box that asks for no suggestions: words may be fixed by themselves. */
+    private var plainBox = true
     private var vibrate = true
     private var sound = false
 
@@ -170,12 +174,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val k = KeyboardView(this, this)
         val e = EmojiPanel(this, this).apply { visibility = View.GONE }
         val c = ClipboardPanel(this, this).apply { visibility = View.GONE }
-        kv = k; panel = e; clipPanel = c
+        val m = KeyboardMenuPanel(this, this).apply { visibility = View.GONE }
+        kv = k; panel = e; clipPanel = c; menuPanel = m
         emoji?.let { e.data = it }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(e, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(c, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(m, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(k, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
         }
     }
@@ -248,7 +254,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         predictive = cls == InputType.TYPE_CLASS_TEXT && !password
         // Addresses, email addresses and boxes that ask for no suggestions still get them on the bar, but a
         // word is never changed by itself there ("deere.com" must stay as typed).
-        val plain = variation !in setOf(
+        plainBox = variation !in setOf(
             InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
             InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_FILTER,
         ) && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
@@ -256,31 +262,19 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         // turns suggestions off.
         swipe = cls == InputType.TYPE_CLASS_TEXT && !password
         personal = !password && info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 && prefs.kbLearn
-        autocorrect = prefs.kbAutocorrect && plain
+        autocorrect = prefs.kbAutocorrect && plainBox
         vibrate = prefs.kbVibrate
         sound = prefs.kbSound
 
-        val dark = when (prefs.kbTheme) {
-            "dark" -> true
-            "light" -> false
-            else -> resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
-        }
-        val theme = KeyboardTheme.make(dark, prefs.kbStyle, prefs.kbAccent.takeIf { it != 0 } ?: prefs.accent)
-        k.theme = theme
-        panel?.theme = theme
-        clipPanel?.theme = theme
-        window?.window?.let { w ->
-            w.navigationBarColor = theme.background
-            @Suppress("DEPRECATION")
-            w.decorView.systemUiVisibility = if (dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        }
+        applyLook()
         k.keyPopups = prefs.kbPopup
         k.symbolHints = prefs.kbSymbolHints
         k.enterKind = enterKind(info)
 
-        if (!restarting || emojiMode != EmojiMode.OFF || clipOpen) {
+        if (!restarting || emojiMode != EmojiMode.OFF || clipOpen || menuOpen) {
             closeEmoji(show = false)
             closeClipboard(show = false)
+            closeMenu(show = false)
             lettersPage = null // the number row or symbol hints may have been switched in Settings
             k.shift = KeyboardView.Shift.OFF
             showPage(when (cls) {
@@ -297,6 +291,28 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         captureClip()
         updateShift()
         showStrip()
+    }
+
+    /** The light or dark look and the key style from Settings, on the keys, the pages and the nav bar. */
+    private fun applyLook() {
+        val k = kv ?: return
+        val dark = when (prefs.kbTheme) {
+            "dark" -> true
+            "light" -> false
+            else -> resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        }
+        val theme = KeyboardTheme.make(dark, prefs.kbStyle, prefs.kbAccent.takeIf { it != 0 } ?: prefs.accent)
+        k.theme = theme
+        panel?.theme = theme
+        clipPanel?.theme = theme
+        menuPanel?.theme = theme
+        window?.window?.let { w ->
+            w.navigationBarColor = theme.background
+            @Suppress("DEPRECATION")
+            w.decorView.systemUiVisibility = if (dark) 0 else View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        }
+        k.toolbar = KeyboardToolbar.parse(prefs.kbToolbar)
+        k.heightScale = prefs.kbHeight / 100f
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -462,10 +478,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (word.isEmpty()) wordPrev = prevWord(ic.getTextBeforeCursor(64, 0))
         word.append(ch)
         val p = k.page
-        val first = if (p.kind == PageKind.LETTERS && prefs.kbNumberRow) 1 else 0
         val tapped = !x.isNaN() && p.kind == PageKind.LETTERS && p.unit > 0f && c.isLetter()
         xs += if (tapped) x / p.unit else Float.NaN
-        ys += if (tapped) y / p.rowHeight - first - 0.5f else Float.NaN
+        ys += if (tapped) (y - p.lettersTop) / p.rowHeight - 0.5f else Float.NaN
         ic.setComposingText(word, 1)
         showStrip()
     }
@@ -682,9 +697,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     override fun onStrip(slot: Int) {
         when (slot) {
-            KeyboardView.SLOT_MIC -> if (emojiMode == EmojiMode.OFF) mic()
-            KeyboardView.SLOT_CLIPBOARD -> openClipboard()
-            KeyboardView.SLOT_FIX -> fix()
+            KeyboardView.SLOT_MENU -> openMenu()
             KeyboardView.SLOT_CANCEL -> when {
                 emojiMode == EmojiMode.SEARCH -> searchDone()
                 micState != Mic.IDLE -> cancelMic()
@@ -744,7 +757,6 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (busy() || notice != null || emojiMode == EmojiMode.SEARCH) return
         k.message = null
         k.cancelable = false
-        k.clipButton = word.isEmpty()
         k.chips = false
         // Something just copied goes on the bar, ready to paste, until it's used or typing starts.
         val copied = lastCopy
@@ -984,6 +996,78 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         showStrip()
     }
 
+    // ------------------------------------------------------------------ the top bar's buttons and the menu
+
+    override fun onTool(item: String) {
+        if (emojiMode == EmojiMode.SEARCH) return
+        when (item) {
+            KeyboardToolbar.MIC -> mic()
+            KeyboardToolbar.FIX -> fix()
+            KeyboardToolbar.CLIPBOARD -> openClipboard()
+            KeyboardToolbar.EMOJI -> openEmoji()
+            KeyboardToolbar.SETTINGS -> openApp(settings = true)
+            KeyboardToolbar.THEME -> {
+                // Flips what's showing now; "Match phone" comes back from the menu or Settings.
+                prefs.kbTheme = if (kv?.theme?.dark == true) "light" else "dark"
+                applyLook()
+            }
+            KeyboardToolbar.NUMBERS -> {
+                prefs.kbNumberRow = !prefs.kbNumberRow
+                resetLetters()
+            }
+        }
+    }
+
+    /** The letters page again, for a changed number row or symbol hints. */
+    private fun resetLetters() {
+        lettersPage = null
+        if (kv?.page?.kind == PageKind.LETTERS) { showPage(letters()); updateShift() }
+    }
+
+    private var menuOpen = false
+
+    private fun openMenu() {
+        val k = kv ?: return
+        val m = menuPanel ?: return
+        commitWord()
+        closeEmoji(show = false)
+        closeClipboard(show = false)
+        m.panelHeight = k.height
+        m.theme = k.theme
+        m.show()
+        menuOpen = true
+        m.visibility = View.VISIBLE
+        k.visibility = View.GONE
+    }
+
+    private fun closeMenu(show: Boolean = true) {
+        if (!menuOpen) return
+        menuOpen = false
+        menuPanel?.visibility = View.GONE
+        kv?.visibility = View.VISIBLE
+        if (show) { showPage(letters()); updateShift(); showStrip() }
+    }
+
+    override fun onMenuToolbar(list: List<String>) {
+        kv?.toolbar = list
+    }
+
+    override fun onMenuSetting() {
+        prefs = Prefs(this)
+        applyLook()
+        autocorrect = prefs.kbAutocorrect && plainBox
+        vibrate = prefs.kbVibrate
+        sound = prefs.kbSound
+        lettersPage = null // the number row may have changed; the letters come back when the menu closes
+    }
+
+    override fun onMenuAllSettings() {
+        closeMenu()
+        openApp(settings = true)
+    }
+
+    override fun onMenuClose() = closeMenu()
+
     // ------------------------------------------------------------------ clipboard
 
     private lateinit var clips: ClipHistory
@@ -1025,6 +1109,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val c = clipPanel ?: return
         commitWord()
         closeEmoji(show = false)
+        closeMenu(show = false)
         clips.prune(System.currentTimeMillis())
         if (clips.changed) saveClips()
         c.panelHeight = k.height
@@ -1093,6 +1178,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val e = panel ?: return
         commitWord()
         closeClipboard(show = false)
+        closeMenu(show = false)
         if (e.data == null) emoji?.let { e.data = it }
         val sp = emojiPrefs()
         e.recents = sp.getString("emoji_recent", "")!!.split('\n').filter { it.isNotEmpty() }

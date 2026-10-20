@@ -693,6 +693,8 @@ class SettingsScreen(private val a: MainActivity) {
         kbSwitch("Suggest what I copied", "Something you just copied shows on the bar, ready to paste. A link, email address or phone number in it gets its own button.", prefs.kbClipSuggest) { prefs.kbClipSuggest = it }
         col.addView(kb)
 
+        col.addView(text("On the keyboard itself, the four-squares button at the left of its top bar opens its menu: move, remove or add the top bar's buttons, change its height, and switch its look.", 13f, C.SUB), lp().margins(this, t = 8))
+
         // How the keyboard looks: light or dark, the key style, and its colour.
         col.addView(text("Keyboard look", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
         val look = card()
