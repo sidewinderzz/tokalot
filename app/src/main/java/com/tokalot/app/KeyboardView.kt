@@ -44,7 +44,10 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         fun onGlideEnd()
         /** Space bar slide: move the cursor [steps] more characters (negative: left). */
         fun onCursorSlide(steps: Int)
-        /** Delete slide: select [words] words back from the cursor; [done]: the finger lifted, so delete them. */
+        /**
+         * Delete slide: select [words] words back from the cursor, or the whole text box for [DELETE_ALL];
+         * [done]: the finger lifted, so delete them.
+         */
         fun onDeleteSlide(words: Int, done: Boolean)
         /**
          * A cursor slide ended ([cancelled] false), or either slide was abandoned (the finger strayed off
@@ -68,6 +71,8 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         private const val TOOL = -10
         /** A chip that pastes a picture: drawn as [chipThumb] instead of text. */
         const val IMAGE_CHIP = "\u0001image"
+        /** A backspace slide that reached the keyboard's left edge: everything in the text box. */
+        const val DELETE_ALL = Int.MAX_VALUE
         private const val LONG_PRESS_MS = 380L
         private const val REPEAT_START_MS = 400L
         private const val REPEAT_MS = 55L
@@ -638,7 +643,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 if (steps != p.slideSteps) { listener.onCursorSlide(steps - p.slideSteps); p.slideSteps = steps }
             }
             p.deleting -> {
-                val words = deleteWords(-dx)
+                val words = deleteWords(-dx, x)
                 if (words != p.deleteWords) { p.deleteWords = words; listener.onDeleteSlide(words, false) }
             }
             key.code == KeyCode.SPACE && ready && !p.longDone -> {
@@ -652,7 +657,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
             key.code == KeyCode.DELETE && ready && dx < 0 && x < pageX(key.x) && !p.repeating -> {
                 p.deleting = true; p.fired = true
                 handler.removeCallbacks(longPress); handler.removeCallbacks(repeat)
-                p.deleteWords = deleteWords(-dx)
+                p.deleteWords = deleteWords(-dx, x)
                 listener.onDeleteSlide(p.deleteWords, false)
                 invalidate()
             }
@@ -677,8 +682,12 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         }
     }
 
-    /** Words a delete slide of [d] pixels to the left covers: one at 23 pt, two at 41 pt, then one per 16 pt. */
-    private fun deleteWords(d: Float): Int = when {
+    /**
+     * Words a delete slide of [d] pixels to the left covers: one at 23 pt, two at 41 pt, then one per 16 pt.
+     * Reaching the keyboard's left edge (where the finger is at [x]) takes everything in the text box.
+     */
+    private fun deleteWords(d: Float, x: Float): Int = when {
+        x < width * 0.1f -> DELETE_ALL
         d < deleteFirst -> 0
         d < deleteSecond -> 1
         else -> 2 + ((d - deleteSecond) / deleteStep).toInt()

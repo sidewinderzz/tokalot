@@ -952,6 +952,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             cursorSlide?.let { ic.setSelection(it.fromStart, it.fromEnd) }
             if (slideAnchor >= 0 && slideAnchor != Int.MAX_VALUE) ic.setSelection(slideFromStart, slideFromEnd)
         }
+        if (kv?.message == EDGE_HINT) kv?.message = null
         endSlides()
         updateShift()
         showStrip()
@@ -966,6 +967,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     /** A backspace slide in progress: where it started, what's before that, and the selection it replaced. */
     private var slideAnchor = -1
+    private val EDGE_HINT = "Let go to delete everything"
     private var slideBefore = ""
     private var slideFromStart = 0
     private var slideFromEnd = 0
@@ -990,20 +992,46 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
                 slideBefore = ic.getTextBeforeCursor(2000, 0)?.toString() ?: ""
             }
         }
-        val n = TextSteps.wordsBack(slideBefore, words)
+        val all = words == KeyboardView.DELETE_ALL
+        val n = if (all) slideBefore.length else TextSteps.wordsBack(slideBefore, words)
         val known = slideAnchor != Int.MAX_VALUE
         if (!done) {
-            if (known) ic.setSelection(slideAnchor - n, slideAnchor)
+            when {
+                all && known -> ic.performContextMenuAction(android.R.id.selectAll)
+                known -> ic.setSelection(slideAnchor - n, slideAnchor)
+            }
+            // At the left edge the bar says what letting go does, so a whole message never goes by surprise.
+            if (!busy()) {
+                if (all) kv?.message = EDGE_HINT else if (kv?.message == EDGE_HINT) kv?.message = notice
+            }
             return
         }
+        if (kv?.message == EDGE_HINT) kv?.message = null
+        var gone = ""
         when {
-            known && n > 0 -> { ic.setSelection(slideAnchor - n, slideAnchor); ic.commitText("", 1) }
+            all -> {
+                ic.performContextMenuAction(android.R.id.selectAll)
+                gone = ic.getSelectedText(0)?.toString() ?: ""
+                ic.commitText("", 1)
+            }
+            known && n > 0 -> {
+                gone = slideBefore.takeLast(n)
+                ic.setSelection(slideAnchor - n, slideAnchor); ic.commitText("", 1)
+            }
             known -> ic.setSelection(slideFromStart, slideFromEnd) // let go before a whole word: nothing deleted
-            n > 0 -> ic.deleteSurroundingText(n, 0)
+            n > 0 -> { gone = slideBefore.takeLast(n); ic.deleteSurroundingText(n, 0) }
         }
         endSlides()
         updateShift()
         showStrip()
+        // Holding backspace is slow and a slide is quick, so a slide can be taken back: until you type again.
+        if (gone.isNotEmpty()) {
+            notice(if (all) "Deleted all · tap to undo" else "Deleted · tap to undo", 6000) {
+                currentInputConnection?.commitText(gone, 1)
+                updateShift()
+                showStrip()
+            }
+        }
     }
 
     // ------------------------------------------------------------------ the top bar's buttons and the menu
