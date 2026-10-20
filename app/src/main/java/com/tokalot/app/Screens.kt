@@ -611,6 +611,25 @@ class SettingsScreen(private val a: MainActivity) {
             }
         }
         setupRow("Accessibility switch", serviceEnabled(), "On", "Set up") { openAccessibilitySetup() }
+        // Some phones (Samsung) switch the service off after every update; a one-time permission lets Tokalot fix that itself.
+        setup.addView(divider())
+        val keep = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(16), dp(14))
+            addView(text("Stay on after updates", 17f))
+            if (ServiceGuard.canRepair(this@with)) {
+                addView(text("On. If an update switches the mic button off, Tokalot turns it back on.", 14f, C.GOOD))
+            } else {
+                addView(text("Some phones, such as Samsung, switch Tokalot off after each update, and you have to turn it off and on again. To have Tokalot do that itself, connect the phone to a computer with USB debugging on and run this once (it lasts through updates):", 14f, C.SUB))
+                addView(text(ServiceGuard.GRANT_COMMAND, 13f).apply {
+                    typeface = android.graphics.Typeface.MONOSPACE
+                    setPadding(0, dp(8), 0, dp(4))
+                    setTextIsSelectable(true)
+                })
+                addView(row(pill("Copy command") { copy(ServiceGuard.GRANT_COMMAND) }), lp().margins(this@with, t = 6))
+            }
+        }
+        setup.addView(keep)
         val pct = downloadPct
         val haveModel = ModelManager.active(this)
         val modelStatus = when {

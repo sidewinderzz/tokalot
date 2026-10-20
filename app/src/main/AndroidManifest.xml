@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Haptic feedback from the floating button. -->
@@ -14,6 +15,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- In-app updates: lets Tokalot hand a newer signed APK to Android's installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Optional, never granted by installing: only if you run the adb command in Settings › Setup. Then, when an
+         update leaves the mic button's accessibility service off, Tokalot switches it off and on again itself. -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Lets Tokalot show app names (e.g. "Gmail") in history and the Style tab, and find the launchers
          that start out on Settings' clipboard-only list. -->
@@ -70,6 +76,15 @@
                 <data android:mimeType="application/ogg" />
             </intent-filter>
         </activity>
+
+        <!-- After Tokalot updates itself: checks the mic button's service came back (see ServiceGuard). -->
+        <receiver
+            android:name=".ServiceGuard$UpdateReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".OfflineFlowService"
