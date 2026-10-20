@@ -528,7 +528,7 @@ public static class Sync
             ["snippets"] = new JsonArray(d.Snippets.Select(s => (JsonNode?)new JsonObject { ["trigger"] = s.Trigger, ["text"] = s.Text }).ToArray()),
             ["styles"] = new JsonObject(d.Styles.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, kv.Value))),
             ["instructions"] = d.Instructions,
-            ["notes"] = new JsonArray((d.Notes ?? new()).Select(n => NoteJson).ToArray()),
+            ["notes"] = new JsonArray((d.Notes ?? new()).Select(NoteJson).ToArray()),
         };
         if (d.Settings != null)
             o["settings"] = new JsonObject(d.Settings.Select(kv => new KeyValuePair<string, JsonNode?>(kv.Key, JsonNode.Parse(kv.Value))));
