@@ -1,0 +1,2472 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
+using System.Windows.Shell;
+using System.Windows.Threading;
+using Tokalot.Desktop.Core;
+using Tokalot.Desktop.Platform;
+
+namespace Tokalot.Desktop.UI;
+
+/** The settings and history window. Closing it leaves Tokalot running in the tray. */
+public sealed class MainWindow : Window
+{
+    public enum Page { Home, Dictionary, Style, Snippets, Notes, Settings, Stats }
+
+    public Page CurrentPage { get; private set; } = Page.Home;
+
+    private readonly StackPanel nav = new() { Margin = new Thickness(14, 18, 14, 0) };
+    private readonly ScrollViewer scroller = new() { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    private readonly Border toast;
+    private readonly TextBlock toastText;
+    private readonly TextBox search;
+    private readonly Border searchBox;
+    private StackPanel? historyBox;
+    private TextBlock? bannerText;
+    /** The theme this window was built with (see onSync). */
+    private readonly string shownTheme = Settings.Current.Theme;
+    /** The update line in Settings › About, which shows the download progress too. */
+    private TextBlock? settingsUpdateText;
+    private TextBlock? modelStatus;
+    private TextBlock? modelProgress; // under the list in Settings › Offline model
+    private int historyLimit = 100, notesLimit = 100;
+    private readonly HashSet<long> expanded = new(), showOriginal = new();
+    private static string styleTab = "MESSAGING";
+    private static int? downloadPct;
+    private static LocalModel? modelDownloading; // one at a time
+    private static string? downloadError;
+    private Snippet? editing;
+    private bool editingNew;
+    private readonly Action onHistory, onPlayer, onNoteImport;
+    private readonly Border playerHost = new() { Visibility = Visibility.Collapsed };
+    /** Floating over the bottom of the page: "Back to playing" on a note, "Note deleted · Undo" after a delete. */
+    private readonly Border followChip, undoBar;
+    private readonly DispatcherTimer noteTimer;
+    private readonly Action<bool> onSync;
+
+    private static Settings S => Settings.Current;
+
+    /**
+     * Saves settings once typing in a box pauses, rather than on every keystroke (each save rewrites the file
+     * and nudges sync). Leaving or closing the window saves at once.
+     */
+    private static DispatcherTimer? saveTimer;
+    private static void SaveSoon()
+    {
+        saveTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(700), DispatcherPriority.Background, (_, _) => SaveNow(), Dispatcher.CurrentDispatcher);
+        saveTimer.Stop();
+        saveTimer.Start();
+    }
+    private static void SaveNow()
+    {
+        if (saveTimer is not { IsEnabled: true }) return;
+        saveTimer.Stop();
+        S.Save();
+    }
+
+    /** History often changes a few times in a row for one dictation; Home is rebuilt once for the lot. */
+    private readonly DispatcherTimer historyTimer;
+
+    /** The strip at the top you drag the window by; the minimize and close buttons sit in its right end. */
+    private const double CaptionHeight = 32;
+    /** Sizes were carried over from the phone app and read large on a monitor, so the whole window is drawn a bit smaller. */
+    private const double UiScale = 0.9;
+
+    public MainWindow()
+    {
+        Title = "Tokalot";
+        // Never open larger than the screen: the title strip with Close must stay reachable.
+        var area = SystemParameters.WorkArea;
+        Width = Math.Min(1040, area.Width); Height = Math.Min(760, area.Height);
+        MinWidth = Math.Min(760, Width); MinHeight = Math.Min(520, Height);
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        Background = C.Bg;
+        FontFamily = C.Sans;
+        try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/icon.png")); } catch { }
+        // No system title bar: the app draws to the top edge. Resizing, snapping and double-click to maximize still work.
+        WindowChrome.SetWindowChrome(this, new WindowChrome
+        {
+            // Windows adds the top resize border to the caption, so take it off to match the drawn strip.
+            CaptionHeight = CaptionHeight * UiScale - 6, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(0), UseAeroCaptionButtons = false,
+        });
+
+        (searchBox, search) = Ui.Field("", "Search your dictations");
+        search.TextChanged += (_, _) => FillHistory();
+
+        toastText = new TextBlock { Foreground = Brushes.White, FontSize = 13.5, FontFamily = C.Sans };
+        toast = Ui.Stadium(new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x1C, 0x1C, 0x1E)),
+            Padding = new Thickness(18, 9, 18, 9), Child = toastText, Opacity = 0, IsHitTestVisible = false,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 28),
+        });
+
+        // Sidebar | content
+        var root = new Grid { Background = C.Bg, LayoutTransform = new ScaleTransform(UiScale, UiScale) };
+        root.Resources[typeof(System.Windows.Controls.Primitives.ScrollBar)] = Ui.ScrollBarStyle();
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(232) });
+        root.ColumnDefinitions.Add(new ColumnDefinition());
+        root.Children.Add(Sidebar());
+        var contentGrid = new Grid { Margin = new Thickness(0, CaptionHeight, 0, 0) };
+        contentGrid.RowDefinitions.Add(new RowDefinition());
+        contentGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        scroller.PreviewMouseWheel += PassWheelToPage;
+        contentGrid.Children.Add(scroller);
+        Grid.SetRow(playerHost, 1);
+        contentGrid.Children.Add(playerHost);
+        contentGrid.Children.Add(toast);
+        followChip = Ui.Stadium(new Border
+        {
+            Background = C.Text, Padding = new Thickness(16, 8, 16, 8), Cursor = Cursors.Hand, Visibility = Visibility.Collapsed,
+            Child = Ui.Text("Back to playing", 13.5, C.Card), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(0, 0, 0, 16), Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 12, ShadowDepth = 2, Opacity = 0.3 },
+        });
+        followChip.MouseLeftButtonUp += (_, _) => NoteFollowAgain();
+        contentGrid.Children.Add(Ui.Keys(followChip, NoteFollowAgain, "Back to playing"));
+        var undo = Ui.Text("Undo", 13.5, C.Hex("#6EA8FE"), bold: true);
+        undo.Margin = new Thickness(18, 0, 0, 0);
+        undo.Cursor = Cursors.Hand;
+        undo.MouseLeftButtonUp += (_, _) => UndoDelete();
+        undoBar = Ui.Stadium(new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0xEE, 0x1C, 0x1C, 0x1E)), Padding = new Thickness(18, 9, 18, 9), Visibility = Visibility.Collapsed,
+            Child = Ui.Row(Ui.Text("Note deleted", 13.5, Brushes.White), Ui.Keys(undo, UndoDelete, "Undo")),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 0, 28),
+        });
+        contentGrid.Children.Add(undoBar);
+        // Scrolling by hand stops the note page following the word being played.
+        scroller.PreviewMouseWheel += (_, _) => NoteUnfollow();
+        scroller.PreviewTouchDown += (_, _) => NoteUnfollow();
+        scroller.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            for (var d = e.OriginalSource as DependencyObject; d != null && d != scroller; d = d is Visual ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+                if (d is System.Windows.Controls.Primitives.ScrollBar) { NoteUnfollow(); return; }
+        };
+        scroller.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key is Key.PageUp or Key.PageDown or Key.Home or Key.End or Key.Up or Key.Down && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase) NoteUnfollow();
+        };
+        Grid.SetColumn(contentGrid, 1);
+        root.Children.Add(contentGrid);
+        var caption = CaptionButtons();
+        Grid.SetColumn(caption, 1);
+        root.Children.Add(caption);
+        Content = root;
+        // A maximized window hangs a few pixels past the screen edge; pull the content back in.
+        StateChanged += (_, _) => root.Margin = new Thickness(WindowState == WindowState.Maximized ? 7 : 0);
+
+        historyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(120), DispatcherPriority.Background, (_, _) =>
+        {
+            historyTimer!.Stop();
+            if (CurrentPage == Page.Home) FillHistory();
+        }, Dispatcher);
+        historyTimer.Stop();
+        onHistory = () => Dispatcher.BeginInvoke(() => { historyTimer.Stop(); historyTimer.Start(); });
+        onPlayer = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Home) FillHistory(); });
+        History.Changed += onHistory;
+        Player.Changed += onPlayer;
+        Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); historyTimer.Stop(); SaveNow(); };
+        noteTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(50), DispatcherPriority.Normal, (_, _) => NoteTick(), Dispatcher);
+        noteTimer.Stop();
+        NotePlayer.Changed += NotePlayerChanged;
+        Closed += (_, _) => { NotePlayer.Changed -= NotePlayerChanged; NotePlayer.Stop(false); noteTimer.Stop(); CommitDelete(); };
+        Deactivated += (_, _) => SaveNow();
+        SourceInitialized += (_, _) => DarkTitleBar();
+        Activated += (_, _) => Sync.Queue();
+        // A sync that changed nothing only updates the status line on Settings: not worth taking the cursor out of a box being typed in.
+        onSync = changed => Dispatcher.BeginInvoke(() =>
+        {
+            // The theme may have come in from another device; changing it rebuilds this window.
+            if (changed && S.Theme != shownTheme) { App.Current.ApplyTheme(); return; }
+            if (changed || CurrentPage == Page.Stats || (CurrentPage == Page.Settings && Keyboard.FocusedElement is not System.Windows.Controls.Primitives.TextBoxBase)) Render();
+        });
+        Sync.Finished += onSync;
+        Closed += (_, _) => Sync.Finished -= onSync;
+        onNoteImport = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Notes) Render(); });
+        NoteImport.Changed += onNoteImport;
+        Closed += (_, _) => NoteImport.Changed -= onNoteImport;
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                e.Handled = true;
+                if (CurrentPage != Page.Home) Go(Page.Home);
+                search.Focus();
+            }
+            else if (e.Key == Key.Escape && (editing != null || editingNew)) { e.Handled = true; editing = null; editingNew = false; Render(); }
+            else if (e.Key == Key.Escape && CurrentPage == Page.Notes && openNoteId != null) { e.Handled = true; CloseNote(); }
+            else if (e.Key == Key.Escape && CurrentPage == Page.Home && search.Text.Length > 0) { e.Handled = true; search.Text = ""; }
+        };
+        SizeChanged += (_, _) => { if (IsLoaded && IsWide != wideLayout) Render(); };
+        Render();
+    }
+
+    // ---------- frame ----------
+
+    private UIElement CaptionButtons()
+    {
+        Border Button(string path, string tip, Brush hover, Brush hoverGlyph, Action onClick)
+        {
+            var glyph = new System.Windows.Shapes.Path
+            {
+                Data = Geometry.Parse(path), Stroke = C.Text, StrokeThickness = 1, Width = 10, Height = 10, SnapsToDevicePixels = true,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+            };
+            var b = new Border { Width = 46, Height = CaptionHeight, Background = Brushes.Transparent, Child = glyph, ToolTip = tip };
+            WindowChrome.SetIsHitTestVisibleInChrome(b, true);
+            b.MouseEnter += (_, _) => { b.Background = hover; glyph.Stroke = hoverGlyph; };
+            b.MouseLeave += (_, _) => { b.Background = Brushes.Transparent; glyph.Stroke = C.Text; };
+            b.MouseLeftButtonUp += (_, _) => onClick();
+            return Ui.Keys(b, onClick, tip);
+        }
+        var row = Ui.Row(
+            Button("M0,5.5 H10", "Minimize", C.Hover, C.Text, () => WindowState = WindowState.Minimized),
+            Button("M0,0 L10,10 M10,0 L0,10", "Close", C.Hex("#C42B1C"), Brushes.White, Close));
+        row.HorizontalAlignment = HorizontalAlignment.Right;
+        row.VerticalAlignment = VerticalAlignment.Top;
+        return row;
+    }
+
+    private UIElement Sidebar()
+    {
+        var logo = new Bars { Width = 34, Height = 34, BarBrush = C.Text, AccentBrush = Accent };
+        var title = new TextBlock { Text = "Tokalot", FontFamily = C.Sans, FontWeight = FontWeights.Bold, FontSize = 23, Foreground = C.Text, Margin = new Thickness(8, 0, 0, 1), VerticalAlignment = VerticalAlignment.Center };
+        var head = Ui.Row(logo, title);
+        head.Margin = new Thickness(22, 26, 0, 4);
+
+        var dismiss = new Border
+        {
+            Width = 22, Height = 22, CornerRadius = new CornerRadius(11), Background = Brushes.Transparent, Cursor = Cursors.Hand,
+            Child = Icons.Get("close", 14, C.Sub), ToolTip = "Hide this tip",
+        };
+        var hint = Ui.Card(Ui.Stack(
+            Spread(Ui.Text("Hold to talk", 13, C.Sub), dismiss),
+            Ui.Row(KeyCap("Ctrl"), new TextBlock { Text = "+", FontSize = 14, Foreground = C.Sub, Margin = new Thickness(7, 0, 7, 0), VerticalAlignment = VerticalAlignment.Center }, KeyCap("Win")),
+            Ui.Text("Tap once for hands-free. Esc cancels.", 12.5, C.Sub)), 16);
+        ((StackPanel)hint.Child).Children[1].SetValue(MarginProperty, new Thickness(0, 8, 0, 8));
+        hint.Margin = new Thickness(14, 0, 14, 18);
+        hint.VerticalAlignment = VerticalAlignment.Bottom;
+        if (S.HideShortcutTip) hint.Visibility = Visibility.Collapsed;
+        dismiss.MouseEnter += (_, _) => dismiss.Background = C.Hover;
+        dismiss.MouseLeave += (_, _) => dismiss.Background = Brushes.Transparent;
+        void HideTip() { S.HideShortcutTip = true; S.Save(); hint.Visibility = Visibility.Collapsed; }
+        dismiss.MouseLeftButtonUp += (_, _) => HideTip();
+        Ui.Keys(dismiss, HideTip, "Hide this tip");
+
+        var g = new Grid();
+        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        g.RowDefinitions.Add(new RowDefinition());
+        g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        g.Children.Add(head);
+        Grid.SetRow(nav, 1);
+        g.Children.Add(nav);
+        Grid.SetRow(hint, 2);
+        g.Children.Add(hint);
+        return g;
+    }
+
+    private static Border KeyCap(string k) => new()
+    {
+        Background = C.Field, BorderBrush = C.Pill, BorderThickness = new Thickness(1, 1, 1, 2), CornerRadius = new CornerRadius(7),
+        Padding = new Thickness(10, 4, 10, 4), Child = Ui.Text(k, 14, bold: true),
+    };
+
+    private void RenderNav()
+    {
+        nav.Children.Clear();
+        void Item(Page p, string icon, string label)
+        {
+            var active = p == CurrentPage || (p == Page.Home && CurrentPage == Page.Stats); // word stats open from Home
+            var row = Ui.Row(
+                Spaced(Icons.Get(icon, 22, C.Text), 0, 0, 12, 0),
+                Ui.Text(label, 15, C.Text, bold: active));
+            var b = new Border
+            {
+                Child = row, CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 10, 14, 10), Margin = new Thickness(0, 0, 0, 4),
+                Background = active ? C.NavActive : Brushes.Transparent, Cursor = Cursors.Hand,
+            };
+            b.MouseEnter += (_, _) => { if (!active) b.Background = C.Hover; };
+            b.MouseLeave += (_, _) => { if (!active) b.Background = Brushes.Transparent; };
+            b.MouseLeftButtonUp += (_, _) => Go(p);
+            nav.Children.Add(Ui.Keys(b, () => Go(p), label));
+        }
+        Item(Page.Home, "home", "Home");
+        Item(Page.Dictionary, "book", "Dictionary");
+        Item(Page.Style, "style", "Style");
+        Item(Page.Snippets, "snippet", "Snippets");
+        if (S.NotesBeta) Item(Page.Notes, "notes", "Notes");
+        nav.Children.Add(new Border { Height = 14 });
+        Item(Page.Settings, "settings", "Settings");
+    }
+
+    /** Full height of the current page (screenshot mode). */
+    internal double ExtentHeight => scroller.ExtentHeight;
+
+    /**
+     * Every text and key box holds a small scroll area of its own, and WPF lets it take the mouse wheel even
+     * when it has nothing to scroll. So the page stopped while the pointer crossed one, which is most noticeable
+     * over the stack of boxes in Settings › API keys. The wheel now goes to the page unless something under the
+     * pointer can really scroll that way.
+     */
+    private void PassWheelToPage(object sender, MouseWheelEventArgs e)
+    {
+        ScrollViewer? inner = null;
+        for (var d = e.OriginalSource as DependencyObject; d != null && d != scroller;
+             d = d is Visual or System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(d) : LogicalTreeHelper.GetParent(d))
+        {
+            if (d is not ScrollViewer sv) continue;
+            var canScroll = e.Delta > 0 ? sv.VerticalOffset > 0 : sv.VerticalOffset < sv.ScrollableHeight;
+            if (sv.ScrollableHeight > 0 && canScroll) return; // a box with more text than shows: let it scroll
+            inner ??= sv;
+        }
+        if (inner == null) return; // nothing in the way: the page gets the wheel as usual
+        e.Handled = true;
+        scroller.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta) { RoutedEvent = UIElement.MouseWheelEvent, Source = scroller });
+    }
+
+    internal void SetStyleTab(string id) => styleTab = id;
+
+    internal void OpenSnippetEditor(Snippet? s) { editing = s; editingNew = s == null; Render(); }
+
+    public void Go(Page p)
+    {
+        if (openNoteId != null) { NotePlayer.Stop(false); openNoteId = null; } // the sidebar's Notes goes back to the list too
+        if (p != Page.Notes) CommitDelete();
+        if (p != CurrentPage) scroller.ScrollToTop();
+        CurrentPage = p;
+        Render();
+    }
+
+    /** Rebuilds the current page, keeping the scroll position. */
+    public void Render()
+    {
+        var offset = scroller.VerticalOffset;
+        if (CurrentPage == Page.Notes && !S.NotesBeta) CurrentPage = Page.Home; // voice notes were switched off (or restored away)
+        RenderNav();
+        playerHost.Visibility = Visibility.Collapsed; // the note page puts it back
+        var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 10, 36, 48) };
+        switch (CurrentPage)
+        {
+            case Page.Home: BuildHome(col); break;
+            case Page.Dictionary: BuildDictionary(col); break;
+            case Page.Style: BuildStyle(col); break;
+            case Page.Snippets: BuildSnippets(col); break;
+            case Page.Notes: BuildNotes(col); break;
+            case Page.Settings: BuildSettings(col); break;
+            case Page.Stats: BuildStats(col); break;
+        }
+        wideLayout = IsWide;
+        scroller.Content = wideLayout && !(CurrentPage == Page.Notes && openNoteId != null) ? TwoColumns(col) : StripMarkers(col);
+        scroller.UpdateLayout();
+        scroller.ScrollToVerticalOffset(offset);
+        NoteChip();
+    }
+
+    // ---------- two columns on wide windows ----------
+
+    /** Marks the end of a page's full-width header (title and intro). */
+    private sealed class HeaderEnd : FrameworkElement { }
+    /** Marks where the second column starts; pages without one are balanced by section. */
+    private sealed class ColBreak : FrameworkElement { }
+
+    private const double ColumnGap = 32, WideAt = 1180;
+    private bool wideLayout;
+    /** Screenshot mode renders without a real window, so it sets the width here. */
+    internal double? ForcedWidth { get; set; }
+    private double ContentWidth => Math.Max(0, (ForcedWidth ?? ActualWidth / UiScale) - 232 - 72 - 20);
+    private bool IsWide => ContentWidth >= WideAt;
+
+    private static StackPanel StripMarkers(StackPanel col)
+    {
+        foreach (var m in col.Children.OfType<FrameworkElement>().Where(e => e is HeaderEnd or ColBreak).ToList()) col.Children.Remove(m);
+        return col;
+    }
+
+    /** Rebuilds a one-column page as a header plus two columns. */
+    private UIElement TwoColumns(StackPanel col)
+    {
+        var items = col.Children.Cast<UIElement>().ToList();
+        col.Children.Clear();
+        var root = new StackPanel { MaxWidth = 1500, Margin = col.Margin };
+
+        int headerEnd = items.FindIndex(e => e is HeaderEnd);
+        foreach (var e in items.Take(Math.Max(0, headerEnd))) root.Children.Add(e);
+        var body = items.Skip(headerEnd + 1).ToList();
+
+        var left = new StackPanel();
+        var right = new StackPanel();
+        int brk = body.FindIndex(e => e is ColBreak);
+        if (brk >= 0)
+        {
+            foreach (var e in body.Take(brk)) left.Children.Add(e);
+            foreach (var e in body.Skip(brk + 1)) right.Children.Add(e);
+        }
+        else
+        {
+            // Settings: keep sections whole and in order, filling the left column to about half.
+            var groups = new List<List<UIElement>>();
+            foreach (var e in body)
+            {
+                if (groups.Count == 0 || (e is FrameworkElement fe && Equals(fe.Tag, "section"))) groups.Add(new List<UIElement>());
+                groups[^1].Add(e);
+            }
+            double colW = (Math.Min(1500, ContentWidth) - ColumnGap) / 2;
+            var heights = groups.Select(g => g.Sum(e => { e.Measure(new Size(colW, double.PositiveInfinity)); return e.DesiredSize.Height; })).ToList();
+            double total = heights.Sum(), acc = 0;
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var target = acc + heights[i] / 2 <= total / 2 ? left : right;
+                if (target == left) acc += heights[i];
+                foreach (var e in groups[i]) target.Children.Add(e);
+            }
+        }
+        // The first item of each column shouldn't carry a big top gap.
+        foreach (var c in new[] { left, right })
+            if (c.Children.Count > 0 && c.Children[0] is FrameworkElement f && f.Margin.Top > 8)
+                f.Margin = new Thickness(f.Margin.Left, 4, f.Margin.Right, f.Margin.Bottom);
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ColumnGap) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.Children.Add(left);
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(right);
+        root.Children.Add(grid);
+        return root;
+    }
+
+    private void Toast(string msg)
+    {
+        toastText.Text = msg;
+        var a = new DoubleAnimationUsingKeyFrames();
+        a.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(120))));
+        a.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1700))));
+        a.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(1950))));
+        toast.BeginAnimation(OpacityProperty, a);
+    }
+
+    private static void Intro(StackPanel col, string title, string sub)
+    {
+        col.Children.Add(Ui.Heading(title));
+        col.Children.Add(Spaced(Ui.Text(sub, 15, C.Sub), 0, 4, 0, 20));
+        col.Children.Add(new HeaderEnd());
+    }
+
+    private static T Spaced<T>(T e, double l, double t, double r, double b) where T : FrameworkElement
+    {
+        e.Margin = new Thickness(l, t, r, b);
+        return e;
+    }
+
+    private static void Open(string url)
+    {
+        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+
+    private static TextBlock Link(string text, Action onClick)
+    {
+        var t = Ui.Text(text, 14, C.Link);
+        t.Cursor = Cursors.Hand;
+        t.MouseLeftButtonUp += (_, _) => onClick();
+        return Ui.Keys(t, onClick, text);
+    }
+
+    /** A row that stretches its first child and right-aligns the rest. */
+    private static Grid Spread(UIElement left, params UIElement[] right)
+    {
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        if (left is FrameworkElement lf) lf.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(left);
+        for (int i = 0; i < right.Length; i++)
+        {
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(right[i], i + 1);
+            if (right[i] is FrameworkElement fe) { fe.VerticalAlignment = VerticalAlignment.Center; fe.Margin = new Thickness(8, 0, 0, 0); }
+            g.Children.Add(right[i]);
+        }
+        return g;
+    }
+
+    // ---------- Home ----------
+
+    public static bool SetupComplete => S.CloudSttReady || ModelManager.IsReady;
+
+    public void SetBannerProgress(int pct)
+    {
+        var line = $"Downloading Tokalot {App.Current.UpdateVersion}… {pct}%";
+        if (bannerText != null) bannerText.Text = line;
+        if (settingsUpdateText != null) settingsUpdateText.Text = line;
+    }
+
+    private void BuildHome(StackPanel col)
+    {
+        var app = App.Current;
+        if (app.UpdateVersion != null)
+        {
+            var downloading = app.UpdateProgress != null;
+            bannerText = Ui.Text(downloading ? $"Downloading Tokalot {app.UpdateVersion}… {app.UpdateProgress}%" : $"Tokalot {app.UpdateVersion} is available", 15);
+            bannerText.VerticalAlignment = VerticalAlignment.Center;
+            var banner = downloading
+                ? Spread(bannerText)
+                : Spread(bannerText, Ui.Button("Update", () => _ = app.InstallUpdate(), filled: true));
+            col.Children.Add(Spaced(Ui.Card(banner, 14), 0, 0, 0, 14));
+        }
+        else if (Sync.NewerElsewhere)
+        {
+            // Another device runs a newer Tokalot that syncs things this one can't: worth updating even before a release shows up here.
+            var check = Ui.Button("Check for updates", async () => { await app.CheckForUpdates(); Render(); }, filled: true);
+            col.Children.Add(Spaced(Ui.Card(Spread(Ui.Stack(
+                Ui.Text("Update Tokalot to sync everything", 15),
+                Ui.Text("Another device that shares your sync file has a newer Tokalot. This one keeps syncing what it knows, but settings or history added since then only arrive once it's updated.", 13, C.Sub)),
+                check), 14), 0, 0, 0, 14));
+        }
+
+        if (App.InsideAnotherAppsStorage)
+        {
+            var c = Ui.Stack(
+                Ui.Text("Tokalot is installed inside another app's private storage", 15.5, C.Warn, bold: true),
+                Spaced(Ui.Text("That happens when the installer is opened from within another app instead of from your browser's downloads. Windows then hides Tokalot from the Start menu, doesn't start it when you sign in, and can show it an empty set of settings. To fix it, download the installer with your web browser and run it from File Explorer. Your settings and history are kept.", 14, C.Sub), 0, 4, 0, 12),
+                Ui.Button("Download the installer", () => Open(Updater.SetupUrl), filled: true));
+            col.Children.Add(Spaced(Ui.Card(c, 20), 0, 0, 0, 14));
+        }
+
+        if (!(app.Controller?.HotkeyWorks ?? true))
+        {
+            var c = Ui.Card(Ui.Text("Tokalot couldn't listen for Ctrl+Win. Quit it from the tray icon and open it again.", 15, C.Warn), 18);
+            col.Children.Add(Spaced(c, 0, 0, 0, 14));
+        }
+
+        SpelledCard(col);
+
+        if (!SetupComplete)
+        {
+            var c = Ui.Stack(
+                Ui.Heading("Finish setup", 30),
+                Spaced(Ui.Text("Add a Groq API key (free) or download the offline model, and Ctrl+Win will start working in any app.", 15, C.Sub), 0, 6, 0, 14),
+                Ui.Button("Open settings", () => OpenSettingsAt(SetupCategory), filled: true));
+            col.Children.Add(Spaced(Ui.Card(c, 22), 0, 0, 0, 16));
+        }
+
+        // This month at a glance.
+        var m = Usage.This();
+        FrameworkElement Stat(string value, string label) => Ui.Stack(Ui.Heading(value, 32), Ui.Text(label, 13, C.Sub));
+        var stats = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        for (int i = 0; i < 3; i++) stats.ColumnDefinitions.Add(new ColumnDefinition());
+        // Speaking pace: words Whisper heard per minute of recording this month. (Cost lives in Settings > Usage.)
+        var now = DateTime.Now;
+        var monthStart = new DateTimeOffset(new DateTime(now.Year, now.Month, 1)).ToUnixTimeMilliseconds();
+        var spoken = History.All().Where(e => e.Time >= monthStart && e.DurationMs > 0 && e.Raw.Length > 0).ToList();
+        var minutes = spoken.Sum(e => e.DurationMs) / 60000.0;
+        var pace = minutes > 0 ? Math.Round(spoken.Sum(e => TextTools.WordCount(e.Raw)) / minutes).ToString(CultureInfo.InvariantCulture) : "\u2013";
+        var cells = new[] { Stat(Ui.Compact(m.Words), "words"), Stat(m.Dictations.ToString(CultureInfo.InvariantCulture), "dictations"), Stat(pace, "words a minute") };
+        for (int i = 0; i < 3; i++) { Grid.SetColumn(cells[i], i); stats.Children.Add(cells[i]); }
+        // The month isn't over yet, so say how far in it is.
+        var header = $"{now.ToString("MMMM yyyy", CultureInfo.InvariantCulture)} \u00b7 Day {now.Day} of {DateTime.DaysInMonth(now.Year, now.Month)}";
+        var statCard = Ui.Stack(Ui.Text(header.ToUpperInvariant(), 12, C.Sub, bold: true), stats);
+        // Clean-ups, other devices and all-time totals live on the word stats page; Home keeps just the three numbers.
+        statCard.Children.Add(Spaced(Ui.Text("View stats ›", 13, C.Sub), 0, 10, 0, 0));
+        var sc = Ui.Card(statCard, 22);
+        sc.Cursor = Cursors.Hand;
+        sc.MouseLeftButtonUp += (_, _) => Go(Page.Stats);
+        Ui.Keys(sc, () => Go(Page.Stats), "Word stats");
+        col.Children.Add(Spaced(sc, 0, 0, 0, 16));
+
+        (searchBox.Parent as Panel)?.Children.Remove(searchBox);
+        col.Children.Add(new ColBreak());
+        col.Children.Add(searchBox);
+        historyBox = new StackPanel();
+        col.Children.Add(historyBox);
+        FillHistory();
+    }
+
+    private void FillHistory()
+    {
+        var box = historyBox;
+        if (box == null) return;
+        box.Children.Clear();
+        var q = search.Text.Trim();
+        var all = History.All();
+        var list = q.Length == 0 ? all : all.Where(e =>
+            e.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Raw.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+            e.AppLabel.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (list.Count == 0)
+        {
+            box.Children.Add(Spaced(Ui.Heading(q.Length == 0 ? "Today" : "No matches", 30), 0, 24, 0, 12));
+            box.Children.Add(Ui.Card(Ui.Text(q.Length == 0
+                ? "Nothing yet. Click into any text box, hold Ctrl+Win and talk."
+                : $"Nothing matches “{q}”.", 16, C.Sub), 24));
+            return;
+        }
+        string lastDay = "";
+        StackPanel? group = null;
+        foreach (var e in list.Take(historyLimit))
+        {
+            var day = DayLabel(e.Time);
+            if (day != lastDay)
+            {
+                box.Children.Add(Spaced(Ui.Heading(day, 30), 0, 24, 0, 12));
+                group = new StackPanel();
+                box.Children.Add(Ui.Card(group));
+                lastDay = day;
+            }
+            else group!.Children.Add(Ui.Divider());
+            group!.Children.Add(EntryView(e));
+        }
+        if (list.Count > historyLimit)
+        {
+            var more = Ui.Button("Show older", () => { historyLimit += 200; FillHistory(); });
+            more.HorizontalAlignment = HorizontalAlignment.Center;
+            box.Children.Add(Spaced(more, 0, 20, 0, 0));
+        }
+    }
+
+    private UIElement EntryView(Entry e)
+    {
+        var box = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
+        var open = expanded.Contains(e.Id);
+        if (open)
+        {
+            // Selectable when expanded.
+            box.Children.Add(new TextBox
+            {
+                Text = e.Text, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+                Foreground = C.Text, FontSize = 16.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
+            });
+        }
+        else
+        {
+            var t = Ui.Text(e.Text, 16.5);
+            t.MaxHeight = 16.5 * 1.4 * 6;
+            t.TextTrimming = TextTrimming.CharacterEllipsis;
+            t.Cursor = Cursors.Hand;
+            t.MouseLeftButtonUp += (_, _) => { expanded.Add(e.Id); FillHistory(); };
+            box.Children.Add(t);
+            t.Focusable = false;
+        }
+
+        if (showOriginal.Contains(e.Id))
+        {
+            var orig = new Border
+            {
+                Background = C.Field, CornerRadius = new CornerRadius(14), Padding = new Thickness(14, 10, 14, 12), Margin = new Thickness(0, 12, 0, 0),
+                Child = Ui.Stack(Ui.Text("ORIGINAL", 11, C.Sub, bold: true), new TextBox
+                {
+                    Text = e.Raw, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+                    Foreground = C.Sub, FontSize = 14.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
+                }),
+            };
+            box.Children.Add(orig);
+        }
+
+        var secs = e.DurationMs / 1000;
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(e.Time).LocalDateTime.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
+        if (e.AppLabel.Length > 0) meta += " · " + e.AppLabel;
+        if (secs > 0) meta += $" · {secs}s";
+        if (e.Cleaned) meta += " · AI";
+        box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
+
+        var actions = new List<UIElement> { Ui.Button("Copy", () => { _ = TextInjector.Copy(e.Text); Toast("Copied"); }, icon: "copy") };
+        if (e.Pending && AudioStore.Exists(e.Id))
+            actions.Insert(0, Ui.Button("Transcribe", () => App.Current.Controller?.Retry(e), filled: true));
+        if (AudioStore.Exists(e.Id))
+        {
+            var playing = Player.PlayingId == e.Id;
+            actions.Add(Ui.Button("", () => { if (playing) Player.Stop(); else Player.Play(e.Id); }, filled: playing, icon: playing ? "stop" : "play"));
+        }
+        if (e.Cleaned && e.Raw.Length > 0 && e.Raw != e.Text)
+            actions.Add(Ui.Button("Original", () => { if (!showOriginal.Add(e.Id)) showOriginal.Remove(e.Id); FillHistory(); }, filled: showOriginal.Contains(e.Id)));
+        if (open) actions.Add(Ui.Button("Less", () => { expanded.Remove(e.Id); FillHistory(); }));
+        var row = Ui.Row(actions.ToArray());
+        foreach (FrameworkElement a in row.Children) a.Margin = new Thickness(0, 0, 8, 0);
+
+        var menu = new ContextMenu();
+        // The button marks its click handled, so the menu has to open from the button's own action.
+        Border more = null!;
+        more = Ui.Button("", () => { menu.PlacementTarget = more; menu.IsOpen = true; }, icon: "more");
+        var copyOrig = new MenuItem { Header = "Copy original" };
+        copyOrig.Click += (_, _) => { _ = TextInjector.Copy(e.Raw.Length > 0 ? e.Raw : e.Text); Toast("Copied"); };
+        var del = new MenuItem { Header = "Delete" };
+        del.Click += (_, _) =>
+        {
+            if (Player.PlayingId == e.Id) Player.Stop(false);
+            History.Delete(e.Id);
+            AudioStore.Delete(e.Id);
+        };
+        menu.Items.Add(copyOrig);
+        menu.Items.Add(del);
+        more.ContextMenu = menu;
+        box.Children.Add(Spread(row, more));
+        return box;
+    }
+
+    private static string Plural(int n, string word) => $"{n} {word}{(n == 1 ? "" : "s")}";
+
+    private static string DayLabel(long t)
+    {
+        var d = DateTimeOffset.FromUnixTimeMilliseconds(t).LocalDateTime.Date;
+        var today = DateTime.Today;
+        if (d == today) return "Today";
+        if (d == today.AddDays(-1)) return "Yesterday";
+        return d.Year == today.Year
+            ? d.ToString("dddd, MMM d", CultureInfo.InvariantCulture)
+            : d.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+    }
+
+    // ---------- Dictionary ----------
+
+    // ---------- Word stats (opened from the card on Home) ----------
+
+    private void BuildStats(StackPanel col)
+    {
+        var b = WordStats.Build();
+        col.Children.Add(Spaced(Link("‹ Home", () => Go(Page.Home)), 0, 0, 0, 10));
+        var where = b.Devices.Count > 1 ? $" on all {b.Devices.Count} of your devices" : "";
+        Intro(col, "Your words", b.Months.Count == 0
+            ? "Nothing counted yet. Dictate something and it shows up here."
+            : $"Since {b.Since}{where}.");
+
+        FrameworkElement Stat(string value, string label) => Ui.Stack(Ui.Heading(value, 32), Ui.Text(label, 13, C.Sub));
+        var cells = new[]
+        {
+            Stat(Ui.Compact(b.Words), "words"),
+            Stat(Ui.Compact(b.Dictations), "dictations"),
+            Stat(b.Dictations > 0 ? (b.Words / b.Dictations).ToString(CultureInfo.InvariantCulture) : "\u2013", "words each"),
+        };
+        var grid = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        for (int i = 0; i < 3; i++) { grid.ColumnDefinitions.Add(new ColumnDefinition()); Grid.SetColumn(cells[i], i); grid.Children.Add(cells[i]); }
+        col.Children.Add(Spaced(Ui.Card(Ui.Stack(Ui.Text("ALL TIME", 12, C.Sub, bold: true), grid), 22), 0, 0, 0, 4));
+
+        if (b.Months.Count > 0)
+        {
+            Section(col, "Words per month");
+            var max = Math.Max(1, b.Months.Max(m => m.Words));
+            // The month in progress says so, with where it's heading at the pace so far.
+            var today = DateTime.Now;
+            var nowKey = today.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            var days = DateTime.DaysInMonth(today.Year, today.Month);
+            string MonthSub(WordStats.MonthRow m) => m.Key != nowKey ? $"{m.Dictations} dictations"
+                : $"So far, day {today.Day} of {days}" + (WordStats.OnTrack(m.Words, today.Day, days) is { } w ? $" \u00b7 on track for {Ui.Compact(w)}" : "");
+            col.Children.Add(Ui.List(b.Months.AsEnumerable().Reverse().Select(m => StatBar(m.Short, m.Words, max, MonthSub(m))).ToArray()));
+        }
+
+        col.Children.Add(new ColBreak());
+        Section(col, "Highlights");
+        var rows = new List<UIElement>();
+        void Fact(string label, string value, string? sub = null)
+        {
+            if (value.Length == 0) return;
+            var texts = Ui.Stack(Ui.Text(label, 15));
+            if (sub != null) texts.Children.Add(Ui.Text(sub, 13, C.Sub));
+            rows.Add(Spaced(Spread(texts, Ui.Text(value, 15, bold: true)), 20, 13, 20, 13));
+        }
+        if (b.Best is { } best) Fact("Best month", Ui.Compact(best.Words) + " words", best.Label);
+        if (b.Months.Count > 1) Fact("Average month", Ui.Compact(b.Average) + " words", "Not counting this month yet");
+        if (b.Words > 0) Fact("Typing it would have taken", WordStats.TypingTime(b.Words), $"At the average typing speed, {WordStats.TypingWpm} words a minute");
+        Fact("That's about", WordStats.Equivalent(b.Words));
+        if (b.Pace is { } pace) Fact("Speaking pace", $"{Math.Round(pace)} words a minute");
+        if (b.Longest > 0)
+            Fact("Longest dictation", Plural(b.Longest, "word"), DateTimeOffset.FromUnixTimeMilliseconds(b.LongestAt).LocalDateTime.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture));
+        if (b.Days.Days > 0) Fact("Days you dictated", b.Days.Days.ToString(CultureInfo.InvariantCulture),
+            $"Longest streak {Plural(b.Days.Best, "day")}" + (b.Days.Current > 1 ? $" \u00b7 {b.Days.Current} days running now" : ""));
+        if (b.BusiestDay is { } day) Fact("Busiest day of the week", day.ToString());
+        if (b.Here.Fillers + b.Here.Corrections > 0)
+            Fact("Cleaned up", Plural(b.Here.Fillers, "filler word"), $"and {Plural(b.Here.Corrections, "self-correction")}");
+        if (b.Here.Local > 0) Fact("Offline dictations", b.Here.Local.ToString(CultureInfo.InvariantCulture));
+        if (rows.Count == 0) rows.Add(Spaced(Ui.Text("Highlights show up once you've dictated a few times.", 14, C.Sub), 20, 13, 20, 13));
+        col.Children.Add(Ui.List(rows.ToArray()));
+
+        if (b.Apps.Count > 0)
+        {
+            Section(col, "Where you talk the most");
+            var max = Math.Max(1, b.Apps[0].Words);
+            col.Children.Add(Ui.List(b.Apps.Select(a => StatBar(a.Label, a.Words, max)).ToArray()));
+        }
+
+        if (b.Devices.Count > 1)
+        {
+            Section(col, "By device");
+            var max = Math.Max(1, b.Devices.Max(d => d.Words));
+            col.Children.Add(Ui.List(b.Devices.Select(d => StatBar(d.Name.Length > 0 ? d.Name : "Unnamed device", d.Words, max, $"{d.Dictations} dictations")).ToArray()));
+        }
+
+        col.Children.Add(Spaced(Ui.Text(
+            (b.Devices.Count > 1 ? "Words per month and clean-ups count every device that syncs. " : "") +
+            (S.SyncFile.Length > 0 && S.SyncHistory ? "Pace, streaks and apps come from the dictation history, synced from your other devices too."
+                : "Pace, streaks and apps come from this PC's history."), 13, C.Sub), 4, 8, 0, 0));
+    }
+
+    /** One row of a bar list: a label, a bar as long as [value] is next to [max], and the number. */
+    private static UIElement StatBar(string label, long value, long max, string? sub = null)
+    {
+        var bar = new Grid { Height = 8, VerticalAlignment = VerticalAlignment.Center };
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(value, 0), GridUnitType.Star) });
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(max - value, 0), GridUnitType.Star) });
+        var track = new Border { Background = C.Field, CornerRadius = new CornerRadius(4) };
+        Grid.SetColumnSpan(track, 2);
+        bar.Children.Add(track);
+        if (value > 0) bar.Children.Add(new Border { Background = C.Text, CornerRadius = new CornerRadius(4), MinWidth = 8 });
+        var texts = Ui.Stack(Ui.Text(label, 15));
+        if (sub != null) texts.Children.Add(Ui.Text(sub, 12.5, C.Sub));
+        var g = new Grid { Margin = new Thickness(20, 12, 20, 12) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(170) });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
+        texts.VerticalAlignment = VerticalAlignment.Center;
+        g.Children.Add(texts);
+        Grid.SetColumn(bar, 1);
+        g.Children.Add(bar);
+        var n = Ui.Text(Ui.Compact(value), 15, bold: true);
+        n.HorizontalAlignment = HorizontalAlignment.Right;
+        n.VerticalAlignment = VerticalAlignment.Center;
+        Grid.SetColumn(n, 2);
+        g.Children.Add(n);
+        return g;
+    }
+
+    private void BuildDictionary(StackPanel col)
+    {
+        Intro(col, "Dictionary", "Names, places and jargon Tokalot should always spell right. They're given to speech recognition and to the cleanup model as hints.");
+        SpelledCard(col);
+        var (box, input) = Ui.Field("", "Add words, separated by commas, e.g. Kubernetes, Nguyen, PostgreSQL", multiLine: true);
+        col.Children.Add(box);
+        var add = Ui.Button("Add", () =>
+        {
+            var existing = new HashSet<string>(S.Words.Select(w => w.ToLowerInvariant()));
+            var fresh = input.Text.Split(new[] { ',', '\n', '\r' }).Select(w => w.Trim())
+                .Where(w => w.Length > 0 && existing.Add(w.ToLowerInvariant())).ToList();
+            if (fresh.Count > 0)
+            {
+                S.Words.AddRange(fresh);
+                S.Save();
+                Render();
+                Toast($"Added {fresh.Count} {(fresh.Count == 1 ? "word" : "words")}");
+            }
+            else if (input.Text.Trim().Length > 0) Toast("Already in your dictionary");
+        }, filled: true);
+        add.HorizontalAlignment = HorizontalAlignment.Right;
+        col.Children.Add(Spaced(add, 0, 10, 0, 16));
+
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Learn from my corrections",
+            "Off unless you turn it on. After Tokalot pastes a dictation, it looks at that text box again for up to two minutes. " +
+            "If you respell one word into a name or a term (Kaitlin to Caitlyn, get hub to GitHub), the new spelling is added here, " +
+            "and a note lets you undo it. Ordinary words are left alone. The text is only compared on this PC, never saved or sent; " +
+            "the learned word is all that's kept. Works in most apps, but not ones that don't let other programs read their text boxes.",
+            Ui.Switch(S.LearnWords, v => { S.LearnWords = v; S.Save(); }))), 0, 0, 0, 16));
+
+        col.Children.Add(new ColBreak());
+        if (S.Words.Count == 0)
+        {
+            col.Children.Add(Ui.Card(Ui.Text("No words yet.", 16, C.Sub), 22));
+            return;
+        }
+        var rows = S.Words.OrderBy(w => w, StringComparer.OrdinalIgnoreCase).Select(w =>
+        {
+            var remove = Ui.Button("", () => { S.Words.Remove(w); S.LearnedWords.Remove(w); S.Save(); Render(); }, icon: "close");
+            remove.BorderThickness = new Thickness(0);
+            remove.Background = Brushes.Transparent;
+            var name = S.LearnedWords.Contains(w)
+                ? (UIElement)Ui.Row(Ui.Text(w, 16), Spaced(Ui.Text("learned", 12.5, C.Sub), 10, 2, 0, 0))
+                : Ui.Text(w, 16);
+            return (UIElement)Spaced(Spread(name, remove), 20, 8, 12, 8);
+        }).ToArray();
+        col.Children.Add(Ui.List(rows));
+    }
+
+    /**
+     * Words the user spelled out letter by letter while dictating (see Learn.Spelled), offered for the dictionary.
+     * Shown on Home and Dictionary until each is added or turned down.
+     */
+    private void SpelledCard(StackPanel col)
+    {
+        var words = S.SuggestedWords.Where(w => !S.Words.Contains(w, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (words.Count == 0) return;
+        var rows = new List<UIElement>
+        {
+            Spaced(Ui.Stack(
+                Ui.Text(words.Count == 1 ? "You spelled out a word" : $"You spelled out {words.Count} words", 15.5, bold: true),
+                Ui.Text(words.Count == 1
+                    ? "Add it to your dictionary so it's spelled right without spelling it next time."
+                    : "Add them to your dictionary so they're spelled right without spelling them next time.", 13.5, C.Sub)), 20, 14, 18, 14),
+        };
+        foreach (var w in words)
+        {
+            var notNow = Ui.Button("Not now", () =>
+            {
+                S.SuggestedWords.Remove(w);
+                if (!S.DismissedWords.Contains(w, StringComparer.OrdinalIgnoreCase)) S.DismissedWords.Add(w);
+                S.Save();
+                Render();
+            });
+            var add = Ui.Button("Add", () =>
+            {
+                S.SuggestedWords.Remove(w);
+                if (!S.Words.Contains(w, StringComparer.OrdinalIgnoreCase)) S.Words.Add(w);
+                S.Save();
+                Render();
+                Toast($"Added “{w}” to your dictionary");
+            }, filled: true);
+            rows.Add(Spaced(Spread(Ui.Text(w, 16), notNow, add), 20, 10, 16, 10));
+        }
+        col.Children.Add(Spaced(Ui.List(rows.ToArray()), 0, 0, 0, 16));
+    }
+
+    // ---------- Notes (beta) ----------
+
+    private void BuildNotes(StackPanel col)
+    {
+        if (openNoteId is { } open) { BuildNote(col, open); return; }
+        Intro(col, "Notes", "Dictate without a text box: hold Ctrl+Shift+Win, or pick New voice note in the tray menu. Each dictation is saved here as its own note and copied to the clipboard. You can also add a recording, like a WhatsApp voice message saved to this PC, and it's transcribed into a note.");
+        col.Children.Add(Spaced(Ui.Button("Add a recording", AddRecording, filled: true), 0, 0, 0, 16));
+        if (!S.NotesFeedbackDone)
+        {
+            // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
+            void Done() { S.NotesFeedbackDone = true; S.Save(); Render(); }
+            var useful = Ui.Button("Useful", () => { Open(NotesFeedbackUrl("useful")); Done(); }, filled: true);
+            useful.Margin = new Thickness(0, 0, 8, 0);
+            var close = CloseX(Done, "Close");
+            close.VerticalAlignment = VerticalAlignment.Top;
+            col.Children.Add(Spaced(Ui.Card(Ui.Stack(
+                Spread(Ui.Text("Voice notes are a beta. Worth keeping?", 15.5, bold: true), close),
+                Spaced(Ui.Text("Opens a short form on GitHub (a free account is needed). It's public, so your notes aren't in it.", 13.5, C.Sub), 0, 2, 0, 10),
+                Ui.Row(useful, Ui.Button("Not for me", () => { Open(NotesFeedbackUrl("not for me")); Done(); }))), 20), 0, 0, 0, 16));
+        }
+        // Recordings still being transcribed, or that failed: they become notes once they're done.
+        foreach (var w in NoteImport.Waiting())
+        {
+            var running = NoteImport.IsRunning(w.Id);
+            var status = running ? "Transcribing…"
+                : w.Status == "pending" ? "Tokalot closed before this was transcribed."
+                : "Couldn't transcribe it: " + (w.Error.Length > 0 ? w.Error : "unknown error");
+            var actions = new List<UIElement>();
+            if (!running)
+            {
+                var again = Ui.Button("Try again", () => { _ = NoteImport.Transcribe(S, w.Id); Render(); }, filled: true);
+                again.Margin = new Thickness(0, 0, 8, 0);
+                actions.Add(again);
+            }
+            if (!running)
+                actions.Add(Ui.Button("Remove", () =>
+                {
+                    if (!Ui.Dialog(this, "Remove this recording? It can't be brought back.", "Remove")) return;
+                    NoteImport.DeleteMedia(w.Id);
+                    Render();
+                }));
+            col.Children.Add(Spaced(Ui.Card(Ui.Stack(
+                Ui.Text(w.Name.Length > 0 ? w.Name : "Recording", 15.5, bold: true),
+                Spaced(Ui.Text(status, 13.5, running ? C.Sub : C.Amber), 0, 2, 0, actions.Count > 0 ? 10 : 0),
+                Ui.Row(actions.ToArray())), 20), 0, 0, 0, 16));
+        }
+        var notes = Notes.All().Where(n => n.Id != pendingDelete).ToList();
+        if (notes.Count == 0)
+        {
+            col.Children.Add(Ui.Card(Ui.Text("No notes yet. Press Ctrl+Shift+Win, or New voice note in the tray menu, and talk.", 16, C.Sub), 24));
+            return;
+        }
+        string lastDay = "";
+        StackPanel? group = null;
+        foreach (var n in notes.Take(notesLimit))
+        {
+            var day = DayLabel(n.Time);
+            if (day != lastDay)
+            {
+                // Each day is a section, so on a wide window the days fill both columns.
+                var heading = Spaced(Ui.Heading(day, 30), 0, group == null ? 0 : 24, 0, 12);
+                heading.Tag = "section";
+                col.Children.Add(heading);
+                group = new StackPanel();
+                col.Children.Add(Ui.Card(group));
+                lastDay = day;
+            }
+            else group!.Children.Add(Ui.Divider());
+            group!.Children.Add(NoteRow(n));
+        }
+        if (notes.Count > notesLimit)
+        {
+            var more = Ui.Button("Show older", () => { notesLimit += 200; Render(); });
+            more.HorizontalAlignment = HorizontalAlignment.Center;
+            col.Children.Add(Spaced(more, 0, 20, 0, 0));
+        }
+    }
+
+    /** A small round ✕. */
+    private static Border CloseX(Action onClick, string tip)
+    {
+        var x = new Border
+        {
+            Width = 26, Height = 26, CornerRadius = new CornerRadius(13), Background = Brushes.Transparent, Cursor = Cursors.Hand,
+            Child = Icons.Get("close", 15, C.Sub), ToolTip = tip,
+        };
+        x.MouseEnter += (_, _) => x.Background = C.Hover;
+        x.MouseLeave += (_, _) => x.Background = Brushes.Transparent;
+        x.MouseLeftButtonUp += (_, e) => { e.Handled = true; onClick(); };
+        return Ui.Keys(x, onClick, tip);
+    }
+
+    private void AddRecording()
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Add a recording", Multiselect = true,
+            Filter = "Recordings|" + string.Join(";", NoteImport.Extensions.Select(e => "*" + e)) + "|All files|*.*",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        var added = dlg.FileNames.Count(f => NoteImport.AddRecording(S, f));
+        if (added < dlg.FileNames.Length) Toast(added == 0 ? "Couldn't read that file" : "Some files couldn't be read");
+        Render();
+    }
+
+    /** Per note: what's being asked for (a summary or the timeline) right now, and the last error. */
+    private readonly Dictionary<long, string> noteBusy = new(), noteError = new();
+
+    private async void RunNote(long id, string what, Func<Task> work)
+    {
+        if (noteBusy.ContainsKey(id)) return;
+        noteBusy[id] = what;
+        noteError.Remove(id);
+        Render();
+        try { await work(); }
+        catch (Exception e) { noteError[id] = e.Message; }
+        noteBusy.Remove(id);
+        if (CurrentPage == Page.Notes) Render();
+    }
+
+    /**
+     * The beta's feedback form on GitHub (.github/ISSUE_TEMPLATE/voice-notes-feedback.yml), with the vote in the
+     * title and the app and Windows version filled in. Nothing else about the PC or the notes is sent.
+     */
+    private static string NotesFeedbackUrl(string vote) =>
+        Updater.RepoUrl + "/issues/new?template=voice-notes-feedback.yml&title=" + Uri.EscapeDataString("[Voice notes] " + vote) +
+        "&app=" + Uri.EscapeDataString($"Tokalot {Updater.CurrentVersion} on Windows {Environment.OSVersion.Version}");
+
+    /** A note in the list: its first lines and when it was made. Clicking it opens the note. */
+    private UIElement NoteRow(Note n)
+    {
+        var info = NoteImport.Get(n.Id);
+        var voice = info?.Audio != null;
+        // With a title: the title in bold, then the text's first line in grey. Without: the first lines of the text.
+        FrameworkElement preview;
+        if (info?.Title is { } title)
+        {
+            var head = Ui.Text(title, 16.5, bold: true);
+            var first = Ui.Text(n.Text.Trim().Split('\n')[0].Trim(), 14.5, C.Sub);
+            foreach (var t in new[] { head, first }) { t.TextWrapping = TextWrapping.NoWrap; t.TextTrimming = TextTrimming.CharacterEllipsis; }
+            preview = Ui.Stack(head, Spaced(first, 0, 2, 0, 0));
+        }
+        else
+        {
+            var text = Ui.Text(System.Text.RegularExpressions.Regex.Replace(n.Text.Trim(), @"\s+", " "), 16.5);
+            text.MaxHeight = 16.5 * 1.4 * 2;
+            text.TextTrimming = TextTrimming.CharacterEllipsis;
+            preview = text;
+        }
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("h:mm tt", CultureInfo.InvariantCulture);
+        if (voice)
+        {
+            meta += " · voice note";
+            if (info!.Duration > 0) meta += " · " + NoteMedia.Clock(info.Duration);
+            if (info.Source != null) meta += " · from " + info.Source;
+        }
+        var metaRow = Ui.Row();
+        if (voice) metaRow.Children.Add(Spaced(Icons.Get("play", 14, C.Sub), 0, 0, 4, 0));
+        metaRow.Children.Add(Ui.Text(meta, 13.5, C.Sub));
+        var row = new Border
+        {
+            Padding = new Thickness(16, 12, 16, 12), Margin = new Thickness(6), CornerRadius = new CornerRadius(22),
+            Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = Ui.Stack(preview, Spaced(metaRow, 0, 6, 0, 0)),
+        };
+        row.MouseEnter += (_, _) => row.Background = C.Hover;
+        row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+        row.MouseLeftButtonUp += (_, _) => OpenNote(n.Id);
+        return Ui.Keys(row, () => OpenNote(n.Id), "Open note");
+    }
+
+    // ---------- one note ----------
+
+    private long? openNoteId;
+    private bool noteSummaryShown, noteTimelineShown;
+    private string? noteFile;
+    private List<NoteMedia.Word> noteWords = new();
+    private List<NoteMedia.Cut>? noteSilence;
+    private List<NoteMedia.Cut> noteCuts = new();
+    private double noteDuration;
+    private readonly List<System.Windows.Documents.Run> noteRuns = new();
+    private int noteLit = -1;
+    private TextBlock? noteText;
+    private Slider? noteSlider;
+    private TextBlock? noteElapsed, noteRemain;
+    private bool noteSliderSetting;
+    /** The "Click any word" hint, hidden at once when it's used. */
+    private FrameworkElement? noteHint;
+    /** The timeline's points as shown, so playback can mark the one being played. */
+    private readonly List<(double Time, TextBlock Text, Border Bar)> notePoints = new();
+    private int noteNow = -1;
+    /** Notes asked for a title in this window already, so a failure isn't retried on every redraw. */
+    private readonly HashSet<long> titleTried = new();
+
+    /** The accent for marks on the page; the white accent would vanish on a light page, so it's the text colour there. */
+    private static Brush Accent => !C.Dark && S.Accent == 0xFFFFFFFF ? C.Text : C.Argb(S.Accent);
+
+    private void OpenNote(long id)
+    {
+        openNoteId = id;
+        noteSummaryShown = noteTimelineShown = false;
+        noteSilence = null;
+        noteResumeAt = 0;
+        noteFollow = true;
+        NotePlayer.Stop(false);
+        scroller.ScrollToTop();
+        Render();
+    }
+
+    private void CloseNote()
+    {
+        NotePlayer.Stop(false);
+        noteTimer.Stop();
+        openNoteId = null;
+        Render();
+    }
+
+    /**
+     * The note page, laid out like the phone's: the title, then Summary and Timeline as small buttons that open
+     * below them, then the text (a voice note's words can be clicked to play from there), the rest in the ⋮ menu,
+     * and a slim player along the bottom of the window.
+     */
+    private void BuildNote(StackPanel col, long id)
+    {
+        var back = Ui.Button("Notes", CloseNote, icon: "back");
+        var note = Notes.All().FirstOrDefault(x => x.Id == id && x.Id != pendingDelete);
+        if (note == null)
+        {
+            col.Children.Add(back);
+            col.Children.Add(Spaced(Ui.Text("This note was deleted.", 16, C.Sub), 4, 16, 0, 0));
+            return;
+        }
+        var info = NoteImport.Get(id);
+        var file = NoteImport.AudioFile(id);
+        noteWords = info?.Words ?? new();
+        noteDuration = info?.Duration ?? 0;
+        var voice = file != null && noteWords.Count > 0;
+        noteFile = voice ? file : null;
+        if (voice && noteSilence == null)
+        {
+            noteSilence = info!.Silence;
+            if (noteSilence == null)
+            {
+                noteSilence = new();
+                var words = noteWords; var duration = noteDuration;
+                Task.Run(() =>
+                {
+                    var found = NotePlayer.FindSilence(file!, words, duration);
+                    if (found == null) return;
+                    NoteImport.Update(id, o => o["silence"] = new System.Text.Json.Nodes.JsonArray(
+                        found.Select(c => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonArray(c.Start, c.End)).ToArray()));
+                    Dispatcher.BeginInvoke(() => { if (openNoteId == id) { noteSilence = found; NoteRecut(); } });
+                });
+            }
+        }
+        NoteRecut();
+        // A note with no title gets one from the AI in the background; without a key or on a failure it just stays without.
+        if (info?.Title == null && info?.TitleOff != true && note.Text.Trim().Length >= 40 && titleTried.Add(id)) MakeTitle(note);
+
+        // The ⋮ menu: what's set once and left alone, and the rarer actions.
+        var menu = new ContextMenu();
+        Border more = null!;
+        more = Ui.Button("", () => { menu.PlacementTarget = more; menu.IsOpen = true; }, icon: "more");
+        if (voice)
+        {
+            var silence = new MenuItem { Header = "Skip silence", IsCheckable = true, IsChecked = S.NoteSkipSilence };
+            silence.Click += (_, _) => { S.NoteSkipSilence = !S.NoteSkipSilence; S.Save(); NoteRecut(); };
+            var ums = new MenuItem { Header = "Skip ums", IsCheckable = true, IsChecked = S.NoteSkipUms };
+            ums.Click += (_, _) => { S.NoteSkipUms = !S.NoteSkipUms; S.Save(); NoteRecut(); };
+            menu.Items.Add(silence);
+            menu.Items.Add(ums);
+        }
+        var rename = new MenuItem { Header = "Rename" };
+        rename.Click += (_, _) =>
+        {
+            // Saving it empty removes the title, and the AI doesn't make another for this note.
+            if (Ui.Prompt(this, "Rename", "Leave it empty for no title.", NoteImport.Get(id)?.Title ?? "") is not { } named) return;
+            NoteImport.SetTitle(id, named);
+            Render();
+        };
+        menu.Items.Add(rename);
+        var copy = new MenuItem { Header = "Copy text" };
+        copy.Click += (_, _) => { _ = TextInjector.Copy(note.Text); Toast("Copied"); };
+        menu.Items.Add(copy);
+        var delete = new MenuItem { Header = "Delete note" };
+        delete.Click += (_, _) => DeleteNote(id);
+        menu.Items.Add(delete);
+        more.ContextMenu = menu;
+        col.Children.Add(Spread(back, more));
+
+        if (info?.Title is { } title) col.Children.Add(Spaced(Ui.Heading(title, 30), 4, 16, 0, 0));
+        var stamp = DateTimeOffset.FromUnixTimeMilliseconds(note.Time).LocalDateTime.ToString("dddd, MMM d · h:mm tt", CultureInfo.InvariantCulture);
+        if (info?.Source != null) stamp += " · from " + info.Source;
+        col.Children.Add(Spaced(Ui.Text(stamp, 13.5, C.Sub), 4, info?.Title != null ? 4 : 16, 0, 10));
+
+        // Summary and Timeline: small buttons above the text, each opening right under them. They're reached for
+        // instead of reading, so they come first and the text follows.
+        var segments = info?.Segments ?? new();
+        var buttons = Ui.Row(NotePill("≡", "Summary", noteSummaryShown, () =>
+        {
+            noteSummaryShown = !noteSummaryShown;
+            if (noteSummaryShown && NoteImport.Get(id)?.Summary(S.NoteSummaryLevel) == null) Summarize(note, S.NoteSummaryLevel, voice, false);
+            else Render();
+        }));
+        if (voice && segments.Count >= 2)
+        {
+            var timeline = NotePill("⏱", "Timeline", noteTimelineShown, () =>
+            {
+                noteTimelineShown = !noteTimelineShown;
+                if (noteTimelineShown && NoteImport.Get(id)?.Index == null) RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments));
+                else Render();
+            });
+            timeline.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(timeline);
+        }
+        col.Children.Add(Spaced(buttons, 0, 0, 0, 14));
+
+        noteBusy.TryGetValue(id, out var busy);
+        notePoints.Clear();
+        noteNow = -1;
+        if (noteError.TryGetValue(id, out var err)) col.Children.Add(Spaced(Ui.Text("Couldn't do that: " + err, 14, C.Amber), 4, 0, 0, 12));
+        if (noteSummaryShown) col.Children.Add(Spaced(SummaryPanel(note, info, voice, busy), 0, 0, 0, 14));
+        if (noteTimelineShown && voice) col.Children.Add(Spaced(TimelinePanel(id, info, segments, busy), 0, 0, 0, 14));
+
+        // The text. A voice note's is built word by word so a click plays from that word and playback lights it up.
+        FrameworkElement body;
+        noteRuns.Clear();
+        noteLit = -1;
+        noteText = null;
+        noteHint = null;
+        if (voice)
+        {
+            var t = noteText = new TextBlock { FontSize = 16.5, FontFamily = C.Sans, Foreground = C.Text, TextWrapping = TextWrapping.Wrap, LineHeight = 16.5 * 1.5 };
+            // Screen readers get the text as one block; the words are only for the mouse and stay out of the Tab order.
+            System.Windows.Automation.AutomationProperties.SetName(t, note.Text);
+            for (var i = 0; i < noteWords.Count; i++)
+            {
+                if (i > 0) t.Inlines.Add(new System.Windows.Documents.Run(noteWords[i].Start - noteWords[i - 1].End >= 2.0 ? "\n\n" : " "));
+                var run = new System.Windows.Documents.Run(noteWords[i].Text) { Cursor = Cursors.Hand, Focusable = false };
+                var at = noteWords[i].Start;
+                run.MouseLeftButtonUp += (_, e) => { e.Handled = true; NoteHintSeen(); NotePlay(at); };
+                t.Inlines.Add(run);
+                noteRuns.Add(run);
+            }
+            body = t;
+            if (!S.NoteWordHintSeen)
+                col.Children.Add(noteHint = Spaced(Spread(Ui.Text("Click any word to play from there", 13.5, C.Sub), CloseX(NoteHintSeen, "Hide this tip")), 4, 0, 0, 8));
+        }
+        else body = new TextBox
+        {
+            Text = note.Text, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+            Foreground = C.Text, FontSize = 16.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        col.Children.Add(Ui.Card(body, 24));
+
+        if (voice) { playerHost.Child = NotePlayerBar(); playerHost.Visibility = Visibility.Visible; }
+    }
+
+    private async void MakeTitle(Note n)
+    {
+        if (await NoteImport.MakeTitle(S, n.Id, n.Text) != null && CurrentPage == Page.Notes) Render();
+    }
+
+    /** The word hint goes for good once a word is clicked or it's closed. */
+    private void NoteHintSeen()
+    {
+        if (noteHint != null) noteHint.Visibility = Visibility.Collapsed;
+        if (S.NoteWordHintSeen) return;
+        S.NoteWordHintSeen = true;
+        S.Save();
+    }
+
+    /** Summary and Timeline: quiet outlined pills with a small glyph, filled while their card is open. */
+    private static Border NotePill(string glyph, string label, bool open, Action onClick)
+    {
+        var fg = open ? C.Card : C.Text;
+        var b = Ui.Stadium(new Border
+        {
+            Background = open ? C.Text : Brushes.Transparent, BorderBrush = open ? C.Text : C.Pill, BorderThickness = new Thickness(1),
+            Padding = new Thickness(12, 0, 14, 0), MinHeight = 32, Cursor = Cursors.Hand, HorizontalAlignment = HorizontalAlignment.Left,
+            Child = Ui.Row(Spaced(Ui.Text(glyph, 13, fg), 0, 0, 6, 0), Ui.Text(label, 13.5, fg)),
+        });
+        b.MouseEnter += (_, _) => b.Opacity = 0.82;
+        b.MouseLeave += (_, _) => b.Opacity = 1;
+        b.MouseLeftButtonUp += (_, e) => { e.Handled = true; onClick(); };
+        return Ui.Keys(b, onClick, label);
+    }
+
+    /** Three grey bars that pulse gently while a summary or the timeline is being made. */
+    private static FrameworkElement Skeleton(string what)
+    {
+        var box = new StackPanel { Margin = new Thickness(0, 4, 0, 0) };
+        foreach (var w in new[] { 1.0, 0.8, 0.55 })
+        {
+            var g = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(w, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - w, GridUnitType.Star) });
+            g.Children.Add(new Border { Height = 12, CornerRadius = new CornerRadius(6), Background = C.Pill });
+            box.Children.Add(g);
+        }
+        System.Windows.Automation.AutomationProperties.SetName(box, what);
+        box.BeginAnimation(OpacityProperty, new DoubleAnimation(0.75, 0.3, TimeSpan.FromMilliseconds(900)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever });
+        return box;
+    }
+
+    // ---------- deleting, with Undo ----------
+
+    /** The note deleted a moment ago: hidden, and really deleted once the Undo bar goes. */
+    private long? pendingDelete;
+    private DispatcherTimer? undoTimer;
+
+    private void DeleteNote(long id)
+    {
+        CommitDelete(); // an earlier one can't be undone any more
+        NotePlayer.Stop(false);
+        pendingDelete = id;
+        undoTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(6), DispatcherPriority.Normal, (_, _) => CommitDelete(), Dispatcher);
+        undoTimer.Stop();
+        undoTimer.Start();
+        undoBar.Visibility = Visibility.Visible;
+        if (openNoteId == id) CloseNote(); else Render();
+    }
+
+    /** The real delete of the note waiting on Undo, if there is one. */
+    private void CommitDelete()
+    {
+        undoTimer?.Stop();
+        undoBar.Visibility = Visibility.Collapsed;
+        if (pendingDelete is not { } id) return;
+        pendingDelete = null;
+        Notes.Delete(id);
+    }
+
+    private void UndoDelete()
+    {
+        undoTimer?.Stop();
+        undoBar.Visibility = Visibility.Collapsed;
+        pendingDelete = null;
+        Render();
+    }
+
+    private void Summarize(Note n, int level, bool voice, bool redo)
+    {
+        if (!redo && NoteImport.Get(n.Id)?.Summary(level) != null) { Render(); return; }
+        RunNote(n.Id, "Summarizing…", () => NoteImport.Summarize(S, n.Id, n.Text, level, voice));
+    }
+
+    private Border SummaryPanel(Note n, NoteImport.Info? info, bool voice, string? busy)
+    {
+        var level = S.NoteSummaryLevel;
+        // The length, as a small label that opens a chooser of the five.
+        var lengths = new ContextMenu();
+        for (var l = 1; l <= 5; l++)
+        {
+            var lv = l;
+            var item = new MenuItem { Header = NoteMedia.LevelNames[l - 1], IsCheckable = true, IsChecked = level == l };
+            item.Click += (_, _) =>
+            {
+                S.NoteSummaryLevel = lv;
+                S.Save();
+                if (NoteImport.Get(n.Id)?.Summary(lv) == null) Summarize(n, lv, voice, false);
+                else Render();
+            };
+            lengths.Items.Add(item);
+        }
+        var length = Ui.Stadium(new Border
+        {
+            Background = Brushes.Transparent, Padding = new Thickness(8, 2, 8, 3), Cursor = Cursors.Hand, ContextMenu = lengths,
+            Child = Ui.Text(NoteMedia.LevelNames[level - 1] + " ▾", 13, C.Sub), Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+        });
+        void Choose() { lengths.PlacementTarget = length; lengths.IsOpen = true; }
+        length.MouseEnter += (_, _) => length.Background = C.Hover;
+        length.MouseLeave += (_, _) => length.Background = Brushes.Transparent;
+        length.MouseLeftButtonUp += (_, _) => Choose();
+        var box = Ui.Stack(Spaced(Ui.Row(Ui.Text("Summary", 15.5, bold: true), Ui.Keys(length, Choose, "Summary length: " + NoteMedia.LevelNames[level - 1])), 0, 0, 0, 10));
+        if (busy == "Summarizing…") box.Children.Add(Skeleton(busy));
+        else if (info?.Summary(level) is { } summary)
+        {
+            box.Children.Add(new TextBox
+            {
+                Text = summary, IsReadOnly = true, BorderThickness = new Thickness(0), Background = Brushes.Transparent,
+                Foreground = C.Text, FontSize = 15.5, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap, Padding = new Thickness(-2, 0, 0, 0),
+            });
+            var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(summary); Toast("Copied"); }, icon: "copy");
+            copy.Margin = new Thickness(0, 10, 8, 0);
+            var redo = Ui.Button("Redo", () => Summarize(n, level, voice, true));
+            redo.Margin = new Thickness(0, 10, 0, 0);
+            box.Children.Add(Ui.Row(copy, redo));
+        }
+        else box.Children.Add(Ui.Button("Summarize", () => Summarize(n, level, voice, false), filled: true));
+        return Ui.Card(box, 22);
+    }
+
+    private Border TimelinePanel(long id, NoteImport.Info? info, List<NoteMedia.Segment> segments, string? busy)
+    {
+        var box = Ui.Stack(Ui.Text("Timeline", 15.5, bold: true),
+            Spaced(Ui.Text("Every point in the order it was said. Click one to hear it.", 13, C.Sub), 0, 2, 0, 8));
+        var points = info?.Index;
+        if (busy == "Making the timeline…") box.Children.Add(Skeleton(busy));
+        else if (points == null)
+            box.Children.Add(Ui.Button("Make the timeline", () => RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments)), filled: true));
+        else if (points.Count == 0) box.Children.Add(Ui.Text("Nothing to put on it.", 14, C.Sub));
+        else
+        {
+            var lastTopic = "";
+            foreach (var p in points)
+            {
+                if (p.Topic.Length > 0 && !p.Topic.Equals(lastTopic, StringComparison.OrdinalIgnoreCase))
+                    box.Children.Add(Spaced(Ui.Text(p.Topic.ToUpperInvariant(), 11.5, C.Sub, bold: true), 0, 10, 0, 2));
+                lastTopic = p.Topic;
+                // An accent bar at the left marks the point being played (see NoteShow).
+                var bar = new Border { Width = 3, CornerRadius = new CornerRadius(1.5), Background = Accent, Margin = new Thickness(0, 2, 8, 2), Visibility = Visibility.Hidden };
+                DockPanel.SetDock(bar, Dock.Left);
+                var time = Ui.Text(NoteMedia.Clock(p.Time), 14, C.Link);
+                time.Width = 52;
+                DockPanel.SetDock(time, Dock.Left);
+                var text = Ui.Text(p.Text, 14.5);
+                var row = new DockPanel { Margin = new Thickness(0, 3, 0, 3), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+                row.Children.Add(bar);
+                row.Children.Add(time);
+                row.Children.Add(text);
+                notePoints.Add((p.Time, text, bar));
+                var at = p.Time;
+                row.MouseLeftButtonUp += (_, _) => NotePlay(at);
+                box.Children.Add(Ui.Keys(row, () => NotePlay(at), NoteMedia.Clock(p.Time) + ", " + p.Text));
+            }
+            var redo = Ui.Button("Redo", () => RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments)));
+            redo.Margin = new Thickness(0, 10, 0, 0);
+            box.Children.Add(redo);
+        }
+        return Ui.Card(box, 22);
+    }
+
+    // ---------- the player ----------
+
+    /** What playback jumps over: stretches with no voice and "um"s, as switched on in the ⋮ menu. */
+    private void NoteRecut() =>
+        noteCuts = NoteMedia.Merge((S.NoteSkipSilence ? noteSilence ?? new List<NoteMedia.Cut>() : new List<NoteMedia.Cut>())
+            .Concat(S.NoteSkipUms ? NoteMedia.FillerCuts(noteWords) : new List<NoteMedia.Cut>()));
+
+    private static string SpeedLabel(double v) => v.ToString("0.##", CultureInfo.InvariantCulture) + "×";
+
+    /** Play, a position bar with the time gone and the time left under its ends, and the speed. */
+    private UIElement NotePlayerBar()
+    {
+        var playing = NotePlayer.Playing && NotePlayer.File == noteFile;
+        var play = Ui.Button("", NoteToggle, filled: true, icon: playing ? "pause" : "play");
+        var slider = noteSlider = new Slider
+        {
+            Minimum = 0, Maximum = Math.Max(0.1, noteDuration), IsMoveToPointEnabled = true, Style = Ui.SliderStyle(Accent),
+            Value = NotePlayer.File == noteFile ? NotePlayer.Position : 0,
+        };
+        slider.ValueChanged += (_, e) =>
+        {
+            if (noteSliderSetting) return;
+            if (NotePlayer.File == noteFile) NotePlayer.Seek(e.NewValue);
+            noteResumeAt = e.NewValue;
+            NoteShow(e.NewValue);
+        };
+        noteElapsed = Ui.Text("", 12, C.Sub);
+        noteRemain = Ui.Text("", 12, C.Sub);
+        noteRemain.HorizontalAlignment = HorizontalAlignment.Right;
+        var times = new Grid { Margin = new Thickness(0, -2, 0, 0) };
+        times.Children.Add(noteElapsed);
+        times.Children.Add(noteRemain);
+        var middle = Ui.Stack(slider, times);
+        middle.Margin = new Thickness(14, 0, 14, 0);
+        middle.VerticalAlignment = VerticalAlignment.Center;
+        var speed = Ui.Button(SpeedLabel(S.NoteSpeed), () =>
+        {
+            var i = Array.FindIndex(Sync.NoteSpeeds, v => Math.Abs(v - S.NoteSpeed) < 0.001);
+            S.NoteSpeed = Sync.NoteSpeeds[(i + 1) % Sync.NoteSpeeds.Length];
+            S.Save();
+            NotePlayer.SetSpeed(S.NoteSpeed);
+            playerHost.Child = NotePlayerBar();
+        });
+        var g = new Grid { Margin = new Thickness(24, 10, 24, 12) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.Children.Add(play);
+        Grid.SetColumn(middle, 1); g.Children.Add(middle);
+        Grid.SetColumn(speed, 2); g.Children.Add(speed);
+        NoteShow(slider.Value);
+        return new Border { Background = C.Card, BorderBrush = C.Line, BorderThickness = new Thickness(0, 1, 0, 0), Child = g };
+    }
+
+    /** Where Play starts when nothing is loaded yet: the start, or wherever the bar was dragged. */
+    private double noteResumeAt;
+
+    private void NoteToggle()
+    {
+        if (noteFile == null) return;
+        if (NotePlayer.Playing && NotePlayer.File == noteFile) NotePlayer.Pause();
+        else NotePlay(NotePlayer.File == noteFile ? NotePlayer.Position : noteResumeAt);
+    }
+
+    private void NotePlay(double from)
+    {
+        if (noteFile == null) return;
+        NotePlayer.Play(noteFile, from, S.NoteSpeed);
+    }
+
+    private void NotePlayerChanged() => Dispatcher.BeginInvoke(() =>
+    {
+        if (NotePlayer.Error is { } err) Toast("Windows can't play this recording: " + err);
+        if (NotePlayer.Playing) noteTimer.Start(); else noteTimer.Stop();
+        if (openNoteId != null && noteFile != null && playerHost.Visibility == Visibility.Visible) playerHost.Child = NotePlayerBar();
+        NoteChip();
+    });
+
+    /** About 20 times a second while playing: jumps over a cut, moves the bar and lights up the word being said. */
+    private void NoteTick()
+    {
+        if (!NotePlayer.Playing || NotePlayer.File != noteFile) { noteTimer.Stop(); return; }
+        // Following the word: an easing step toward where the page should be.
+        if (noteScrollTo is { } target)
+        {
+            var gap = target - scroller.VerticalOffset;
+            scroller.ScrollToVerticalOffset(Math.Abs(gap) < 1 ? target : scroller.VerticalOffset + gap * 0.25);
+            if (Math.Abs(gap) < 1) noteScrollTo = null;
+        }
+        var at = NotePlayer.Position;
+        if (NoteMedia.SkipTo(noteCuts, at) is { } to)
+        {
+            if (to >= noteDuration - 0.05) { NotePlayer.Pause(); NotePlayer.Seek(0); NoteShow(0); return; }
+            NotePlayer.Seek(to);
+            at = to;
+        }
+        NoteShow(at);
+    }
+
+    private void NoteShow(double at)
+    {
+        if (noteSlider != null) { noteSliderSetting = true; noteSlider.Value = at; noteSliderSetting = false; }
+        if (noteElapsed != null && noteRemain != null)
+        {
+            noteElapsed.Text = NoteMedia.Clock(at);
+            noteRemain.Text = "-" + NoteMedia.Clock(Math.Max(0, noteDuration - at));
+        }
+        // The timeline point being played: the last one at or before the position.
+        var now = NotePlayer.File == noteFile ? notePoints.FindLastIndex(p => p.Time <= at + 0.02) : -1;
+        if (now != noteNow)
+        {
+            if (noteNow >= 0 && noteNow < notePoints.Count) { notePoints[noteNow].Bar.Visibility = Visibility.Hidden; notePoints[noteNow].Text.FontWeight = FontWeights.Normal; }
+            noteNow = now;
+            if (now >= 0) { notePoints[now].Bar.Visibility = Visibility.Visible; notePoints[now].Text.FontWeight = FontWeights.SemiBold; }
+        }
+        var i = NotePlayer.File == noteFile ? NoteMedia.WordAt(noteWords, at + 0.02) : -1;
+        if (i == noteLit) return;
+        if (noteLit >= 0 && noteLit < noteRuns.Count) noteRuns[noteLit].Background = null;
+        noteLit = i;
+        if (i >= 0 && i < noteRuns.Count) noteRuns[i].Background = new SolidColorBrush(Color.FromArgb(0x55, 0x6E, 0xA8, 0xFE));
+        if (noteFollow && NotePlayer.Playing) NoteScrollToWord(false);
+    }
+
+    // ---------- following the word being played ----------
+
+    /** Playback keeps the lit word in view until the page is scrolled by hand; "Back to playing" turns it on again. */
+    private bool noteFollow = true;
+    private double? noteScrollTo;
+
+    /**
+     * Aims the page so the lit word sits about a third of the way down: only once it has left a comfortable band
+     * (always, when [now]), and smoothly, a step on each tick.
+     */
+    private void NoteScrollToWord(bool now)
+    {
+        if (noteText == null || noteLit < 0 || noteLit >= noteRuns.Count) return;
+        try
+        {
+            var r = noteRuns[noteLit].ContentStart.GetCharacterRect(System.Windows.Documents.LogicalDirection.Forward);
+            if (r.IsEmpty) return;
+            var y = noteText.TransformToVisual(scroller).Transform(r.TopLeft).Y;
+            var h = scroller.ViewportHeight;
+            if (!now && y > h * 0.12 && y + r.Height < h * 0.65) return;
+            noteScrollTo = Math.Clamp(scroller.VerticalOffset + y - h / 3, 0, scroller.ScrollableHeight);
+        }
+        catch (InvalidOperationException) { } // not laid out yet
+    }
+
+    private void NoteUnfollow()
+    {
+        if (openNoteId == null || !noteFollow || !NotePlayer.Playing) return; // scrolling while paused leaves it on for the next play
+        noteFollow = false;
+        noteScrollTo = null;
+        NoteChip();
+    }
+
+    private void NoteFollowAgain()
+    {
+        noteFollow = true;
+        NoteChip();
+        NoteScrollToWord(true);
+    }
+
+    /** "Back to playing" shows only while a note plays and the page isn't following it. */
+    private void NoteChip() =>
+        followChip.Visibility = openNoteId != null && noteFile != null && !noteFollow && NotePlayer.Playing && NotePlayer.File == noteFile
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    // ---------- Snippets ----------
+
+    private void BuildSnippets(StackPanel col)
+    {
+        Intro(col, "Snippets", "Say a trigger phrase and it's replaced with the full text, exactly as you wrote it. The AI never rewrites snippet text.");
+        if (editing == null && !editingNew)
+            col.Children.Add(Spaced(Ui.Button("New snippet", () => { editingNew = true; Render(); }, filled: true), 0, 0, 0, 16));
+        else col.Children.Add(Spaced(SnippetEditor(editing), 0, 0, 0, 16));
+        col.Children.Add(new ColBreak());
+
+        if (S.Snippets.Count == 0)
+        {
+            col.Children.Add(Ui.Card(Ui.Text("Example: say \"my email\" and get your full email address, or \"home address\" for your full street address.", 16, C.Sub), 22));
+            return;
+        }
+        var rows = S.Snippets.Select(sn =>
+        {
+            var body = Ui.Text(sn.Text, 14.5, C.Sub);
+            body.MaxHeight = 14.5 * 1.4 * 3;
+            body.TextTrimming = TextTrimming.CharacterEllipsis;
+            var item = new Border
+            {
+                Padding = new Thickness(22, 15, 22, 15), Background = Brushes.Transparent, Cursor = Cursors.Hand,
+                Child = Ui.Stack(Ui.Text($"“{sn.Trigger}”", 16, bold: true), body),
+            };
+            item.MouseEnter += (_, _) => item.Background = C.Hover;
+            item.MouseLeave += (_, _) => item.Background = Brushes.Transparent;
+            item.MouseLeftButtonUp += (_, _) => { editing = sn; editingNew = false; Render(); scroller.ScrollToTop(); };
+            return (UIElement)Ui.Keys(item, () => { editing = sn; editingNew = false; Render(); scroller.ScrollToTop(); }, sn.Trigger);
+        }).ToArray();
+        col.Children.Add(Ui.List(rows));
+    }
+
+    private FrameworkElement SnippetEditor(Snippet? existing)
+    {
+        var (tBox, trig) = Ui.Field(existing?.Trigger ?? "", "Trigger phrase you'll say");
+        var (bBox, body) = Ui.Field(existing?.Text ?? "", "Text to insert", multiLine: true);
+        void Close() { editing = null; editingNew = false; Render(); }
+        var buttons = new List<UIElement>
+        {
+            Ui.Button("Save", () =>
+            {
+                var t = trig.Text.Trim();
+                if (t.Length == 0 || body.Text.Trim().Length == 0) { Toast("Add a trigger and some text"); return; }
+                S.Snippets.RemoveAll(x => x == existing || string.Equals(x.Trigger, t, StringComparison.OrdinalIgnoreCase));
+                S.Snippets.Add(new Snippet(t, body.Text));
+                S.Save();
+                Close();
+            }, filled: true),
+            Ui.Button("Cancel", Close),
+        };
+        if (existing != null) buttons.Add(Ui.Button("Delete", () => { S.Snippets.Remove(existing); S.Save(); Close(); }));
+        var row = Ui.Row(buttons.ToArray());
+        foreach (FrameworkElement b in row.Children) b.Margin = new Thickness(0, 0, 8, 0);
+        var card = Ui.Card(Ui.Stack(
+            Ui.Text(existing == null ? "New snippet" : "Edit snippet", 17, bold: true),
+            Spaced(tBox, 0, 12, 0, 0), Spaced(bBox, 0, 10, 0, 14), row), 20);
+        Dispatcher.BeginInvoke(() => trig.Focus());
+        return card;
+    }
+
+    // ---------- Style ----------
+
+    private void BuildStyle(StackPanel col)
+    {
+        Intro(col, "Style", "How the cleanup model writes what you say, per kind of app. Tokalot checks which app you're in when you press Ctrl+Win.");
+        if (!S.CleanupReady)
+        {
+            var warn = Ui.Card(Ui.Text("AI cleanup isn't active, so styles won't apply yet. Pick a cleanup model and add its key in Settings.", 15, C.Warn), 18);
+            warn.Cursor = Cursors.Hand;
+            warn.MouseLeftButtonUp += (_, _) => OpenSettingsAt(SpeechCategory);
+            col.Children.Add(Spaced(warn, 0, 0, 0, 16));
+        }
+
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Polish my wording",
+            "Off: your own words are kept, with fillers removed and punctuation and formatting fixed. On: the AI may also tighten and clarify what you said, " +
+            "and for a few seconds after each dictation Ctrl+Win+Z puts your own words back.",
+            Ui.Switch(S.Polish, v => { S.Polish = v; S.Save(); }))), 0, 0, 0, 18));
+
+        var tabs = new WrapPanel();
+        foreach (var c in Catalog.Categories)
+        {
+            var on = c.Id == styleTab;
+            var t = Ui.Stadium(new Border
+            {
+                Padding = new Thickness(16, 9, 16, 9), Margin = new Thickness(0, 0, 8, 8),
+                Background = on ? C.Text : C.Card, BorderBrush = on ? C.Text : C.Pill, BorderThickness = new Thickness(1), Cursor = Cursors.Hand,
+                Child = Ui.Text(c.Label, 14.5, on ? C.Card : C.Text),
+            });
+            var id = c.Id;
+            t.MouseLeftButtonUp += (_, _) => { styleTab = id; Render(); };
+            tabs.Children.Add(Ui.Keys(t, () => { styleTab = id; Render(); }, c.Label));
+        }
+        col.Children.Add(Spaced(tabs, 0, 0, 0, 4));
+        var cat = Catalog.CategoryById(styleTab);
+        col.Children.Add(Spaced(Ui.Text(cat.Blurb, 14, C.Sub), 4, 0, 0, 12));
+
+        var current = S.StyleFor(cat);
+        col.Children.Add(Ui.List(Catalog.Styles.Select(st => (UIElement)Ui.Choice(st.Label, st.Example, current.Id == st.Id, () =>
+        {
+            S.CategoryStyles[cat.Id] = st.Id;
+            S.Save();
+            Render();
+        })).ToArray()));
+        if (cat.Id == "AI_CODE")
+            col.Children.Add(Spaced(Ui.Text("In these apps Tokalot also keeps technical terms exact and puts file names, commands and code names in `backticks`. Lists use markdown dashes.", 13, C.Sub), 4, 8, 0, 0));
+        if (cat.Id == "EMAIL")
+            col.Children.Add(Spaced(Ui.Text("In email apps a spoken greeting and sign-off go on their own lines, with blank lines between paragraphs.", 13, C.Sub), 4, 8, 0, 0));
+
+        // Apps you've dictated into (tap to change their category).
+        var apps = History.All().Where(e => e.AppKey.Length > 0).GroupBy(e => e.AppKey).Select(g => g.First()).Take(30).ToList();
+        if (apps.Count > 0)
+        {
+            col.Children.Add(new ColBreak());
+            col.Children.Add(Spaced(Ui.Heading("Your apps", 28), 0, 28, 0, 4));
+            col.Children.Add(Spaced(Ui.Text("Click an app to change which style it uses.", 14, C.Sub), 0, 0, 0, 12));
+            var rows = apps.Select(e =>
+            {
+                var appCat = AppDetect.Categorize(new ActiveApp(e.AppKey, e.AppLabel), S);
+                var row = new Border
+                {
+                    Padding = new Thickness(22, 13, 22, 13), Background = Brushes.Transparent, Cursor = Cursors.Hand,
+                    Child = Spread(Ui.Text(e.AppLabel, 16), Ui.Text(appCat.Label, 14.5, C.Sub)),
+                };
+                row.MouseEnter += (_, _) => row.Background = C.Hover;
+                row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+                var menu = new ContextMenu();
+                foreach (var c in Catalog.Categories)
+                {
+                    var mi = new MenuItem { Header = c.Label, IsCheckable = true, IsChecked = c.Id == appCat.Id };
+                    var id = c.Id;
+                    mi.Click += (_, _) => { S.AppOverrides[e.AppKey] = id; S.Save(); Render(); };
+                    menu.Items.Add(mi);
+                }
+                row.ContextMenu = menu;
+                row.MouseLeftButtonUp += (_, _) => { menu.PlacementTarget = row; menu.IsOpen = true; };
+                return (UIElement)Ui.Keys(row, () => { menu.PlacementTarget = row; menu.IsOpen = true; }, e.AppLabel);
+            }).ToArray();
+            col.Children.Add(Ui.List(rows));
+        }
+
+        if (!col.Children.OfType<ColBreak>().Any()) col.Children.Add(new ColBreak());
+        col.Children.Add(Spaced(Ui.Heading("Your instructions", 28), 0, 28, 0, 4));
+        col.Children.Add(Spaced(Ui.Text("Applies everywhere. E.g. \"Use US spelling\", \"Write numbers as digits\", \"Never use exclamation points\".", 14, C.Sub), 0, 0, 0, 12));
+        var (box, input) = Ui.Field(S.CustomInstructions, "Optional", multiLine: true);
+        input.TextChanged += (_, _) => { S.CustomInstructions = input.Text; SaveSoon(); };
+        col.Children.Add(box);
+    }
+
+    // ---------- Settings ----------
+
+    private const string SetupCategory = "Setup", SpeechCategory = "Speech & cleanup", DataCategory = "Your data";
+
+    /** Settings categories, in order, each with its sections in the order shown when it's open. Same as the Android app. */
+    private static readonly (string Name, string[] Sections)[] Categories =
+    {
+        (SetupCategory, new[] { "Setup" }),
+        (SpeechCategory, new[] { "Speech to text", "Offline model", "AI cleanup", "API keys", "Speed" }),
+        ("Recording & look", new[] { "Recording", "Recording indicator", "Appearance" }),
+        (DataCategory, new[] { "Recordings", "Sync", "AI assistants", "Backup", "Usage" }),
+        ("About", new[] { "About" }),
+    };
+
+    /** On a wide window the categories from this one on go in the right column. A fixed split, so opening one never moves the others across. */
+    private const string RightColumnFrom = "Recording & look";
+
+    /** Screenshot mode shows every category open, so the pictures cover everything. */
+    private static readonly bool ShotMode = Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() == "--screenshots";
+
+    /**
+     * Setup opens by itself while setup isn't finished. It then stays open for the rest of this run, so adding a
+     * key doesn't fold it away under the pointer, unless it's closed by hand.
+     */
+    private static bool setupHeld, setupFolded;
+
+    /** Each category as last built (header first), for focus and scrolling after a rebuild. */
+    private readonly Dictionary<string, StackPanel> categoryViews = new();
+
+    /** Marks a section's small heading with its title, so Fold can tell where each section starts. */
+    private sealed record SectionStart(string Title);
+
+    private static void Section(StackPanel col, string title)
+    {
+        var l = Ui.Label(title);
+        l.Tag = new SectionStart(title);
+        col.Children.Add(l);
+    }
+
+    /** Opens Settings with one category open and in view, for links that send the user there to fix something. */
+    internal void OpenSettingsAt(string category)
+    {
+        if (category == SetupCategory) setupFolded = false;
+        if (!S.OpenSettings.Contains(category)) { S.OpenSettings.Add(category); S.Save(); }
+        Go(Page.Settings);
+        if (!categoryViews.TryGetValue(category, out var panel)) return;
+        // Its header near the top, and as much of what's inside as fits.
+        panel.BringIntoView(new Rect(0, 0, panel.ActualWidth, Math.Min(panel.ActualHeight, scroller.ViewportHeight * 0.8)));
+    }
+
+    /**
+     * Regroups the finished Settings page into Categories: each a header you click to open or close, holding its
+     * sections. The sections are built as before; this only moves each one (its heading and everything up to the
+     * next heading) under its category. Anything before the first section (the page title) stays on top.
+     */
+    private void Fold(StackPanel col)
+    {
+        var items = col.Children.Cast<UIElement>().ToList();
+        col.Children.Clear(); // an element can only have one parent, so let go of them all before moving them
+        var sections = new Dictionary<string, List<UIElement>>();
+        List<UIElement>? current = null;
+        foreach (var e in items)
+        {
+            if (e is FrameworkElement { Tag: SectionStart start }) sections[start.Title] = current = new List<UIElement>();
+            if (current != null) current.Add(e); else col.Children.Add(e);
+        }
+
+        if (!SetupComplete && !setupFolded) setupHeld = true;
+        var open = new HashSet<string>(S.OpenSettings);
+        if (setupHeld) open.Add(SetupCategory);
+        if (ShotMode) open.UnionWith(Categories.Select(c => c.Name));
+
+        categoryViews.Clear();
+        foreach (var (name, titles) in Categories)
+        {
+            var parts = titles.Where(sections.ContainsKey).ToList();
+            if (parts.Count == 0) continue;
+            if (name == RightColumnFrom) col.Children.Add(new ColBreak());
+            var isOpen = open.Contains(name);
+            var panel = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            panel.Children.Add(CategoryHeader(name, parts, isOpen));
+            if (isOpen)
+            {
+                var body = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
+                foreach (var title in parts)
+                {
+                    var part = sections[title];
+                    // A category holding one section of its own name doesn't need the small heading as well.
+                    var skipHeading = parts.Count == 1 && title == name;
+                    for (int i = skipHeading ? 1 : 0; i < part.Count; i++)
+                    {
+                        // The first thing inside sits a little closer to the header than headings between sections.
+                        if (body.Children.Count == 0 && part[i] is FrameworkElement first)
+                            first.Margin = new Thickness(first.Margin.Left, skipHeading ? 12 : 18, first.Margin.Right, first.Margin.Bottom);
+                        body.Children.Add(part[i]);
+                    }
+                }
+                panel.Children.Add(body);
+            }
+            col.Children.Add(panel);
+            categoryViews[name] = panel;
+        }
+    }
+
+    /** A category's header: its name, the sections inside, and a chevron. Click it (or Enter) to open or close it. */
+    private FrameworkElement CategoryHeader(string name, List<string> parts, bool isOpen)
+    {
+        var texts = Ui.Stack(Ui.Text(name, 17.5, bold: true));
+        if (parts.Count > 1 || parts[0] != name) texts.Children.Add(Ui.Text(string.Join(" · ", parts), 13, C.Sub));
+        var chevron = Icons.Get("expand", 22, C.Sub);
+        chevron.RenderTransformOrigin = new Point(0.5, 0.5);
+        if (isOpen) chevron.RenderTransform = new RotateTransform(180); // points up while open
+        var inner = new Border { CornerRadius = new CornerRadius(20), Padding = new Thickness(20, 15, 16, 15), Background = Brushes.Transparent, Child = Spread(texts, chevron) };
+        var header = new Border { CornerRadius = new CornerRadius(20), Background = C.Card, Cursor = Cursors.Hand, Child = inner };
+        header.MouseEnter += (_, _) => inner.Background = C.Hover;
+        header.MouseLeave += (_, _) => inner.Background = Brushes.Transparent;
+        void Toggle()
+        {
+            var keyboard = header.IsKeyboardFocused;
+            if (isOpen) S.OpenSettings.Remove(name);
+            else if (!S.OpenSettings.Contains(name)) S.OpenSettings.Add(name);
+            if (name == SetupCategory) { setupFolded = isOpen; setupHeld = false; }
+            S.Save();
+            Render();
+            // The page was rebuilt: put the keyboard back on the same header.
+            if (keyboard && categoryViews.TryGetValue(name, out var panel)) panel.Children[0].Focus();
+        }
+        header.MouseLeftButtonUp += (_, _) => Toggle();
+        return Ui.Keys(header, Toggle, $"{name}, {(isOpen ? "open" : "closed")}");
+    }
+
+    private void BuildSettings(StackPanel col)
+    {
+        col.Children.Add(Spaced(Ui.Heading("Settings"), 0, 0, 0, 8));
+        col.Children.Add(new HeaderEnd());
+
+        // --- Setup
+        Section(col, "Setup");
+        UIElement Status(string title, bool done, string doneText, string notDone, UIElement? action = null)
+        {
+            var st = Ui.Text(done ? doneText : notDone, 13.5, done ? C.Good : C.Warn);
+            if (title.StartsWith("Offline")) modelStatus = st;
+            return Spaced(Spread(Ui.Stack(Ui.Text(title, 15.5), st), action ?? new Border()), 20, 13, 16, 13);
+        }
+        var hookOk = App.Current.Controller?.HotkeyWorks ?? true;
+        var active = ModelManager.Active;
+        var modelText = active != null ? active.Label + " downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Not downloaded";
+        col.Children.Add(Ui.List(
+            Status("Ctrl+Win shortcut", hookOk, "Working", "Not working. Restart Tokalot."),
+            Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key (free)",
+                S.CloudSttReady ? null : Ui.Button("Add key", () => OpenSettingsAt(SpeechCategory))),
+            Status("Offline backup model", active != null || downloadPct != null, modelText, modelText,
+                active != null || downloadPct != null ? null : Ui.Button("Download", () => StartDownload(ModelManager.Of(S.LocalModel)))),
+            Ui.SettingRow("Start with Windows", Updater.CanUpdate ? "Runs quietly in the tray so Ctrl+Win always works." : "Available in the installed version.",
+                Ui.Switch(S.LaunchAtStartup, v => { S.LaunchAtStartup = v; S.Save(); if (Updater.CanUpdate) Startup.Apply(v); }))));
+        col.Children.Add(Spaced(Ui.Text("Windows asks before any app can use the microphone. If dictation hears nothing, check Settings › Privacy & security › Microphone and allow desktop apps.", 13, C.Sub), 4, 8, 0, 0));
+
+        // --- Appearance
+        Section(col, "Appearance");
+        col.Children.Add(Ui.List(new[] { ("system", "Match Windows"), ("light", "Light"), ("dark", "Dark") }
+            .Select(t => (UIElement)Ui.Choice(t.Item2, "", S.Theme == t.Item1, () =>
+            {
+                if (S.Theme == t.Item1) return;
+                S.Theme = t.Item1; S.Save();
+                App.Current.ApplyTheme();
+            })).ToArray()));
+        col.Children.Add(Spaced(Ui.Text("Accent color (voice bars, disc and edge tab)", 14, C.Sub), 4, 16, 0, 8));
+        var swatches = new WrapPanel { Margin = new Thickness(4, 0, 0, 0) };
+        foreach (var (name, argb) in Catalog.Accents)
+        {
+            var on = S.Accent == argb;
+            var dot = new Border
+            {
+                Width = 32, Height = 32, CornerRadius = new CornerRadius(16), Background = C.Argb(argb), Margin = new Thickness(0, 0, 10, 0),
+                BorderBrush = on ? C.Text : C.Pill, BorderThickness = new Thickness(on ? 3 : 1), Cursor = Cursors.Hand, ToolTip = name,
+            };
+            dot.MouseLeftButtonUp += (_, _) => { S.Accent = argb; S.Save(); Render(); };
+            swatches.Children.Add(Ui.Keys(dot, () => { S.Accent = argb; S.Save(); Render(); }, name + " accent"));
+        }
+        col.Children.Add(swatches);
+
+        // --- Recording indicator
+        Section(col, "Recording indicator");
+        col.Children.Add(Ui.List(IndicatorView.Styles.Select(id => (UIElement)IndicatorRow(id)).ToArray()));
+        var dockRow = Ui.Row(Ui.Text("Edge", 14, C.Sub));
+        ((FrameworkElement)dockRow.Children[0]).Margin = new Thickness(4, 0, 12, 0);
+        foreach (var (id, label) in new[] { ("bottom", "Bottom"), ("left", "Left"), ("right", "Right") })
+        {
+            var b = Ui.Button(label, () =>
+            {
+                S.IndicatorDock = id;
+                S.IndicatorAlong = 0.5;
+                S.Save();
+                App.Current.Controller?.RefreshIndicator();
+                Render();
+            }, filled: S.IndicatorDock == id);
+            b.Margin = new Thickness(0, 0, 8, 0);
+            dockRow.Children.Add(b);
+        }
+        if (S.IndicatorStyle != "ripple")
+            dockRow.Children.Add(Ui.Button("Reset to default", () =>
+            {
+                S.IndicatorStyle = "ripple"; S.IndicatorDock = "bottom"; S.IndicatorAlong = 0.5; S.Save();
+                App.Current.Controller?.RefreshIndicator();
+                Render();
+            }));
+        col.Children.Add(Spaced(dockRow, 0, 12, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Or drag the indicator itself to the bottom, left or right edge of your screen. On the sides it turns to face the screen.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Show when idle", "A slim bar stays on the edge between dictations. Click it to dictate, drag it to move it. Hidden while an app is full screen.",
+            Ui.Switch(S.ShowIdleIndicator, v => { S.ShowIdleIndicator = v; S.Save(); App.Current.Controller?.RefreshIndicator(); }))), 0, 12, 0, 0));
+
+        // --- Recording
+        Section(col, "Recording");
+        col.Children.Add(Ui.List(
+            Spaced(Ui.Stack(Ui.Text("How to dictate", 15.5),
+                Ui.Text("Hold Ctrl+Win while you talk and let go to paste. Or tap Ctrl+Win once for hands-free, then tap again to finish. Esc cancels.", 13.5, C.Sub)), 20, 13, 18, 13),
+            Ui.SettingRow("Auto-stop after 30 s of silence", "Hands-free mode only. Long pauses to think are fine.",
+                Ui.Switch(S.AutoStop, v => { S.AutoStop = v; S.Save(); })),
+            Ui.SettingRow("Transcribe while I talk", "In a long dictation, what you've said so far is sent to the speech service each time you pause, so the wait at the end stays short. Nothing appears until you finish. Needs a cloud speech service and AI cleanup.",
+                Ui.Switch(S.LiveStt, v => { S.LiveStt = v; S.Save(); })),
+            Ui.SettingRow("Hands-free reminder", "A short note above the indicator when hands-free starts. Its X turns this off.",
+                Ui.Switch(!S.HideHandsFreeHint, v => { S.HideHandsFreeHint = !v; S.Save(); })),
+            Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
+                Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); Render(); })),
+            Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
+                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); })),
+            Ui.SettingRow("Voice notes (beta)", "A Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. Each dictation is saved as its own note and copied to the clipboard, and recordings you add are transcribed into notes you can summarize. Note text goes in sync when it's set up.",
+                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); }))));
+        if (S.Sounds)
+        {
+            col.Children.Add(Spaced(Ui.Text("Sound style (click one to hear it)", 14, C.Sub), 4, 16, 0, 8));
+            col.Children.Add(Ui.List(Tones.Sets.Select(t => (UIElement)Ui.Choice(t.Label, t.Note, Tones.Valid(S.SoundSet) == t.Id, () =>
+            {
+                Sounds.Play(Sounds.Kind.Start, t.Id);
+                if (S.SoundSet == t.Id) return;
+                S.SoundSet = t.Id; S.Save(); Render();
+            })).ToArray()));
+        }
+
+        // --- Speed
+        Section(col, "Speed");
+        var speedRows = new List<UIElement>
+        {
+            Ui.SettingRow("Quick mode (beta)", "Skips the AI cleanup when a short dictation (20 words or fewer) has nothing for it to fix: no ums, corrections, repeats or spoken punctuation. " +
+                "The text is tidied on this computer instead, which is instant. Email, snippets, the very casual style and your own instructions always go through the AI.",
+                Ui.Switch(S.QuickSkip, v => { S.QuickSkip = v; S.Save(); })),
+        };
+        var timings = Dictation.Recent;
+        speedRows.Add(Spaced(Ui.Stack(
+            Ui.Text("Last dictations", 15.5),
+            Ui.Text(timings.Length == 0 ? "Nothing yet since Tokalot started. Dictate something, then reopen Settings." : string.Join("\n", timings.Take(8)), 13, C.Sub)), 20, 13, 18, 13));
+        col.Children.Add(Ui.List(speedRows.ToArray()));
+        if (timings.Length > 0)
+            col.Children.Add(Spaced(Ui.Button("Copy timings", () => { try { Clipboard.SetText(string.Join("\r\n", timings)); Toast("Copied"); } catch { } }), 0, 10, 0, 0));
+
+        // --- Speech to text
+        Section(col, "Speech to text");
+        col.Children.Add(Ui.List(Catalog.Stt.Select(o =>
+        {
+            var needsKey = o.Service != null && S.Key(o.Service).Length == 0;
+            return (UIElement)Ui.Choice(o.Label, o.Note + (needsKey ? " Needs a key." : ""), S.Stt == o.Id, () => { S.Stt = o.Id; S.Save(); Render(); });
+        }).ToArray()));
+        if (S.Stt != "LOCAL") col.Children.Add(ModelField(S.SttModel(S.SttOption), v => { S.SttModels[S.Stt] = v.Trim(); SaveSoon(); }));
+
+        // --- Offline model
+        Section(col, "Offline model");
+        col.Children.Add(Ui.List(ModelManager.All.Select(m =>
+        {
+            var state = modelDownloading == m ? "Downloading…"
+                : ModelManager.IsDownloaded(m) ? "Downloaded"
+                : modelDownloading == null && downloadError != null && S.LocalModel == m.Id ? "Download failed: " + downloadError
+                : "Click to download";
+            return (UIElement)Ui.Choice(m.Label, m.Note + "\n" + state, S.LocalModel == m.Id, () =>
+            {
+                S.LocalModel = m.Id; S.Save();
+                if (!ModelManager.IsDownloaded(m)) StartDownload(m); else Render();
+            });
+        }).ToArray()));
+        modelProgress = Ui.Text(modelDownloading != null ? $"Downloading {modelDownloading.Label}: {downloadPct ?? 0}%" : "", 13, C.Sub);
+        if (modelDownloading != null) col.Children.Add(Spaced(modelProgress, 4, 8, 0, 0));
+        var others = ModelManager.All.Where(m => m.Id != S.LocalModel && m != modelDownloading && ModelManager.IsDownloaded(m)).ToArray();
+        if (others.Length > 0)
+            col.Children.Add(Spaced(Ui.Button($"Remove the others ({others.Sum(m => m.Size) / 1_000_000} MB)", () =>
+            {
+                foreach (var m in others) ModelManager.Delete(m);
+                Render();
+            }), 0, 10, 0, 0));
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Prefer offline in weak signal",
+            "Skips the cloud when there's no connection, or the speech service was slow to answer while you talked, and gives the cloud only a few seconds before switching to the offline model. Needs an offline model.",
+            Ui.Switch(S.WeakSignal, v => { S.WeakSignal = v; S.Save(); }))), 0, 12, 0, 0));
+
+        // --- Cleanup
+        Section(col, "AI cleanup");
+        col.Children.Add(Ui.List(Catalog.Cleanup.Select(o =>
+        {
+            var needsKey = o.Service != null && S.Key(o.Service).Length == 0;
+            return (UIElement)Ui.Choice(o.Label, o.Note + (needsKey ? " Needs a key." : ""), S.Cleanup == o.Id, () => { S.Cleanup = o.Id; S.Save(); Render(); });
+        }).ToArray()));
+        if (S.Cleanup != "OFF")
+        {
+            col.Children.Add(ModelField(S.CleanupModel(S.CleanupOption), v => { S.CleanupModels[S.Cleanup] = v.Trim(); SaveSoon(); }));
+            var result = Ui.Text("", 14.5, C.Sub);
+            col.Children.Add(Spaced(Ui.Button("Test cleanup", () => TestCleanup(result)), 0, 12, 0, 0));
+            col.Children.Add(Spaced(result, 0, 8, 0, 0));
+        }
+        col.Children.Add(Spaced(Ui.Text("If your chosen provider fails or hits a limit, Tokalot tries another provider you have a key for, then falls back to offline.", 13, C.Sub), 4, 8, 0, 0));
+
+        // --- Keys
+        Section(col, "API keys");
+        var keys = new StackPanel();
+        foreach (var (id, name, page) in Catalog.Services)
+        {
+            var (box, input) = Ui.Secret(S.Key(id), "Paste key");
+            input.PasswordChanged += (_, _) => { S.SetKey(id, input.Password); SaveSoon(); };
+            var pageLink = Link("Get one at " + page, () => Open("https://" + page));
+            pageLink.FontSize = 13;
+            keys.Children.Add(Spaced(Ui.Text(name, 15.5, bold: true), 0, keys.Children.Count == 0 ? 0 : 16, 0, 0));
+            keys.Children.Add(pageLink);
+            keys.Children.Add(Spaced(box, 0, 6, 0, 0));
+        }
+        col.Children.Add(Ui.Card(keys, 20));
+        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync (in Your data) and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
+
+        // --- Recordings
+        Section(col, "Recordings");
+        col.Children.Add(Ui.List(new[] { (0, "Don't save audio"), (7, "Keep 7 days"), (30, "Keep 30 days"), (int.MaxValue, "Keep forever") }
+            .Select(t => (UIElement)Ui.Choice(t.Item2, "", S.AudioKeepDays == t.Item1, () =>
+            {
+                if (t.Item1 < S.AudioKeepDays && AudioStore.TotalBytes() > 0 && !Ui.Dialog(this,
+                        t.Item1 == 0 ? "Delete all saved recordings now? Transcripts stay."
+                            : $"Delete recordings older than {t.Item1} days now? Transcripts stay.", "Delete")) return;
+                S.AudioKeepDays = t.Item1; S.Save();
+                Task.Run(() => AudioStore.Prune(t.Item1)).ContinueWith(_ => Dispatcher.BeginInvoke(Render));
+                Render();
+            })).ToArray()));
+        var mb = AudioStore.TotalBytes() / 1_048_576.0;
+        col.Children.Add(Spaced(Spread(Ui.Text($"Using {mb:0.0} MB", 14, C.Sub), Ui.Button("Delete all", () =>
+        {
+            if (!Ui.Dialog(this, "Delete all saved recordings? Transcripts stay.", "Delete")) return;
+            Player.Stop(false);
+            AudioStore.Prune(0);
+            Render();
+        })), 4, 10, 0, 0));
+
+        // --- Sync (optional)
+        Section(col, "Sync");
+        BuildSync(col);
+
+        // --- AI assistants (optional)
+        Section(col, "AI assistants");
+        var mcpInfo = Ui.Button("", () => Ui.Dialog(this, NotesMcp.Help, "Got it", cancel: null, title: "Connect an AI assistant"), icon: "info");
+        mcpInfo.Margin = new Thickness(0, 0, 8, 0);
+        mcpInfo.ToolTip = "How to connect an AI assistant";
+        System.Windows.Automation.AutomationProperties.SetName(mcpInfo, "How to connect an AI assistant");
+        col.Children.Add(Ui.List(
+            Ui.SettingRow("Let AI assistants read my notes", "Off by default. Claude Desktop, Claude Code and other MCP apps on this PC can search and read your voice notes. Read-only.",
+                Ui.Row(mcpInfo, Ui.Switch(S.NotesMcp, v => { S.NotesMcp = v; S.Save(); Render(); })))));
+        if (S.NotesMcp)
+            col.Children.Add(Spaced(Ui.Row(Ui.Button("Copy setup", () => { _ = TextInjector.Copy(NotesMcp.Config(NotesMcp.Exe)); Toast("Copied"); }, icon: "copy")), 0, 12, 0, 0));
+
+        // --- Backup
+        Section(col, "Backup");
+        bool withAudio = false, withKeys = false;
+        col.Children.Add(Ui.List(
+            Ui.SettingRow("Include recordings", "Makes the file much bigger.", Ui.Switch(false, v => withAudio = v)),
+            Ui.SettingRow("Include API keys", "Only if you'll keep the file somewhere private. Anyone with the file could use your keys.", Ui.Switch(false, v => withKeys = v))));
+        var backupRow = Ui.Row(Ui.Button("Back up…", () => DoBackup(withAudio, withKeys), filled: true), Ui.Button("Restore…", DoRestore));
+        ((FrameworkElement)backupRow.Children[0]).Margin = new Thickness(0, 0, 10, 0);
+        col.Children.Add(Spaced(backupRow, 0, 12, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Saves one .zip file wherever you choose: Documents, OneDrive, a USB stick, etc.", 13, C.Sub), 4, 8, 0, 0));
+
+        // --- Usage
+        Section(col, "Usage");
+        var months = Usage.Recent();
+        if (months.Count == 0) months.Add((DateTime.Now.ToString("MMMM yyyy", CultureInfo.InvariantCulture), Usage.This()));
+        col.Children.Add(Ui.List(months.Select(mo =>
+        {
+            var (label, m) = mo;
+            var box = new StackPanel { Margin = new Thickness(20, 15, 20, 15) };
+            box.Children.Add(Spread(Ui.Text(label, 15.5, bold: true), Ui.Text(Ui.Money(m.Total), 15.5, bold: true)));
+            box.Children.Add(Ui.Text($"{m.Dictations} dictations · {m.Words} words · {m.Local} offline", 13.5, C.Sub));
+            foreach (var o in Catalog.Stt)
+            {
+                var s = m.SttSeconds.GetValueOrDefault(o.Id);
+                if (s > 0) box.Children.Add(Ui.Text($"{o.Label}: {s / 60:0.0} min billed · {Ui.Money(m.SttCost(o.Id))}", 13.5, C.Sub));
+            }
+            foreach (var o in Catalog.Cleanup)
+            {
+                long i = m.TokensIn.GetValueOrDefault(o.Id), x = m.TokensOut.GetValueOrDefault(o.Id);
+                if (i + x > 0) box.Children.Add(Ui.Text($"{o.Label}: {Ui.Compact(i)} in / {Ui.Compact(x)} out tokens · {Ui.Money(m.LlmCost(o.Id))}", 13.5, C.Sub));
+            }
+            return (UIElement)box;
+        }).ToArray()));
+        col.Children.Add(Spaced(Ui.Text("Estimated at each provider's paid list price. Free-tier usage actually costs $0. Check your provider's dashboard for real billing.", 13, C.Sub), 4, 8, 0, 0));
+
+        // Words on every device that shares the sync file, from each device's own entry in it.
+        if (Sync.AllDevices() is { } all)
+        {
+            var box = new StackPanel { Margin = new Thickness(20, 15, 20, 15) };
+            box.Children.Add(Spread(Ui.Text("All your devices", 15.5, bold: true), Ui.Text($"{Ui.Compact(all.Total)} words", 15.5, bold: true)));
+            box.Children.Add(Ui.Text($"{Ui.Compact(all.Month)} words this month", 13.5, C.Sub));
+            foreach (var d in all.Each)
+                box.Children.Add(Ui.Text($"{(d.Name.Length > 0 ? d.Name : "Unnamed device")}: {Ui.Compact(d.Words)} words · {d.Dictations} dictations", 13.5, C.Sub));
+            col.Children.Add(Spaced(Ui.List((UIElement)box), 0, 12, 0, 0));
+            col.Children.Add(Spaced(Ui.Text("Each device adds its own counts to the sync file when it syncs.", 13, C.Sub), 4, 8, 0, 0));
+        }
+
+        // --- About
+        Section(col, "About");
+        var about = new StackPanel();
+        about.Children.Add(Ui.Text("Tokalot for Windows " + Updater.CurrentVersion + (RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? " (ARM64)" : ""), 16, bold: true));
+        about.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this PC. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The Ctrl+Win listener only watches for that shortcut; it never records your typing.", 14, C.Sub), 0, 4, 0, 0));
+        about.Children.Add(Spaced(Link("Source code: github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)), 0, 8, 0, 0));
+        // A new version can be installed from here too, not only from the banner on Home.
+        var app = App.Current;
+        var downloading = app.UpdateProgress != null;
+        var status = Ui.Text(app.UpdateVersion == null ? "" : downloading
+            ? $"Downloading Tokalot {app.UpdateVersion}… {app.UpdateProgress}%"
+            : $"Version {app.UpdateVersion} is available.", 14, C.Sub);
+        settingsUpdateText = status;
+        var check = Ui.Button("Check for updates", async () =>
+        {
+            if (!Updater.CanUpdate) { status.Text = "Updates work in the installed version (TokalotSetup.exe)."; return; }
+            status.Text = "Checking…";
+            var v = await App.Current.CheckForUpdates();
+            if (v != null) Render(); // brings up the Update button
+            else status.Text = Updater.LastCheckFailed ? "Couldn't check for updates. Check your connection and try again." : "You're up to date.";
+        });
+        about.Children.Add(Spaced(app.UpdateVersion != null && !downloading
+            ? Ui.Row(Ui.Button("Update", () => _ = app.InstallUpdate(), filled: true), Spaced(check, 8, 0, 0, 0))
+            : (FrameworkElement)check, 0, 12, 0, 0));
+        about.Children.Add(Spaced(status, 0, 6, 0, 0));
+        var licenses = new TextBox
+        {
+            Text = Licenses.Text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, FontSize = 12.5, Foreground = C.Sub,
+            Background = C.Field, BorderThickness = new Thickness(0), Padding = new Thickness(12), MaxHeight = 320,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0),
+        };
+        about.Children.Add(Spaced(Link("Open-source licenses", () =>
+            licenses.Visibility = licenses.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible), 0, 12, 0, 0));
+        about.Children.Add(licenses);
+        about.Children.Add(Spaced(Link("Quit Tokalot", () => App.Current.Quit()), 0, 12, 0, 0));
+        col.Children.Add(Ui.Card(about, 20));
+
+        Fold(col);
+    }
+
+    /** One choosable indicator style with a live preview on a little dark "screen". */
+    private UIElement IndicatorRow(string id)
+    {
+        var (name, desc) = IndicatorView.Info(id);
+        var selected = S.IndicatorStyle == id;
+        var start = DateTime.UtcNow;
+        var view = new IndicatorView
+        {
+            Look = id, Dock = "bottom", Scale = 0.85, CurrentMode = IndicatorView.Mode.Listening, PauseWhenInactive = true,
+            VerticalAlignment = VerticalAlignment.Bottom, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 8),
+            Level = () =>
+            {
+                // A made-up voice so the preview moves like real speech.
+                double t = (DateTime.UtcNow - start).TotalSeconds + id.Length;
+                double syl = Math.Max(0, Math.Sin(t * Math.PI * 2 * 2.4));
+                double talking = Math.Sin(t * Math.PI * 2 * 0.21 + 0.6) > -0.35 ? 1 : 0.06;
+                double v = (0.3 + 0.7 * syl * syl) * talking * (0.8 + 0.2 * Math.Sin(t * 7.3));
+                return (float)(v * v / 8);
+            },
+        };
+        var screen = new Grid { Width = 150, Height = 66, ClipToBounds = true };
+        screen.Children.Add(new Border { Background = C.Hex("#1F2023"), CornerRadius = new CornerRadius(10) });
+        screen.Children.Add(new Border { Background = C.Hex("#141416"), Height = 8, VerticalAlignment = VerticalAlignment.Bottom, CornerRadius = new CornerRadius(0, 0, 10, 10) });
+        screen.Children.Add(view);
+
+        var dot = new Border
+        {
+            Width = 20, Height = 20, CornerRadius = new CornerRadius(10), VerticalAlignment = VerticalAlignment.Center,
+            Background = selected ? C.Text : C.Card, BorderBrush = C.Pill, BorderThickness = new Thickness(selected ? 0 : 2), Margin = new Thickness(0, 0, 16, 0),
+        };
+        var title = Ui.Row(Ui.Text(name, 15.5, bold: selected));
+        if (id == "ripple")
+        {
+            var badge = new Border { Background = C.Field, CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 1, 8, 2), Margin = new Thickness(10, 0, 0, 0), Child = Ui.Text("Default", 11.5, C.Sub) };
+            title.Children.Add(badge);
+        }
+        var texts = Ui.Stack(title, Ui.Text(desc, 13, C.Sub));
+        texts.VerticalAlignment = VerticalAlignment.Center;
+        texts.Margin = new Thickness(18, 0, 0, 0);
+
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.Children.Add(dot);
+        Grid.SetColumn(screen, 1); g.Children.Add(screen);
+        Grid.SetColumn(texts, 2); g.Children.Add(texts);
+        var row = new Border { Padding = new Thickness(20, 12, 20, 12), Child = g, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        row.MouseEnter += (_, _) => row.Background = C.Hover;
+        row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
+        void Pick()
+        {
+            S.IndicatorStyle = id;
+            S.Save();
+            App.Current.Controller?.RefreshIndicator();
+            Render();
+        }
+        row.MouseLeftButtonUp += (_, _) => Pick();
+        return Ui.Keys(row, Pick, name);
+    }
+
+    private static UIElement ModelField(string value, Action<string> save)
+    {
+        var (box, input) = Ui.Field(value, "Model");
+        input.TextChanged += (_, _) => save(input.Text); // empty = the provider's default model
+        return Spaced(Ui.Stack(Spaced(Ui.Text("Model name (change only if the provider renames it)", 13, C.Sub), 4, 10, 0, 4), box), 0, 0, 0, 0);
+    }
+
+    private async void TestCleanup(TextBlock result)
+    {
+        const string sample = "um so i was thinking uh we could meet on tuesday no wait wednesday at the the office around 3 and bring three things one the contract two the laptop three the charger";
+        result.Text = "Testing…";
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            var r = await Task.Run(() => Cleanup.Run(S, S.CleanupOption, sample, false, Catalog.CategoryById("OTHER"), null));
+            result.Text = $"“{r.Text}”\n{sw.ElapsedMilliseconds} ms";
+        }
+        catch (Exception e)
+        {
+            result.Text = "Failed: " + e.Message;
+        }
+    }
+
+    private void StartDownload(LocalModel m)
+    {
+        if (modelDownloading != null) { Toast($"Wait for the {modelDownloading.Label} download to finish"); Render(); return; }
+        modelDownloading = m;
+        downloadPct = 0;
+        downloadError = null;
+        Render();
+        var progress = new Progress<int>(p =>
+        {
+            downloadPct = p;
+            if (modelStatus != null) modelStatus.Text = $"Downloading {p}%";
+            if (modelProgress != null) modelProgress.Text = $"Downloading {m.Label}: {p}%";
+        });
+        Task.Run(() => ModelManager.Download(m, progress)).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        {
+            modelDownloading = null;
+            downloadPct = null;
+            downloadError = t.Result;
+            Render();
+        }));
+    }
+
+    internal void ShowToast(string msg) => Toast(msg);
+
+    private const string SyncInfo =
+        "Tokalot keeps your dictionary, snippets, styles, instructions, voice notes, word stats and settings in one small file. Put that file in a folder you already sync, " +
+        "such as OneDrive, Google Drive, Dropbox or Syncthing, and point each of your devices at it. Each device reads the file and adds its own changes.\n\n" +
+        "It's private. There is no Tokalot account and no Tokalot server. The file only goes where your own sync service takes it. " +
+        "Recordings are never put in it, and your dictation history only if you turn on Include dictation history (the newest 1,000 dictations, as text). " +
+        "A few settings stay on each device because they depend on it: the on-device model, how long recordings are kept, where the indicator sits " +
+        "and starting with the computer.\n\n" +
+        "API keys are left out unless you turn on Include API keys. The file isn't encrypted, so only do that if the folder is private to you. " +
+        "You can stop syncing at any time; your settings stay on this device.";
+
+    /** Optional: share dictionary, snippets, styles, instructions and voice notes between devices through one file in a synced folder. */
+    private void BuildSync(StackPanel col)
+    {
+        var info = Ui.Button("", () => Ui.Dialog(this, SyncInfo, "Got it", cancel: null, title: "How sync works"), icon: "info");
+        info.ToolTip = "How sync works";
+        System.Windows.Automation.AutomationProperties.SetName(info, "How sync works");
+
+        async void Use(string path)
+        {
+            S.SyncFile = path;
+            S.Save();
+            await Sync.Run();
+            Render();
+        }
+
+        if (S.SyncFile.Length == 0)
+        {
+            var create = Ui.Button("Create a sync file", () =>
+            {
+                var dlg = new Microsoft.Win32.SaveFileDialog { FileName = Sync.FileName, Filter = "Tokalot sync file|*.json", DefaultExt = ".json", OverwritePrompt = false };
+                if (dlg.ShowDialog(this) == true) Use(dlg.FileName);
+            }, filled: true);
+            var existing = Ui.Button("Use an existing sync file", () =>
+            {
+                var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Tokalot sync file|*.json" };
+                if (dlg.ShowDialog(this) == true) Use(dlg.FileName);
+            });
+            create.Margin = new Thickness(0, 0, 8, 0);
+            var buttons = Ui.Row(create, existing);
+            buttons.Margin = new Thickness(20, 0, 20, 16);
+            col.Children.Add(Ui.Card(Ui.Stack(
+                Ui.SettingRow("Sync settings between your devices", "Optional. Off.", info), buttons)));
+            return;
+        }
+
+        var status = Ui.Text(Sync.Status(), 13.5, Sync.LastError != null ? C.Warn : C.Good);
+        var where = Ui.Text(S.SyncFile, 13, C.Sub);
+        where.TextTrimming = TextTrimming.CharacterEllipsis;
+        where.TextWrapping = TextWrapping.NoWrap;
+        var head = Spaced(Spread(Ui.Stack(Ui.Text("Sync settings between your devices", 15), status, where), info), 20, 14, 18, 14);
+        col.Children.Add(Ui.List(
+            head,
+            Ui.SettingRow("Include API keys", "Off by default. The sync file isn't encrypted, so only turn this on if the folder is private to you.",
+                Ui.Switch(S.SyncKeys, v => { S.SyncKeys = v; S.Save(); })),
+            Ui.SettingRow("Include dictation history", "Off by default. Shares the text of your newest 1,000 dictations, so every device has the same history and stats. Recordings stay on each device.",
+                Ui.Switch(S.SyncHistory, v => { S.SyncHistory = v; Sync.ForgetHistoryBasis(); S.Save(); }))));
+        var now = Ui.Button("Sync now", async () => { await Sync.Run(); Render(); }, filled: true);
+        var stop = Ui.Button("Stop syncing", () =>
+        {
+            if (!Ui.Dialog(this, "Stop syncing on this PC? The sync file and your settings here stay as they are.", "Stop syncing")) return;
+            S.SyncFile = "";
+            S.SyncKeys = false;
+            S.SyncHistory = false;
+            Sync.Forget();
+            S.Save();
+            Render();
+        });
+        now.Margin = new Thickness(0, 0, 8, 0);
+        col.Children.Add(Spaced(Ui.Row(now, stop), 0, 12, 0, 0));
+    }
+
+    private bool busy; // a backup or restore is running
+
+    private async void DoBackup(bool withAudio, bool withKeys)
+    {
+        if (busy) return;
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            FileName = $"tokalot-desktop-backup-{DateTime.Now:yyyy-MM-dd}.zip", Filter = "Zip file|*.zip", DefaultExt = ".zip",
+        };
+        if (dlg.ShowDialog(this) != true) return;
+        busy = true;
+        Toast("Backing up…");
+        try
+        {
+            // Zipping recordings can take a while; keep the window (and Ctrl+Win) responsive.
+            var s = await Task.Run(() => Backup.Write(dlg.FileName, withAudio, withKeys));
+            Toast($"Backed up {s.Entries} dictations" + (s.Recordings > 0 ? $" and {s.Recordings} recordings" : ""));
+        }
+        catch (Exception e)
+        {
+            Ui.Dialog(this, "Backup failed: " + e.Message, cancel: null);
+        }
+        finally { busy = false; }
+    }
+
+    private async void DoRestore()
+    {
+        if (busy) return;
+        if (!Ui.Dialog(this,
+                "This replaces your current settings, dictionary, snippets and history with the backup's. API keys on this PC are kept unless the backup includes keys.",
+                "Restore", title: "Restore from backup?")) return;
+        var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Tokalot backup|*.zip" };
+        if (dlg.ShowDialog(this) != true) return;
+        busy = true;
+        Toast("Restoring…");
+        try
+        {
+            Player.Stop(false);
+            var s = await Task.Run(() => Backup.Restore(dlg.FileName));
+            // The theme may have changed, which rebuilds the window: finish up on the app, not on this (old) window.
+            App.Current.AfterRestore($"Restored {s.Entries} dictations");
+        }
+        catch (Exception e)
+        {
+            Ui.Dialog(this, "Restore failed: " + e.Message, cancel: null);
+        }
+        finally { busy = false; }
+    }
+
+    // ---------- dark title bar ----------
+
+    [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+    private void DarkTitleBar()
+    {
+        try
+        {
+            var hwnd = new WindowInteropHelper(this).Handle;
+            int on = C.Dark ? 1 : 0;
+            DwmSetWindowAttribute(hwnd, 20, ref on, sizeof(int));
+            // Windows 11: rounded corners, and a window border that matches the app instead of the system accent.
+            int round = 2;
+            DwmSetWindowAttribute(hwnd, 33, ref round, sizeof(int));
+            var c = ((SolidColorBrush)C.Line).Color;
+            int border = c.R | c.G << 8 | c.B << 16;
+            DwmSetWindowAttribute(hwnd, 34, ref border, sizeof(int));
+        }
+        catch { }
+    }
+}

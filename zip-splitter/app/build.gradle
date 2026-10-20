@@ -1,7 +1,0 @@
-plugins { id 'com.android.application' }
-android {
- namespace 'com.shelby.zipsplitter'
- compileSdk 34
- defaultConfig { applicationId 'com.shelby.zipsplitter'; minSdk 26; targetSdk 34; versionCode 1; versionName '1.0' }
- compileOptions { sourceCompatibility JavaVersion.VERSION_1_8; targetCompatibility JavaVersion.VERSION_1_8 }
-}

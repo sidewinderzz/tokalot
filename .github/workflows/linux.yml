@@ -1,0 +1,100 @@
+name: Build Linux app
+
+on:
+  push:
+    branches: ['**']
+    # The Linux app compiles the Windows app's Core folder too, so changes there rebuild it.
+    paths: ['linux/**', 'windows/Tokalot.Desktop/Core/**', '.github/workflows/linux.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Built and tested on each kind of processor: Intel/AMD PCs, and ARM64 (Raspberry Pi 4/5, ARM laptops and servers).
+  build:
+    strategy:
+      matrix:
+        include:
+          - rid: linux-x64
+            runner: ubuntu-latest
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Read version
+        run: |
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' linux/Tokalot.Linux/Tokalot.Linux.csproj | tr -d '\r')
+          [ -n "$VERSION" ] || { echo "No <Version> in the csproj"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Building Tokalot for Linux $VERSION"
+
+      # Self-contained: the user doesn't need .NET installed.
+      - name: Publish
+        run: dotnet publish linux/Tokalot.Linux -c Release -r ${{ matrix.rid }} --self-contained -o publish/Tokalot
+
+      - name: Trim
+        run: |
+          # The speech engine ships its native library for every system; keep only this one.
+          find publish/Tokalot/runtimes -mindepth 1 -maxdepth 1 ! -name '${{ matrix.rid }}' -exec rm -rf {} +
+          rm -f publish/Tokalot/*.pdb
+          cp linux/README.md publish/Tokalot/README.md
+          chmod +x publish/Tokalot/Tokalot
+
+      # Starts the real binary twice with no display: once to print what it can do on this machine,
+      # once to draw every page to PNGs. Either failing fails the build.
+      - name: Smoke test
+        run: |
+          TOKALOT_DATA="$RUNNER_TEMP/tokalot-data" publish/Tokalot/Tokalot --diagnose
+          publish/Tokalot/Tokalot --screenshots "$RUNNER_TEMP/screenshots"
+          ls -l "$RUNNER_TEMP/screenshots"
+          [ "$(ls "$RUNNER_TEMP/screenshots"/*.png | wc -l)" -ge 20 ]
+
+      - name: Package
+        run: tar -czf "Tokalot-${{ matrix.rid }}-$VERSION.tar.gz" -C publish Tokalot
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tokalot-${{ matrix.rid }}
+          path: Tokalot-${{ matrix.rid }}-*.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tokalot-${{ matrix.rid }}-screenshots
+          path: ${{ runner.temp }}/screenshots
+          retention-days: 7
+
+  # Bump <Version> in the .csproj and push to main to release. Linux releases are tagged
+  # linux-v<version> and marked as pre-releases while the app is in beta, so they never become
+  # "latest" (which the Android app's updater and the README's APK link rely on).
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Tokalot-linux-*64
+          merge-multiple: true
+
+      - name: Publish beta release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' linux/Tokalot.Linux/Tokalot.Linux.csproj | tr -d '\r')
+          TAG="linux-v$VERSION"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "$TAG is already released; nothing to publish."
+            exit 0
+          fi
+          gh release create "$TAG" "Tokalot-linux-x64-$VERSION.tar.gz" "Tokalot-linux-arm64-$VERSION.tar.gz" --target "$GITHUB_SHA" --prerelease --latest=false             --title "Tokalot for Linux $VERSION (beta)" --notes-file linux/RELEASE_NOTES.md
