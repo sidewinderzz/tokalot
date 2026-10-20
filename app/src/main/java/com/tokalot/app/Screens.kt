@@ -78,7 +78,7 @@ private fun MainActivity.shortcutFloats(): Boolean = runCatching {
 }.getOrDefault(false)
 
 /** Android's page for Tokalot's accessibility shortcut where the phone has one (Android 12 and newer), else the accessibility list. */
-private fun MainActivity.openShortcutSettings() {
+internal fun MainActivity.openShortcutSettings() {
     val detail = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
         .putExtra(Intent.EXTRA_COMPONENT_NAME, android.content.ComponentName(this, OfflineFlowService::class.java).flattenToString())
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
