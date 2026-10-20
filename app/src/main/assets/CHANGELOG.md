@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.40 · 2026-10-20
+- If Tokalot's accessibility switch is on but Android hasn't started it (some phones, such as Samsung, can do this after an update), the floating mic button can't show. Home now says so, with a Fix it button that opens Tokalot's accessibility page so you can turn it off and on again.
+
 ## 1.39 · 2026-10-19
 - Tapping Update checks GitHub again first, so it always downloads the newest version, even if another one came out after the banner appeared.
 

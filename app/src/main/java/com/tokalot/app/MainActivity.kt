@@ -186,6 +186,8 @@ class MainActivity : Activity() {
         History.onChange = { if (!inSettings && tab == Tab.HOME) render() }
         Notes.onChange = { if (!inSettings && tab == Tab.NOTES && openNote == null) render() }
         render()
+        // Check again once Android has had time to start the service (see serviceStuck).
+        window.decorView.postDelayed({ if (!isDestroyed && serviceStuck() && !inSettings && tab == Tab.HOME) render() }, STUCK_GRACE_MS + 500)
         Sync.onDone = { changed -> if (!isDestroyed) syncFinished(changed) }
         Sync.request(this)
         // Quietly look for a newer release (at most every few hours).
@@ -721,8 +723,19 @@ class MainActivity : Activity() {
     fun serviceEnabled(): Boolean {
         val enabled = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
             ?: return false
-        return enabled.contains("$packageName/${OfflineFlowService::class.java.name}")
+        // Android usually stores the full class name, but "package/.Class" is valid too.
+        return enabled.split(':').any {
+            it == "$packageName/${OfflineFlowService::class.java.name}" || it == "$packageName/.OfflineFlowService"
+        }
     }
+
+    /**
+     * The accessibility switch is on but Android isn't running the service, so no button appears. Some phones
+     * (Samsung, after an app update or a "sleeping apps" clean-up) leave it like that until it's switched off and on.
+     * Only judged once the app has been up a few seconds, since Android starts the service a moment after the app.
+     */
+    fun serviceStuck() = serviceEnabled() && OfflineFlowService.instance == null &&
+        SystemClock.uptimeMillis() - android.os.Process.getStartUptimeMillis() > STUCK_GRACE_MS
 
     fun setupComplete() = micGranted() && serviceEnabled() &&
         (prefs.cloudSttReady || ModelManager.isReady(this))
@@ -803,6 +816,14 @@ class MainActivity : Activity() {
         }
 
         suggestionsCard()?.let { col.addView(it, lp().margins(this, b = 12)) }
+
+        if (setupComplete() && serviceStuck()) {
+            val c = card(20)
+            c.addView(text("The mic button isn't running", 17f))
+            c.addView(text("Tokalot's accessibility switch is on, but Android hasn't started it, so the floating button won't show. This can happen after an update. Turn Tokalot off and back on on the next screen.", 14f, C.SUB), lp().margins(this, t = 4))
+            c.addView(row(pill("Fix it", filled = true) { openShortcutSettings() }), lp().margins(this, t = 10))
+            col.addView(c, lp().margins(this, b = 12))
+        }
 
         if (!setupComplete()) {
             val c = card(20)
@@ -1002,6 +1023,7 @@ class MainActivity : Activity() {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
         /** Which page to open (a [Tab] name). */
         const val EXTRA_TAB = "com.tokalot.app.TAB"
+        private const val STUCK_GRACE_MS = 4000L // how long Android gets to start the accessibility service after the app
         private const val REQ_BACKUP = 41
         private const val REQ_RESTORE = 42
         private const val REQ_SYNC_CREATE = 43
