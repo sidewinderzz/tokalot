@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.10.1
+
+- On a note, the **Summary** and **Timeline** buttons are now at the top, above the text, and open right there.
+
 ## New in 0.10.0
 
 - Notes is a clean list now: click a note to open it. Each note opens on its own page with its text first, **Summary** and **Timeline** as small buttons under it that open right below it (a long text folds up while one is open), and the rest (summary length, skip silence, skip ums, copy, delete) in the **⋮** menu. Esc or **Notes** goes back to the list.

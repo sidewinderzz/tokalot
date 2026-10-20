@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.41 · 2026-10-20
+- On a note, the Summary and Timeline buttons are now at the top, above the text, and open right there. They're for when you want the gist instead of reading, so they come first.
+
 ## 1.40 · 2026-10-20
 - If Tokalot's accessibility switch is on but Android hasn't started it (some phones, such as Samsung, can do this after an update), the floating mic button can't show. Home now says so, with a Fix it button that opens Tokalot's accessibility page so you can turn it off and on again.
 

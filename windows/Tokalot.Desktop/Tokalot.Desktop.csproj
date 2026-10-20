@@ -16,7 +16,7 @@
     <Product>Tokalot</Product>
     <Company>sidewinderzz</Company>
     <!-- Bump this to release a new desktop version (CI publishes desktop-v<Version>). -->
-    <Version>1.15.1</Version>
+    <Version>1.15.2</Version>
     <!-- win-x64 unless another one is asked for (-r win-arm64 for Windows on ARM). -->
     <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == ''">win-x64</RuntimeIdentifier>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
