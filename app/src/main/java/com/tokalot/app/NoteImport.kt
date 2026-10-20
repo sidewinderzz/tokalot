@@ -15,7 +15,7 @@ import java.util.concurrent.Executors
 
 /**
  * Voice notes and text shared into Tokalot from another app (WhatsApp's share button, say), and what a note can
- * carry besides its text: the audio, the time of every word, its summaries and its index.
+ * carry besides its text: the audio, the time of every word, its title, summaries and index.
  *
  * Each such note has a folder, notes-media/<note id>/, holding info.json and, for a voice note, audio.<ext> as it
  * was shared. A voice note gets its folder first and becomes a note once it's transcribed, so one that fails stays
@@ -46,6 +46,10 @@ object NoteImport {
         val segments: List<NoteMedia.Segment> get() = o.optJSONArray("segments")?.let { a ->
             List(a.length()) { a.getJSONArray(it).let { s -> NoteMedia.Segment(s.getDouble(0), s.getDouble(1), s.getString(2)) } }
         } ?: emptyList()
+        /** The note's short title, made by the AI or typed in Rename. */
+        val title: String? get() = o.optString("title").trim().takeIf { it.isNotEmpty() }
+        /** Rename saved an empty title: this note is left without one and isn't titled again. */
+        val titleOff get() = o.optBoolean("titleOff", false)
         fun summary(level: Int): String? = o.optJSONObject("summaries")?.optString("$level")?.takeIf { it.isNotEmpty() }
         val index: List<NoteMedia.Point>? get() = o.optJSONArray("index")?.let { a ->
             List(a.length()) { a.getJSONArray(it).let { p -> NoteMedia.Point(p.getDouble(0), p.getString(1), p.getString(2)) } }
@@ -155,6 +159,7 @@ object NoteImport {
                     if (o.optDouble("duration", 0.0) <= 0 && words.isNotEmpty()) o.put("duration", words.last().end)
                 }
                 Notes.add(app, text, id)
+                makeTitle(app, id, text)
             } catch (e: Exception) {
                 update(app, id) { it.put("status", "failed").put("error", e.message ?: "Couldn't transcribe it") }
             } finally {
@@ -332,8 +337,32 @@ object NoteImport {
         return segments.filter { it.text.isNotBlank() } to words
     }
 
+    /** Notes being titled right now, so opening one while it's transcribed doesn't ask twice. */
+    private val titling = java.util.Collections.synchronizedSet(HashSet<Long>())
+
+    /** Whether [ask] has a provider to try. */
+    fun canAsk(prefs: Prefs) = CleanupChoice.values().any { it != CleanupChoice.OFF && prefs.key(it.service).isNotEmpty() }
+
     /**
-     * Asks the cleanup AI for a summary or index: the provider picked for cleanup first, then any other with a key.
+     * Gives a note without a title a short one from the AI and returns it (blocking). Skipped quietly, returning null,
+     * for a short note, one whose title was cleared in Rename, with no AI key, or when the AI fails.
+     */
+    fun makeTitle(ctx: Context, id: Long, text: String): String? {
+        val prefs = Prefs(ctx.applicationContext)
+        val inf = info(ctx, id)
+        if (inf?.title != null || inf?.titleOff == true || text.trim().length < 40 || !canAsk(prefs) || !titling.add(id)) return null
+        return try {
+            val title = NoteMedia.cleanTitle(ask(prefs, NoteMedia.titleSystem(), NoteMedia.titleUser(text), NoteMedia.TITLE_MAX_TOKENS)) ?: return null
+            if (Notes.all(ctx).none { it.id == id }) return null // deleted meanwhile
+            update(ctx, id) { it.put("title", title) }
+            title
+        } catch (e: Exception) {
+            null
+        } finally { titling.remove(id) }
+    }
+
+    /**
+     * Asks the cleanup AI for a summary, index or title: the provider picked for cleanup first, then any other with a key.
      * Blocking; throws when none has a key or all fail.
      */
     fun ask(prefs: Prefs, system: String, user: String, maxTokens: Int): String {

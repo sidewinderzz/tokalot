@@ -6,6 +6,15 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.42 · 2026-10-20
+- Notes get a short title, written by the AI when a note is made or first opened. It shows on the note and in the list. Rename it from the ⋮ menu.
+- While a recording plays, the page follows the word being said. Scroll yourself and it stops; Back to playing brings it back. The Timeline marks the point being played.
+- A one-time tip says you can tap any word to play from there.
+- The summary length is now a small label on the Summary card. Tap it to pick another length.
+- Quieter Summary and Timeline buttons, more room for the position bar (the time played and left now sit under it), and placeholder lines while a summary is being made.
+- Deleting a note no longer asks first: a bar shows Undo for a few seconds instead.
+- TalkBack reads a note's text as one block, with a Play from start action.
+
 ## 1.41 · 2026-10-20
 - On a note, the Summary and Timeline buttons are now at the top, above the text, and open right there. They're for when you want the gist instead of reading, so they come first.
 

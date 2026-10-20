@@ -35,6 +35,9 @@ public static class NoteImport
         public string Error => (string?)O["error"] ?? "";
         public string? Audio => (string?)O["audio"] is { Length: > 0 } a ? a : null;
         public string Name => (string?)O["name"] ?? "";
+        /** The note's short title, made by the AI or by Rename. titleOff: the user cleared it, so don't make another. */
+        public string? Title => (string?)O["title"] is { Length: > 0 } t ? t : null;
+        public bool TitleOff => (bool?)O["titleOff"] ?? false;
         public double Duration => (double?)O["duration"] ?? 0;
         public List<NoteMedia.Segment> Segments => (O["segments"] as JsonArray)?.Select(s =>
             new NoteMedia.Segment((double)s![0]!, (double)s[1]!, (string)s[2]!)).ToList() ?? new();
@@ -167,6 +170,7 @@ public static class NoteImport
                 o["duration"] = duration > 0 ? duration : words.Count > 0 ? words[^1].End : 0;
             });
             Notes.Add(text, id);
+            _ = MakeTitle(s, id, text).ContinueWith(t => { if (t.Result != null) Changed?.Invoke(); }, TaskScheduler.Default);
         }
         catch (Exception e)
         {
@@ -292,6 +296,30 @@ public static class NoteImport
             sums[level.ToString()] = summary;
         });
         return summary;
+    }
+
+    /** Makes and saves a title for a note that has none (and wasn't cleared by hand). Null if not made; never throws. */
+    public static async Task<string?> MakeTitle(Settings s, long id, string text)
+    {
+        try
+        {
+            if (Get(id) is { } i && (i.Title != null || i.TitleOff) || text.Trim().Length < 40) return null;
+            if (NoteMedia.CleanTitle(await Ask(s, NoteMedia.TitleSystem(), NoteMedia.TitleUser(text), 30)) is not { } title) return null;
+            Update(id, o => { if ((string?)o["title"] is not { Length: > 0 } && (bool?)o["titleOff"] != true) o["title"] = title; });
+            return Get(id)?.Title;
+        }
+        catch { return null; }
+    }
+
+    /** Rename: a new title, or none (empty), which also stops the AI making one for this note. */
+    public static void SetTitle(long id, string? title)
+    {
+        title = title?.Trim() ?? "";
+        Update(id, o =>
+        {
+            if (title.Length == 0) { o.Remove("title"); o["titleOff"] = true; }
+            else { o["title"] = title; o.Remove("titleOff"); }
+        });
     }
 
     /** Asks for and saves the index of a recording. */

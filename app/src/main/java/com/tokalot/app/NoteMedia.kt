@@ -253,6 +253,22 @@ object NoteMedia {
 
     fun summaryUser(text: String) = "Summarize this:\n\n<note>\n$text\n</note>"
 
+    // ---------- the title ----------
+
+    const val TITLE_MAX_TOKENS = 30
+
+    fun titleSystem() = "Write a short title, 3 to 7 words, for this note. Reply with the title only: no quotes, no trailing period."
+
+    fun titleUser(text: String) = "Title this:\n\n<note>\n${text.take(4000)}\n</note>"
+
+    /** The model's reply as a title: its first line, without quotes, a "Title:" label or a closing period, at most 80 characters. Null if nothing's left. */
+    fun cleanTitle(raw: String): String? {
+        var t = raw.lines().firstOrNull { it.isNotBlank() }?.trim() ?: return null
+        t = t.removePrefix("Title:").removePrefix("title:").trim().trim('"', '\'', '“', '”', '‘', '’', '*', '`').trim()
+        if (t.endsWith('.') && !t.endsWith("..")) t = t.dropLast(1).trimEnd()
+        return t.take(80).trim().takeIf { it.isNotEmpty() }
+    }
+
     // ---------- the index ----------
 
     const val MAX_POINTS = 40

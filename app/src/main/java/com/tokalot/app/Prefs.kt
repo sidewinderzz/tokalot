@@ -629,6 +629,11 @@ class Prefs(ctx: Context) {
         get() = (sp.safeInt("note_speed", 100) / 100f).takeIf { s -> NOTE_SPEEDS.any { Math.abs(it - s) < 0.001 } } ?: 1f
         set(v) = sp.edit().putInt("note_speed", Math.round(v * 100)).apply()
 
+    /** The "Tap any word to play from there" hint on a voice note was tapped through or closed. This phone only. */
+    var noteWordHintSeen: Boolean
+        get() = sp.safeBoolean("note_word_hint_seen", false)
+        set(v) = sp.edit().putBoolean("note_word_hint_seen", v).apply()
+
     var notesBeta: Boolean
         get() = sp.safeBoolean("notes_beta", false)
         set(v) = sp.edit().putBoolean("notes_beta", v).apply()

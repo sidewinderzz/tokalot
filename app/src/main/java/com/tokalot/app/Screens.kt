@@ -327,8 +327,9 @@ class NotesScreen(private val a: MainActivity) {
             }
             addView(row(pill("Useful", filled = true) { open("useful") }, spacer(wDp = 8), pill("Not for me") { open("not for me") }))
         }, lp().margins(this, b = 16))
-        val notes = Notes.all(this)
-        NoteImport.prune(this, notes.map { it.id }.toSet())
+        val all = Notes.all(this)
+        NoteImport.prune(this, all.map { it.id }.toSet())
+        val notes = all.filter { it.id != pendingDelete } // deleted a moment ago, while Undo shows
         // Shared voice notes still being transcribed, or that failed, come first.
         val waiting = NoteImport.waiting(this)
         if (waiting.isNotEmpty()) {
@@ -375,18 +376,24 @@ class NotesScreen(private val a: MainActivity) {
                 val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
                 val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}${media.source?.let { " · from $it" } ?: ""}" else time
                 val preview = n.text.trim().replace(Regex("\\s+"), " ")
+                // A titled note leads with its title, then its first line.
+                val title = media?.title
                 c.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(20), dp(14), dp(16), dp(14))
                     minimumHeight = dp(TOUCH_DP)
                     background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
                         android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
-                    addView(text(preview, 16f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+                    if (title != null) {
+                        addView(text(title, 16f, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+                        addView(text(n.text.trim().lineSequence().first().trim(), 15f, C.SUB).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
+                            lp().margins(this@with, t = 2))
+                    } else addView(text(preview, 16f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
                     addView(row(
                         if (voice) icon(R.drawable.ic_play, 14, C.SUB).apply { setPadding(0, 0, dp(4), 0) } else spacer(wDp = 0),
                         text(meta, 13f, C.SUB),
                     ).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this@with, t = 4))
-                    contentDescription = "$meta. $preview"
+                    contentDescription = "${title?.let { "$it. " } ?: ""}$meta. $preview"
                     setOnClickListener { openNote(n.id) }
                 })
             }
