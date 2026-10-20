@@ -843,10 +843,20 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val ic = currentInputConnection ?: return
         val k = kv ?: return
         val g = glide
-        if (g == null) { notice("Swipe typing is still loading its words. Try again in a moment.", 2500); return }
+        if (g == null) {
+            notice(if (loading) "Swipe typing is still loading its words. Try again in a moment." else "Swipe typing's word list didn't load", 3000)
+            return
+        }
         val prev = prevWord(ic.getTextBeforeCursor(64, 0))
-        val found = g.words(5, prev, if (personal) history else null)
-        if (found.isEmpty()) return
+        // Says on the bar why nothing was typed, rather than nothing happening.
+        val found = try {
+            g.words(5, prev, if (personal) history else null)
+        } catch (e: Throwable) {
+            android.util.Log.e("TokalotKeyboard", "swipe failed", e)
+            notice("Swipe didn't work (${e.javaClass.simpleName}: ${e.message?.take(40)})", 6000)
+            return
+        }
+        if (found.isEmpty()) { notice("Couldn't make out that swipe (${g.points} points)", 3000); return }
         val case: (String) -> String = when (k.shift) {
             KeyboardView.Shift.LOCKED -> { s -> s.uppercase() }
             KeyboardView.Shift.ON -> { s -> s.replaceFirstChar { it.uppercaseChar() } }
