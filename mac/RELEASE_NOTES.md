@@ -2,6 +2,10 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.8.1
+
+- On a note, the **Summary** and **Timeline** buttons are now at the top, above the text, and open right there.
+
 ## New in 0.8.0
 
 - Notes is a clean list now: click a note to open it. Each note opens on its own page with its text first, **Summary** and **Timeline** as small buttons under it that open right below it (a long text folds up while one is open), and the rest (summary length, skip silence, skip ums, copy, delete) in the **⋮** menu. Esc or **Notes** goes back to the list.

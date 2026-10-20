@@ -1084,7 +1084,7 @@ public sealed partial class MainWindow : Window
     // ---------- one note ----------
 
     private long? openNoteId;
-    private bool noteSummaryShown, noteTimelineShown, noteFolded = true;
+    private bool noteSummaryShown, noteTimelineShown;
     private string? noteFile;
     private List<NoteMedia.Word> noteWords = new();
     private List<NoteMedia.Cut>? noteSilence;
@@ -1103,7 +1103,6 @@ public sealed partial class MainWindow : Window
     {
         openNoteId = id;
         noteSummaryShown = noteTimelineShown = false;
-        noteFolded = true;
         noteSilence = null;
         noteResumeAt = 0;
         NotePlayer.Stop(false);
@@ -1207,11 +1206,37 @@ public sealed partial class MainWindow : Window
         if (info?.Source != null) stamp += " · from " + info.Source;
         col.Children.Add(Spaced(Ui.Text(stamp, 13.5, C.Sub), 4, 16, 0, 10));
 
+        // Summary and Timeline: small buttons above the text, each opening right under them. They're reached for
+        // instead of reading, so they come first and the text follows.
+        var segments = info?.Segments ?? new();
+        var buttons = Ui.Row(Ui.Button("Summary", () =>
+        {
+            noteSummaryShown = !noteSummaryShown;
+            if (noteSummaryShown && NoteImport.Get(id)?.Summary(S.NoteSummaryLevel) == null) Summarize(note, S.NoteSummaryLevel, voice, false);
+            else Render();
+        }, filled: noteSummaryShown));
+        if (voice && segments.Count >= 2)
+        {
+            var timeline = Ui.Button("Timeline", () =>
+            {
+                noteTimelineShown = !noteTimelineShown;
+                if (noteTimelineShown && NoteImport.Get(id)?.Index == null) RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments));
+                else Render();
+            }, filled: noteTimelineShown);
+            timeline.Margin = new Thickness(8, 0, 0, 0);
+            buttons.Children.Add(timeline);
+        }
+        col.Children.Add(Spaced(buttons, 0, 0, 0, 14));
+
+        noteBusy.TryGetValue(id, out var busy);
+        if (noteError.TryGetValue(id, out var err)) col.Children.Add(Spaced(Ui.Text("Couldn't do that: " + err, 14, C.Warn), 4, 0, 0, 12));
+        if (noteSummaryShown) col.Children.Add(Spaced(SummaryPanel(note, info, voice, busy), 0, 0, 0, 14));
+        if (noteTimelineShown && voice) col.Children.Add(Spaced(TimelinePanel(id, info, segments, busy), 0, 0, 0, 14));
+
         // The text. A voice note's is built word by word so a click plays from that word and playback lights it up.
         Control body;
         noteRuns.Clear();
         noteLit = -1;
-        var folded = (noteSummaryShown || noteTimelineShown) && note.Text.Length > 400 && noteFolded;
         if (voice)
         {
             var t = new TextBlock { FontSize = 16.5, FontFamily = C.Sans, Foreground = C.Text, TextWrapping = TextWrapping.Wrap, LineHeight = 16.5 * 1.5, Cursor = Cursors.Hand, Background = Brushes.Transparent };
@@ -1243,47 +1268,14 @@ public sealed partial class MainWindow : Window
                 if (i < 0) i = ~i - 1;
                 if (i >= 0 && i < noteWords.Count && hit.TextPosition < noteStarts[i] + noteWords[i].Text.Length) NotePlay(noteWords[i].Start);
             };
-            if (folded) { t.MaxLines = 5; t.TextTrimming = TextTrimming.CharacterEllipsis; }
             body = t;
         }
         else
         {
             var t = Selectable(note.Text, 16.5);
-            if (folded) { t.MaxLines = 5; t.TextTrimming = TextTrimming.CharacterEllipsis; }
             body = t;
         }
-        // While a summary or the timeline is open, a long text folds to a few lines so they're in view.
-        var fold = (noteSummaryShown || noteTimelineShown) && note.Text.Length > 400;
         col.Children.Add(Ui.Card(body, 24));
-        if (fold)
-            col.Children.Add(Spaced(Link(noteFolded ? "Show the whole text" : "Fold it up", () => { noteFolded = !noteFolded; Render(); }), 8, 8, 0, 0));
-
-        var segments = info?.Segments ?? new();
-        var buttons = Ui.Row(Ui.Button("Summary", () =>
-        {
-            noteSummaryShown = !noteSummaryShown;
-            noteFolded = true;
-            if (noteSummaryShown && NoteImport.Get(id)?.Summary(S.NoteSummaryLevel) == null) Summarize(note, S.NoteSummaryLevel, voice, false);
-            else Render();
-        }, filled: noteSummaryShown));
-        if (voice && segments.Count >= 2)
-        {
-            var timeline = Ui.Button("Timeline", () =>
-            {
-                noteTimelineShown = !noteTimelineShown;
-                noteFolded = true;
-                if (noteTimelineShown && NoteImport.Get(id)?.Index == null) RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments));
-                else Render();
-            }, filled: noteTimelineShown);
-            timeline.Margin = new Thickness(8, 0, 0, 0);
-            buttons.Children.Add(timeline);
-        }
-        col.Children.Add(Spaced(buttons, 0, 14, 0, 14));
-
-        noteBusy.TryGetValue(id, out var busy);
-        if (noteError.TryGetValue(id, out var err)) col.Children.Add(Spaced(Ui.Text("Couldn't do that: " + err, 14, C.Warn), 4, 0, 0, 12));
-        if (noteSummaryShown) col.Children.Add(Spaced(SummaryPanel(note, info, voice, busy), 0, 0, 0, 14));
-        if (noteTimelineShown && voice) col.Children.Add(Spaced(TimelinePanel(id, info, segments, busy), 0, 0, 0, 14));
 
         if (voice) { playerHost.Child = NotePlayerBar(); playerHost.IsVisible = true; }
     }

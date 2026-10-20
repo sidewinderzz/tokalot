@@ -37,7 +37,6 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     private var duration = 0.0
 
     private var silenceCuts: List<ClosedFloatingPointRange<Double>> = emptyList()
-    private var folded = true
     private var summaryShown = false
     private var timelineShown = false
 
@@ -74,12 +73,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             setLineSpacing(0f, 1.25f)
             transcript = this
         } else text(note.text, 17f).apply { setTextIsSelectable(true); setLineSpacing(0f, 1.2f) }
-        col.addView(card(20).apply { addView(body) }, lp())
-        val foldLink = link("", 14f) {}
-        col.addView(foldLink, lp().margins(this, l = 4))
-
-        // Summary and Timeline: two small buttons under the text, each opening below it. While one is open a long
-        // text folds up to a few lines, so the summary or timeline is in view.
+        // Summary and Timeline: two small buttons above the text, each opening right under them. They're reached
+        // for instead of reading, so they come first and the text follows.
         val summary = summaryCard(note.text, voice)
         val segments = info?.segments.orEmpty()
         val timeline = if (voice && segments.size >= 2) indexCard(segments) else null
@@ -87,28 +82,22 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
         fun layout() {
             summary.visibility = if (summaryShown) View.VISIBLE else View.GONE
             timeline?.visibility = if (timelineShown) View.VISIBLE else View.GONE
-            val long = body.lineCount > 6 || note.text.length > 400
-            val fold = (summaryShown || timelineShown) && long
-            body.maxLines = if (fold && folded) 5 else Int.MAX_VALUE
-            body.ellipsize = if (fold && folded) android.text.TextUtils.TruncateAt.END else null
-            foldLink.visibility = if (fold) View.VISIBLE else View.GONE
-            foldLink.text = if (folded) "Show the whole text" else "Fold it up"
             buttons.removeAllViews()
             buttons.addView(pill("Summary", filled = summaryShown) {
-                summaryShown = !summaryShown; folded = true; layout(); if (summaryShown) summaryOpened?.invoke()
+                summaryShown = !summaryShown; layout(); if (summaryShown) summaryOpened?.invoke()
             })
             if (timeline != null) {
                 buttons.addView(spacer(wDp = 8))
                 buttons.addView(pill("Timeline", filled = timelineShown) {
-                    timelineShown = !timelineShown; folded = true; layout(); if (timelineShown) indexOpened?.invoke()
+                    timelineShown = !timelineShown; layout(); if (timelineShown) indexOpened?.invoke()
                 })
             }
         }
-        foldLink.setOnClickListener { folded = !folded; layout() }
-        col.addView(buttons, lp().margins(this, t = 4, b = 12))
+        col.addView(buttons, lp().margins(this, b = 8))
         col.addView(summary, lp().margins(this, b = 12))
         timeline?.let { col.addView(it, lp().margins(this, b = 12)) }
         layout()
+        col.addView(card(20).apply { addView(body) }, lp())
 
         // The less used settings and actions sit behind the "..." button.
         more.setOnClickListener {
