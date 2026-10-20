@@ -6,6 +6,16 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.44 · 2026-10-20
+- New: Tokalot Keyboard, an optional keyboard in the style of Gboard. Turn it on in Settings › Keyboard.
+- It autocorrects as you type (teh becomes the, dont becomes don't), and a backspace straight after puts back what you typed. Three suggestions sit above the keys, and between words it guesses the next one.
+- Swipe typing: slide from letter to letter. Slide along the space bar to move the cursor, and left from backspace to delete whole words.
+- Long-press a letter for its symbol or accents. There's a symbols page, a number pad in number fields, an optional number row, and an emoji page with search and skin tones.
+- The mic on the keyboard's bar dictates, the same as the floating button, which hides while the keyboard is up.
+- The ✨ button fixes what you typed with your AI cleanup: spelling, typos, capitals and punctuation. It works on the selected text, or the whole text box, and Undo puts it back.
+- Words the keyboard doesn't know, such as names and farm terms, go into your dictionary once you've kept them twice, so they sync and dictation spells them right too. What else it learns from your typing stays on this phone.
+- Light and dark to match the app, in your Tokalot color, with key sound and vibration switches. Its settings sync to your other devices.
+
 ## 1.43 · 2026-10-20
 - After an update, Tokalot checks that the floating mic button came back. Some phones, such as Samsung, switch it off with every update. If that happens you get a notification that takes you straight to the switch.
 - New in Settings › Setup: Stay on after updates. Run one command from a computer once (Tokalot shows it, with a Copy button), and from then on Tokalot turns the mic button back on by itself after an update.

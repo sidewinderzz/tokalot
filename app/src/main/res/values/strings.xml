@@ -5,4 +5,7 @@
     <!-- Quick Settings tiles -->
     <string name="tile_dictate">Dictate</string>
     <string name="tile_note">Voice note</string>
+    <!-- The keyboard -->
+    <string name="keyboard_name">Tokalot Keyboard</string>
+    <string name="keyboard_subtype">English (US)</string>
 </resources>

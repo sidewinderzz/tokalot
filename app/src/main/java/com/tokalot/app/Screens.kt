@@ -534,6 +534,7 @@ class SettingsScreen(private val a: MainActivity) {
 
     companion object {
         const val SETUP = "Setup"
+        const val KEYBOARD = "Keyboard"
         const val SPEECH = "Speech & cleanup"
         const val DATA = "Your data"
         const val RECORDING = "Recording & look"
@@ -542,6 +543,7 @@ class SettingsScreen(private val a: MainActivity) {
         /** Settings categories, in order, each with its sections in the order shown when it's open. */
         val CATEGORIES = listOf(
             SETUP to listOf("Setup"),
+            KEYBOARD to listOf("Keyboard"),
             SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "API keys", "Speed"),
             RECORDING to listOf("Recording", "Without a text box", "Appearance"),
             DATA to listOf("Recordings", "Sync", "Backup", "Usage"),
@@ -643,6 +645,57 @@ class SettingsScreen(private val a: MainActivity) {
         }
         col.addView(setup)
         col.addView(text("If the accessibility switch is greyed out: phone Settings › Apps › Tokalot › ⋮ › Allow restricted settings. Also set Tokalot's battery usage to Unrestricted.", 13f, C.SUB), lp().margins(this, t = 8))
+
+        // --- Keyboard: Tokalot as the phone's keyboard (see TokalotKeyboard)
+        section(col, "Keyboard")
+        val kbSetup = card()
+        fun kbRow(title: String, done: Boolean, doneText: String, action: String, onClick: () -> Unit) {
+            if (kbSetup.childCount > 0) kbSetup.addView(divider())
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(title, 17f))
+                addView(text(if (done) doneText else "Not yet", 14f, if (done) C.GOOD else C.SUB))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            kbSetup.addView(row(texts, if (done) spacer() else pill(action) { onClick() }).apply {
+                setPadding(dp(20), dp(14), dp(16), dp(14))
+            })
+        }
+        val kbOn = TokalotKeyboard.isEnabled(this)
+        kbRow("Turn on Tokalot Keyboard", kbOn, "On", "Turn on") {
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+        }
+        kbRow("Use it as your keyboard", TokalotKeyboard.isCurrent(this), "In use", "Switch") {
+            if (!TokalotKeyboard.isEnabled(this)) startActivity(android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+            else getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showInputMethodPicker()
+        }
+        col.addView(kbSetup)
+        col.addView(text("A keyboard in the style of Gboard, with autocorrect and swipe typing. The mic on its bar dictates like the floating button, and ✨ fixes what you typed with your AI cleanup (the selected text, or the whole box). The floating button hides while it's up. Hold the space bar to switch keyboards, or the comma to come back here.", 13f, C.SUB), lp().margins(this, t = 8))
+        val kb = card()
+        fun kbSwitch(title: String, note: String, on: Boolean, set: (Boolean) -> Unit) {
+            if (kb.childCount > 0) kb.addView(divider())
+            kb.addView(switchRow(title, note, on, set))
+        }
+        kbSwitch("Autocorrect", "Fixes a mistyped word when you type a space or punctuation. Backspace straight after puts back what you typed.", prefs.kbAutocorrect) { prefs.kbAutocorrect = it }
+        kbSwitch("Swipe typing", "Slide your finger from letter to letter instead of tapping.", prefs.kbSwipe) { prefs.kbSwipe = it }
+        kbSwitch("Capitalize sentences", "A capital letter at the start of each sentence, where the app asks for one.", prefs.kbAutoCaps) { prefs.kbAutoCaps = it }
+        kbSwitch("Double space for a period", "Two taps on the space bar type a period and a space.", prefs.kbDoubleSpace) { prefs.kbDoubleSpace = it }
+        kbSwitch("Learn from my typing", "Remembers the words you use and what follows what, on this phone only, for better suggestions. A word the keyboard doesn't know goes into your dictionary once you've kept it twice, so it syncs.", prefs.kbLearn) { prefs.kbLearn = it }
+        kbSwitch("Number row", "Digits above the letters.", prefs.kbNumberRow) { prefs.kbNumberRow = it }
+        kbSwitch("Symbols on letters", "Each letter shows the symbol a long press gives.", prefs.kbSymbolHints) { prefs.kbSymbolHints = it }
+        kbSwitch("Show key on press", "The key pops up bigger above your finger.", prefs.kbPopup) { prefs.kbPopup = it }
+        kbSwitch("Vibrate on key press", "", prefs.kbVibrate) { prefs.kbVibrate = it }
+        kbSwitch("Sound on key press", "Follows your phone's touch sound volume.", prefs.kbSound) { prefs.kbSound = it }
+        col.addView(kb)
+        col.addView(row(
+            text("Forget the words and phrases the keyboard learned from your typing (your dictionary stays).", 14f, C.SUB).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+            pill("Clear") {
+                TokalotKeyboard.clearHistory(this)
+                android.widget.Toast.makeText(this, "Typing history cleared", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        ), lp().margins(this, t = 8, l = 4))
 
         // --- Appearance
         section(col, "Appearance")

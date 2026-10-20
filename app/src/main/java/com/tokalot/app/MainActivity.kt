@@ -258,6 +258,14 @@ class MainActivity : Activity() {
 
     /** Opened on a given page (tapping "Saved to Notes" opens Notes). True if the intent asked for one. */
     private fun openTab(intent: Intent?): Boolean {
+        if (intent?.getBooleanExtra(EXTRA_SETTINGS, false) == true) {
+            // From the keyboard (long press on the comma): Settings, with the Keyboard part open.
+            prefs.openSettings = prefs.openSettings + SettingsScreen.KEYBOARD
+            inSettings = true
+            inStats = false
+            openNote = null
+            return true
+        }
         val t = intent?.getStringExtra(EXTRA_TAB)?.let { name -> Tab.values().firstOrNull { it.name == name } } ?: return false
         tab = t
         inSettings = false
@@ -1073,6 +1081,8 @@ class MainActivity : Activity() {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
         /** Which page to open (a [Tab] name). */
         const val EXTRA_TAB = "com.tokalot.app.TAB"
+        /** Open Settings at the Keyboard part. */
+        const val EXTRA_SETTINGS = "com.tokalot.app.SETTINGS"
         private const val UNDO_TAG = "undo-delete"
         private const val STUCK_GRACE_MS = 4000L // how long Android gets to start the accessibility service after the app
         private const val REQ_BACKUP = 41

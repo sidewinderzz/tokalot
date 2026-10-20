@@ -192,6 +192,10 @@ class Prefs(ctx: Context) {
             "autoLanguage" to "autolang", "polish" to "polish", "sounds" to "sounds", "learnWords" to "learn_words",
             "notesBeta" to "notes_beta", "holdToTalk" to "hold", "haptics" to "haptics", "fitSentence" to "fit_sentence",
             "noteSkipSilence" to "note_skip_silence", "noteSkipUms" to "note_skip_ums",
+            "keyboardAutocorrect" to "kb_autocorrect", "keyboardSwipe" to "kb_swipe", "keyboardAutoCaps" to "kb_autocap",
+            "keyboardDoubleSpace" to "kb_double_space", "keyboardLearn" to "kb_learn", "keyboardNumberRow" to "kb_number_row",
+            "keyboardSymbolHints" to "kb_symbol_hints", "keyboardSound" to "kb_sound", "keyboardVibrate" to "kb_vibrate",
+            "keyboardPopup" to "kb_popup",
         )
 
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
@@ -404,6 +408,16 @@ class Prefs(ctx: Context) {
             "fitSentence" to fitSentence,
             "noteSkipSilence" to noteSkipSilence,
             "noteSkipUms" to noteSkipUms,
+            "keyboardAutocorrect" to kbAutocorrect,
+            "keyboardSwipe" to kbSwipe,
+            "keyboardAutoCaps" to kbAutoCaps,
+            "keyboardDoubleSpace" to kbDoubleSpace,
+            "keyboardLearn" to kbLearn,
+            "keyboardNumberRow" to kbNumberRow,
+            "keyboardSymbolHints" to kbSymbolHints,
+            "keyboardSound" to kbSound,
+            "keyboardVibrate" to kbVibrate,
+            "keyboardPopup" to kbPopup,
             "noteSummaryLevel" to noteSummaryLevel,
             "noteSpeed" to noteSpeed.toDouble(),
             "notePhrases" to notePhrases,
@@ -536,6 +550,49 @@ class Prefs(ctx: Context) {
     var sounds: Boolean
         get() = sp.safeBoolean("sounds", false)
         set(v) = sp.edit().putBoolean("sounds", v).apply()
+
+    // ---------- the Tokalot keyboard (see TokalotKeyboard) ----------
+
+    /** Fix a mistyped word when space or punctuation is typed. */
+    var kbAutocorrect: Boolean
+        get() = sp.safeBoolean("kb_autocorrect", true)
+        set(v) = sp.edit().putBoolean("kb_autocorrect", v).apply()
+    /** Swipe typing: slide a finger across the letters. */
+    var kbSwipe: Boolean
+        get() = sp.safeBoolean("kb_swipe", true)
+        set(v) = sp.edit().putBoolean("kb_swipe", v).apply()
+    /** Capital letter at the start of each sentence. */
+    var kbAutoCaps: Boolean
+        get() = sp.safeBoolean("kb_autocap", true)
+        set(v) = sp.edit().putBoolean("kb_autocap", v).apply()
+    /** Two spaces type a period and a space. */
+    var kbDoubleSpace: Boolean
+        get() = sp.safeBoolean("kb_double_space", true)
+        set(v) = sp.edit().putBoolean("kb_double_space", v).apply()
+    /** Words typed that the keyboard doesn't know go into the dictionary once used twice (see KeyboardLearn). */
+    var kbLearn: Boolean
+        get() = sp.safeBoolean("kb_learn", true)
+        set(v) = sp.edit().putBoolean("kb_learn", v).apply()
+    /** A row of digits above the letters. */
+    var kbNumberRow: Boolean
+        get() = sp.safeBoolean("kb_number_row", false)
+        set(v) = sp.edit().putBoolean("kb_number_row", v).apply()
+    /** Each letter shows its long-press symbol in the corner. */
+    var kbSymbolHints: Boolean
+        get() = sp.safeBoolean("kb_symbol_hints", true)
+        set(v) = sp.edit().putBoolean("kb_symbol_hints", v).apply()
+    /** Click on each key. */
+    var kbSound: Boolean
+        get() = sp.safeBoolean("kb_sound", false)
+        set(v) = sp.edit().putBoolean("kb_sound", v).apply()
+    /** Short buzz on each key. */
+    var kbVibrate: Boolean
+        get() = sp.safeBoolean("kb_vibrate", true)
+        set(v) = sp.edit().putBoolean("kb_vibrate", v).apply()
+    /** The key shown bigger above the finger as it's pressed. */
+    var kbPopup: Boolean
+        get() = sp.safeBoolean("kb_popup", true)
+        set(v) = sp.edit().putBoolean("kb_popup", v).apply()
 
     /** Which Sounds style plays (soft, chime, retro, bubble). */
     var soundSet: String

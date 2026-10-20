@@ -128,5 +128,19 @@
             android:name=".RecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Tokalot Keyboard: a full keyboard with the mic and AI fix on its suggestion bar (see TokalotKeyboard). -->
+        <service
+            android:name=".TokalotKeyboard"
+            android:exported="true"
+            android:label="@string/keyboard_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
     </application>
 </manifest>
