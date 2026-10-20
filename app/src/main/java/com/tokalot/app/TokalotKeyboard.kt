@@ -97,7 +97,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     // ------------------------------------------------------------------ what this text box allows
 
-    /** Suggestions and autocorrect: ordinary text, not passwords, addresses or numbers. */
+    /** Suggestions on the bar: any text box but a password one ([autocorrect] says whether words are fixed too). */
     private var predictive = false
     /** A password box: nothing typed here is remembered, and the clipboard isn't offered. */
     private var password = false
@@ -245,7 +245,10 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             InputType.TYPE_TEXT_VARIATION_PASSWORD, InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
             InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
         )) || (cls == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-        predictive = cls == InputType.TYPE_CLASS_TEXT && !password && variation !in setOf(
+        predictive = cls == InputType.TYPE_CLASS_TEXT && !password
+        // Addresses, email addresses and boxes that ask for no suggestions still get them on the bar, but a
+        // word is never changed by itself there ("deere.com" must stay as typed).
+        val plain = variation !in setOf(
             InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
             InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_FILTER,
         ) && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
@@ -253,7 +256,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         // turns suggestions off.
         swipe = cls == InputType.TYPE_CLASS_TEXT && !password
         personal = !password && info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 && prefs.kbLearn
-        autocorrect = prefs.kbAutocorrect
+        autocorrect = prefs.kbAutocorrect && plain
         vibrate = prefs.kbVibrate
         sound = prefs.kbSound
 
