@@ -137,6 +137,8 @@ class OfflineFlowService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        ServiceGuard.setWanted(this, true) // so an update that switches it off can be noticed
+        ServiceGuard.cancelNote(this)
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         dictation = Dictation(applicationContext)
         History.preload(this)
@@ -194,6 +196,12 @@ class OfflineFlowService : AccessibilityService() {
     }
 
     override fun onInterrupt() {}
+
+    // Android unbinds the service when it's switched off (an update or crash kills the process instead).
+    override fun onUnbind(intent: Intent?): Boolean {
+        ServiceGuard.setWanted(this, false)
+        return super.onUnbind(intent)
+    }
 
     override fun onDestroy() {
         instance = null

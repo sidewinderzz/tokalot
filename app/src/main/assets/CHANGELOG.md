@@ -6,6 +6,10 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.43 · 2026-10-20
+- After an update, Tokalot checks that the floating mic button came back. Some phones, such as Samsung, switch it off with every update. If that happens you get a notification that takes you straight to the switch.
+- New in Settings › Setup: Stay on after updates. Run one command from a computer once (Tokalot shows it, with a Copy button), and from then on Tokalot turns the mic button back on by itself after an update.
+
 ## 1.42 · 2026-10-20
 - Notes get a short title, written by the AI when a note is made or first opened. It shows on the note and in the list. Rename it from the ⋮ menu.
 - While a recording plays, the page follows the word being said. Scroll yourself and it stops; Back to playing brings it back. The Timeline marks the point being played.
