@@ -314,9 +314,10 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 SLOT_MENU -> drawIcon(canvas, R.drawable.ic_kb_grid, mid, cy, dp(19f), t.hint)
                 SLOT_CANCEL -> drawIcon(canvas, R.drawable.ic_close, mid, cy, dp(22f), t.text)
                 SLOT_MESSAGE -> {
-                    text.color = t.text
+                    // While recording just a quiet word: the moving mic says the rest.
+                    text.color = if (recording) t.hint else t.text
                     text.typeface = Typeface.DEFAULT
-                    text.textSize = dp(15f)
+                    text.textSize = dp(if (recording) 13f else 15f)
                     canvas.drawText(ellipsize(message ?: "", p.right - p.left - dp(16f)), mid, baseline(), text)
                 }
                 TOOL -> when (p.item) {

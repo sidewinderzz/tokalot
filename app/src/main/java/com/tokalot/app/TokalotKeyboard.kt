@@ -1333,7 +1333,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         dictation.warmUp()
         Haptics.play(this, Haptics.Kind.START)
         k.recording = true
-        k.message = "Listening… tap the mic when you're done"
+        k.message = "Recording"
         k.cancelable = true
         main.post(levelTick)
     }
@@ -1347,7 +1347,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val taken = r.stopMic()
         RecordingService.stop(this)
         micState = Mic.WORKING
-        kv?.let { it.recording = false; it.working = true; it.message = "Transcribing…"; it.cancelable = true }
+        kv?.let { it.recording = false; it.working = true; it.message = ""; it.cancelable = true }
         // A long recording is put together off the main thread so the keys stay responsive.
         Thread {
             val audio = taken.audio()
