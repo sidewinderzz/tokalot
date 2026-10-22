@@ -1601,7 +1601,7 @@
    "release": "desktop"
   },
   "657969123": {
-   "count": 64,
+   "count": 70,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -1626,11 +1626,11 @@
    "release": "mac-v0.9.0"
   },
   "658032924": {
-   "count": 9,
+   "count": 10,
    "name": "Tokalot-v1.43.apk",
    "release": "v1.43"
   }
  },
- "total": 251,
- "updated": "2026-10-22T01:32:27Z"
+ "total": 258,
+ "updated": "2026-10-22T07:36:44Z"
 }
