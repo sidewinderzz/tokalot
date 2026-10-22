@@ -1601,7 +1601,7 @@
    "release": "desktop"
   },
   "657969123": {
-   "count": 78,
+   "count": 82,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -1631,6 +1631,6 @@
    "release": "v1.43"
   }
  },
- "total": 268,
- "updated": "2026-10-22T13:48:39Z"
+ "total": 272,
+ "updated": "2026-10-22T18:33:25Z"
 }
