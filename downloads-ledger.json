@@ -1486,7 +1486,7 @@
    "release": "mac-v0.8.1"
   },
   "657962750": {
-   "count": 0,
+   "count": 2,
    "name": "Tokalot-linux-x64-0.11.0.tar.gz",
    "release": "linux-v0.11.0"
   },
@@ -1601,7 +1601,7 @@
    "release": "desktop"
   },
   "657969123": {
-   "count": 82,
+   "count": 86,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -1631,6 +1631,6 @@
    "release": "v1.43"
   }
  },
- "total": 272,
- "updated": "2026-10-22T18:33:25Z"
+ "total": 278,
+ "updated": "2026-10-22T22:21:26Z"
 }
