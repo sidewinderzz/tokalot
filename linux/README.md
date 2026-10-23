@@ -86,6 +86,7 @@ Optional:
 | `wl-clipboard` (`wl-copy`, `wl-paste`) | **Needed for automatic pasting on KDE and other non-GNOME Wayland desktops.** Without it Tokalot only copies there and asks you to press Ctrl+V, because its own clipboard may not reach Wayland apps |
 | `xdotool`, `wtype` | Fallback for pressing Ctrl+V when `/dev/uinput` isn't available (`ydotool` is tried too, but needs `/dev/uinput` itself) |
 | `xclip` or `xsel` | Fallback clipboard on X11 |
+| `busctl`, `journalctl` | KDE Wayland only: telling which window is in front, for per-app styles and pasting into terminals (see KDE Plasma below) |
 | `ffmpeg` / `ffplay` or `mpv` | Only to play or re-transcribe recordings restored from a Windows backup (.wma / .m4a) |
 | `notify-send` | A notification if the shortcut can't be set up when Tokalot starts in the background |
 | An AppIndicator / tray | The tray icon (see GNOME below) |
@@ -125,12 +126,13 @@ Wayland (GNOME, KDE and others)
 
 - Tokalot's own windows run through XWayland. That is fine for the main window; the indicator and
   message pill are positioned by Tokalot and that should be honored, but desktops differ.
-- A Wayland desktop doesn't tell apps which window is in front, so per-app styles can't be chosen
-  automatically: every dictation uses the "Everything else" style.
-- For the same reason Tokalot can't tell it is in a terminal, where paste is Ctrl+Shift+V. In a
-  Wayland terminal the paste does nothing, and the dictation isn't left on the clipboard (Tokalot
-  puts back what you had copied): copy it from History, or start Tokalot with
-  `TOKALOT_PASTE=ctrl+shift+v` if you mostly dictate into terminals.
+- Wayland has no general way to ask which window is in front, so Tokalot asks the desktop itself
+  where it can: **KDE Plasma, Sway, Hyprland and niri** (details below). There, per-app styles are
+  chosen automatically and a terminal gets Ctrl+Shift+V. On any other Wayland desktop (GNOME
+  included) every dictation uses the "Everything else" style, and in a terminal the paste does
+  nothing and the dictation isn't left on the clipboard (Tokalot puts back what you had copied):
+  copy it from History, or start Tokalot with `TOKALOT_PASTE=ctrl+shift+v` if you mostly dictate
+  into terminals.
 
 GNOME
 
@@ -141,10 +143,48 @@ GNOME
 KDE Plasma
 
 - On Wayland install `wl-clipboard`; until then dictations are copied but not pasted.
+- The window in front is read through KWin: Tokalot loads a one-line KWin script that prints the
+  window's class and title to KWin's log, runs it, removes it and reads the line back from the
+  journal, about 0.2 s, while you start talking. It needs `busctl` and `journalctl` (both part of
+  systemd) and permission to read the system journal (members of `wheel`, `adm` or
+  `systemd-journal` have it). Without that it quietly does what GNOME does.
+
+Sway, Hyprland, niri
+
+- The window in front comes from `swaymsg -t get_tree`, `hyprctl activewindow -j` or
+  `niri msg --json focused-window`, whichever matches the session.
 
 X11
 
 - Per-app styles and terminal detection work. Nothing extra to install.
+
+How it was checked: terminal detection and the Ctrl+Shift+V paste were tried on KDE Plasma 6 on
+Wayland (Arch). The Sway, Hyprland and niri readers follow what those tools print and have not been
+run on those desktops, so please say if one doesn't work. `Tokalot --diagnose` shows what
+Tokalot sees as the window in front ("Active-app detection").
+
+## Terminal commands (beta)
+
+Two switches under Settings › Style: **Terminal commands (beta)**, off until you turn it on, and
+**Start commands with "shell"**, on by default. In a terminal, start with the word *shell* and what
+you say becomes a shell command: describe it ("shell, show me the ten biggest files in this folder")
+or speak one ("shell git commit dash m quote fix the paste bug quote" gives
+`git commit -m "fix the paste bug"`). Anything that doesn't start with "shell" is dictated as normal
+text, so a prompt for Claude Code or another AI tool stays as you said it. Turn the second switch off
+and everything you say in a terminal becomes a command.
+
+- It is only **pasted, never run, and Enter is never pressed**: you read it first. Tokalot adds no
+  safety check of its own, so read every command, most of all one with `sudo`, `rm` or `dd`.
+- It knows your system, so "shell update the system" gives `sudo pacman -Syu` on Arch and
+  `sudo apt update && sudo apt upgrade` on Ubuntu. With each request Tokalot sends your cleanup AI
+  your distribution's name, its package manager, your login shell and which handier command-line tools
+  are installed (`fd`, `rg`, `bat`, `eza`, `duf`, `jq`…), read from `/etc/os-release` and your path.
+  Nothing else about the machine leaves it.
+- It uses the cleanup AI you picked, so a small model sometimes chooses a clumsy command.
+- It only applies where Tokalot can tell the window in front is a terminal: X11, KDE, Sway, Hyprland
+  and niri (see Wayland above). Everywhere else dictation is unchanged. It needs AI cleanup (a Groq
+  or OpenAI key); with the offline model only, you get the plain transcript.
+- The two switches sync between your computers when sync is on.
 
 ## Switches
 
@@ -155,6 +195,7 @@ X11
 | `--gpu` | Draw with the graphics card even under fractional scaling |
 | `--diagnose` | Print what works on this machine and exit. Add `--download-model` to also fetch and test the offline model |
 | `--screenshots <folder>` | Developer tool: draw every page to PNG files with sample data. Needs no display |
+| `--transcribe <audio file>` | Developer tool: run the whole dictation on a recording (16 kHz WAV is best; other formats need ffmpeg) and print the text. Add `--terminal` to dictate as if into a terminal. It counts as a dictation, so use it with `TOKALOT_DATA` set to a scratch folder |
 | `TOKALOT_DATA=<folder>` | Use another data folder (a test copy that leaves your real data, keyring and autostart alone) |
 | `TOKALOT_PASTE=ctrl+v \| ctrl+shift+v \| shift+insert` | Force the paste shortcut |
 | `TOKALOT_CLIPBOARD=avalonia \| wl-copy \| xclip \| xsel` | Force how the clipboard is reached |
