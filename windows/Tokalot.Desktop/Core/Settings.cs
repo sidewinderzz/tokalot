@@ -65,7 +65,7 @@ public sealed class Settings
     public bool AutoLanguage { get; set; }
     /** Let the cleanup model reword for clarity. Off: the user's own words are kept. */
     public bool Polish { get; set; }
-    /** Desktop only, not synced: dictating into a terminal turns what you say into a shell command (pasted, never run). */
+    /** Desktop only (synced between computers): dictating into a terminal turns what you say into a shell command (pasted, never run). */
     public bool ShellCommands { get; set; }
     /** With Terminal commands on: only a dictation that starts with the word "shell" becomes a command; anything else is dictated normally. */
     public bool ShellCue { get; set; } = true;

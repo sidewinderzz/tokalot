@@ -184,7 +184,7 @@ and everything you say in a terminal becomes a command.
 - It only applies where Tokalot can tell the window in front is a terminal: X11, KDE, Sway, Hyprland
   and niri (see Wayland above). Everywhere else dictation is unchanged. It needs AI cleanup (a Groq
   or OpenAI key); with the offline model only, you get the plain transcript.
-- The settings stay on this computer; they don't sync.
+- The two switches sync between your computers when sync is on.
 
 ## Switches
 
