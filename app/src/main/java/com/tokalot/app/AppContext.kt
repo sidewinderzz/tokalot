@@ -37,6 +37,23 @@ object AppContext {
         ),
     )
 
+    /** Terminal apps: what Terminal commands applies to. Text goes in as typed keys there, so a line break would press Enter. */
+    private val terminals = setOf("com.termux")
+
+    fun isTerminal(pkg: String?) = pkg != null && pkg in terminals
+
+    /**
+     * What Terminal commands tell the AI about this phone: the Android version, the processor type, and whether the
+     * Termux:API app is installed (for the termux-api commands). Nothing else about the phone is sent.
+     */
+    fun shellEnvironment(ctx: Context): String {
+        val parts = mutableListOf("Android ${android.os.Build.VERSION.RELEASE}")
+        android.os.Build.SUPPORTED_ABIS.firstOrNull()?.let { parts += "processor: $it" }
+        val api = runCatching { ctx.packageManager.getPackageInfo("com.termux.api", 0); true }.getOrDefault(false)
+        parts += if (api) "the Termux:API app is installed" else "the Termux:API app is not installed"
+        return parts.joinToString("; ")
+    }
+
     fun categorize(pkg: String?, prefs: Prefs): AppCategory {
         if (pkg.isNullOrEmpty()) return AppCategory.OTHER
         prefs.appOverride(pkg)?.let { return it }

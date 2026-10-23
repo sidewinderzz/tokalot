@@ -235,6 +235,14 @@ class StyleScreen(private val a: MainActivity) {
             addView(switchRow("Fit into the sentence", "Dictating into the middle of a sentence: no capital at the start, and no period when the sentence carries on. Tokalot only looks at the characters right next to the cursor; the AI is just told \"mid-sentence\", never your text.", prefs.fitSentence) {
                 prefs.fitSentence = it
             })
+            addView(divider())
+            addView(switchRow("Terminal commands (beta)", "In Termux, what you say becomes a shell command: say what you want (\"show the ten biggest files here\") or speak a command (\"git commit dash m quote fix quote\"). It is only typed, never run, so you read it and press Enter yourself. Needs AI cleanup.", prefs.shellCommands) {
+                prefs.shellCommands = it
+            })
+            addView(divider())
+            addView(switchRow("Start commands with \"shell\"", "On: in Termux only a dictation that starts with \"shell\" becomes a command (\"shell, show me the ten biggest files\"); anything else is dictated normally, so prompts for Claude Code or another AI tool stay as you said them. Off: everything you say in Termux becomes a command.", prefs.shellCue) {
+                prefs.shellCue = it
+            })
         }, lp().margins(this, b = 16))
 
         // Category tabs

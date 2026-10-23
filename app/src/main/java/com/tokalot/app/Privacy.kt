@@ -42,6 +42,8 @@ object Privacy {
             { it.fitSentence }) { p, on -> p.fitSentence = on },
         Switch("Learn from my corrections", "Looks at the text box again for two minutes after a dictation and adds names you respell, and words you spell out, to your dictionary.", setOf(Level.FULL),
             { it.learnWords }) { p, on -> p.learnWords = on },
+        Switch("Terminal commands (beta)", "In Termux, what you say becomes a shell command. Sends your Android version, processor type and whether Termux:API is installed to your AI cleanup with the request.", setOf(Level.FULL),
+            { it.shellCommands }) { p, on -> p.shellCommands = on },
     )
 
     /** How long recordings are kept at each level, in days (see [Prefs.audioKeepDays]). */

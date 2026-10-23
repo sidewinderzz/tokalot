@@ -2,6 +2,13 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.11.0
+
+- New: **Terminal commands (beta)**, in Settings › Style, off until you turn it on. In Terminal, iTerm2, Ghostty, WezTerm, Alacritty, kitty, Warp, Hyper or Tabby, start with "shell" and say what you want ("shell, show me the ten biggest files in this folder") or speak a command ("shell git commit dash m quote fix the paste bug quote") and a shell command is pasted. Anything that doesn't start with "shell" is dictated as normal text, so prompts for Claude Code and the like are left alone (**Start commands with "shell"** turns that off). It is never run: you read it and press Enter yourself.
+- It writes commands for macOS: zsh, Homebrew (`brew install`, no `sudo`), and the BSD flags macOS's own `sed`, `find` and `date` take. With each request your cleanup AI is told your macOS version, the chip, your login shell, whether Homebrew or MacPorts is installed and which handier tools you have (`fd`, `rg`, `bat`, `gsed`…). It needs AI cleanup.
+- Both Terminal commands switches sync with your other devices (Windows, Linux and Android) when sync is on. Terminal commands is also on the **Privacy** page, where **Everything on** turns it on.
+- For testing: `Tokalot --transcribe <file.wav> --terminal` dictates as if into Terminal.
+
 ## New in 0.10.0
 
 - Settings is now split into pages, listed down the left with a line saying what each is set to. Click one to open it. No more long scroll.
