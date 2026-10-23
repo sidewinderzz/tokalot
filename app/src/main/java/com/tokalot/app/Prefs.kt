@@ -201,6 +201,7 @@ class Prefs(ctx: Context) {
             "keyboardSymbolHints" to "kb_symbol_hints", "keyboardSound" to "kb_sound", "keyboardVibrate" to "kb_vibrate",
             "keyboardPopup" to "kb_popup", "keyboardClipboard" to "kb_clipboard", "keyboardClipSuggest" to "kb_clip_suggest",
             "keyboardScreenshots" to "kb_screenshots", "keyboardCodes" to "kb_codes",
+            "headsetMic" to "headset_mic", "headsetMicAll" to "headset_mic_all",
         )
 
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
@@ -444,6 +445,8 @@ class Prefs(ctx: Context) {
             "keyboardAccent" to (kbAccent.toLong() and 0xFFFFFFFFL),
             "keyboardToolbar" to kbToolbar,
             "keyboardHeight" to kbHeight,
+            "headsetMic" to headsetMic,
+            "headsetMicAll" to headsetMicAll,
             "noteSummaryLevel" to noteSummaryLevel,
             "noteSpeed" to noteSpeed.toDouble(),
             "notePhrases" to notePhrases,
@@ -753,6 +756,16 @@ class Prefs(ctx: Context) {
     var noteSpeed: Float
         get() = (sp.safeInt("note_speed", 100) / 100f).takeIf { s -> NOTE_SPEEDS.any { Math.abs(it - s) < 0.001 } } ?: 1f
         set(v) = sp.edit().putInt("note_speed", Math.round(v * 100)).apply()
+
+    /** Record from a connected Bluetooth headset's mic, falling back to the phone's when none is connected. */
+    var headsetMic: Boolean
+        get() = sp.safeBoolean("headset_mic", false)
+        set(v) = sp.edit().putBoolean("headset_mic", v).apply()
+
+    /** [headsetMic] for every dictation too, not only voice notes. */
+    var headsetMicAll: Boolean
+        get() = sp.safeBoolean("headset_mic_all", false)
+        set(v) = sp.edit().putBoolean("headset_mic_all", v).apply()
 
     /** The "Tap any word to play from there" hint on a voice note was tapped through or closed. This phone only. */
     var noteWordHintSeen: Boolean

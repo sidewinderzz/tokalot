@@ -32,7 +32,7 @@ import android.widget.TextView
  * five levels of detail and gets a short title from the AI. Summaries, the index and the title are saved with the
  * note, so they're only made once.
  */
-class NoteScreen(private val a: MainActivity, private val id: Long) {
+class NoteScreen(private val a: MainActivity, private val id: Long, private val find: String = "") {
     private val main = Handler(Looper.getMainLooper())
     private var released = false
     private var player: MediaPlayer? = null
@@ -94,13 +94,23 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }, more).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this, t = 4, b = 8))
 
+        // Its tags: tap one for every note with it, "+ Tag" to add or remove some.
+        val tagRow = FlowRow(this, dp(6))
+        fun showTags(tags: List<String>) {
+            tagRow.removeAllViews()
+            tags.forEach { t -> tagRow.addView(tagChip(t) { showTag(t) }.apply { contentDescription = "Tag $t. Show notes with it" }) }
+            tagRow.addView(tagChip("+ Tag", dashed = true) { editTags(note.id) { showTags(it) } }.apply { contentDescription = "Add or remove tags" })
+        }
+        showTags(note.tags)
+        col.addView(tagRow, lp().margins(this, t = -4, b = 4))
+
         val body = if (voice) text(spanned(), 17f).apply {
             movementMethod = LinkMovementMethod.getInstance()
             highlightColor = 0
             setLineSpacing(0f, 1.25f)
             transcript = this
             readAsOneBlock(this)
-        } else text(note.text, 17f).apply { setTextIsSelectable(true); setLineSpacing(0f, 1.2f) }
+        } else text(marked(note.text), 17f).apply { setTextIsSelectable(true); setLineSpacing(0f, 1.2f) }
         // Summary and Timeline: two small buttons above the text, each opening right under them. They're reached
         // for instead of reading, so they come first and the text follows.
         val summary = summaryCard(note.text, voice)
@@ -151,6 +161,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
                     Unit
                 },
             )
+            items += "Tags" to { editTags(note.id) { showTags(it) } }
             if (voice) {
                 items += "Skip silence: ${if (prefs.noteSkipSilence) "on" else "off"}" to {
                     prefs.noteSkipSilence = !prefs.noteSkipSilence; recut()
@@ -192,6 +203,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
             addView(backChip, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dp(8) })
         }
+        if (find.isNotEmpty()) sv.post { if (!released) goToFind() }
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(area, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -201,6 +213,82 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
     }
 
     private fun summaryLevel() = a.prefs.noteSummaryLevel
+
+    /**
+     * Picks this note's tags: every tag already used, ticked if this note has it, and a box for a new one.
+     * Saves on Save and hands the new tags to [done].
+     */
+    private fun editTags(noteId: Long, done: (List<String>) -> Unit) = with(a) {
+        val all = Notes.all(this)
+        val mine = all.firstOrNull { it.id == noteId }?.tags.orEmpty()
+        val picked = LinkedHashSet(mine)
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        fun line(t: String) = android.widget.CheckBox(this).apply {
+            text = t
+            textSize = 17f
+            setTextColor(C.TEXT)
+            buttonTintList = android.content.res.ColorStateList.valueOf(C.visible(prefs.accent))
+            minHeight = dp(TOUCH_DP)
+            isChecked = t in picked
+            setOnCheckedChangeListener { _, on -> if (on) picked.add(t) else picked.remove(t) }
+        }
+        Notes.allTags(all).forEach { list.addView(line(it), lp()) }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        if (list.childCount == 0) box.addView(text("No tags yet. Type one below, like Farm, Shop or Ideas.", 15f, C.SUB), lp().margins(this, b = 8))
+        box.addView(list)
+        val f = field("New tag")
+        fun addTyped() {
+            val t = Notes.cleanTags(listOf(f.text.toString())).firstOrNull() ?: return
+            // The same tag in other capitals is the one already there.
+            val same = (0 until list.childCount).map { list.getChildAt(it) as android.widget.CheckBox }
+                .firstOrNull { it.text.toString().equals(t, ignoreCase = true) }
+            if (same != null) same.isChecked = true else { picked.add(t); list.addView(line(t), lp()) }
+            f.setText("")
+        }
+        f.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+        f.setOnEditorActionListener { _, _, _ -> addTyped(); true }
+        box.addView(row(
+            f.apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
+            spacer(wDp = 8),
+            pill("Add") { addTyped() },
+        ), lp().margins(this, t = 8))
+        sheet("Tags", box, positive = "Save") {
+            addTyped() // typed but not added yet: meant to be
+            val tags = Notes.cleanTags(picked.toList())
+            if (tags != mine) runCatching { Notes.setTags(this, noteId, tags) }.onFailure { toast("Couldn't save the tags") }
+            done(tags)
+        }
+        Unit
+    }
+
+    /** [s] with the words searched for marked, as the Notes list marks them. */
+    private fun marked(s: String): CharSequence {
+        val words = NoteFind.words(find)
+        if (words.isEmpty()) return s
+        val sp = SpannableString(s)
+        val hl = (C.visible(a.prefs.accent) and 0x00FFFFFF) or 0x44000000
+        NoteFind.hits(s, words).forEach { sp.setSpan(BackgroundColorSpan(hl), it.first, it.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+        return sp
+    }
+
+    /**
+     * Opened from a search: the transcript has the words marked, the page scrolls to the first, and a voice note is
+     * set to play from there.
+     */
+    private fun goToFind() {
+        val words = NoteFind.words(find)
+        if (transcript == null || words.isEmpty()) return
+        val i = this.words.indexOfFirst { w -> words.any { w.text.lowercase().contains(it) } }
+        if (i < 0) return
+        following = true
+        follow(i, force = true)
+        val file = NoteImport.audioFile(a, id) ?: return
+        val p = prepare(file) ?: return
+        val t = this.words[i].start
+        seekingTo = t
+        p.seekTo((t * 1000).toLong(), MediaPlayer.SEEK_CLOSEST)
+        show((t * 1000).toInt())
+    }
 
     /**
      * Summary and Timeline: small outlined buttons with a leading glyph (text or icon), filled while their card is
@@ -388,6 +476,12 @@ class NoteScreen(private val a: MainActivity, private val id: Long) {
                 override fun updateDrawState(ds: TextPaint) { ds.color = C.TEXT; ds.isUnderlineText = false }
             }, from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             at = to
+        }
+        // Opened from a search: the words searched for are marked (bold, lighter than the word being played).
+        val hl = (C.visible(a.prefs.accent) and 0x00FFFFFF) or 0x2E000000
+        NoteFind.hits(text, NoteFind.words(find)).forEach {
+            s.setSpan(BackgroundColorSpan(hl), it.first, it.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            s.setSpan(android.text.style.StyleSpan(Typeface.BOLD), it.first, it.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         span = s
         return s

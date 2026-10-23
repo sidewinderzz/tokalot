@@ -6,6 +6,12 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.48 · 2026-10-23
+- Tag your voice notes. Tap + Tag on a note (or Tags in its ⋮ menu) to pick tags or make a new one. Tap a tag to see every note with it. Tags sync to your other devices.
+- The Notes list has a search box that looks through the words in every note, its title and its tags. Matching words are highlighted, and opening a result takes you to the first match; on a voice note, Play starts there.
+- Tag chips above the list filter it, and a sort menu puts notes newest first, oldest first or by title, or shows only a day or a date range.
+- Record from a Bluetooth headset: Settings › Recording › Microphone › Bluetooth headset first. When a headset is connected its mic is used, otherwise the phone's. Choose whether that's for voice notes only or for dictation too. Off until you turn it on, because music pauses while the headset mic is in use.
+
 ## 1.46 · 2026-10-23
 - New: Tokalot Keyboard, an optional keyboard in the style of Gboard. Turn it on in Settings › Keyboard.
 - It autocorrects as you type (teh becomes the, dont becomes don't), and a backspace straight after puts back what you typed. Three suggestions sit above the keys, and between words it guesses the next one.

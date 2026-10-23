@@ -56,6 +56,14 @@ class MainActivity : Activity() {
     /** The note opened from the Notes page, if any, and its screen (which owns a player to stop). */
     private var openNote: Long? = null
     private var noteScreen: NoteScreen? = null
+    /** The search words the note was opened from, to highlight in it. */
+    private var openNoteFind = ""
+    /** What the Notes list shows: its search, tag chip, sort and dates. Kept while a note is open. */
+    var notesFilter = NoteFind.Filter()
+    /** The Notes search box, kept across redraws so typing isn't interrupted (like the one on Home). */
+    var notesSearch: EditText? = null
+    /** Redraws just the list under the Notes search box, as the search changes. */
+    var notesRefill: (() -> Unit)? = null
     /** A note deleted a moment ago: hidden, with "Note deleted · Undo" showing. It's really deleted when the bar goes. */
     var pendingDelete: Long? = null
         private set
@@ -175,6 +183,7 @@ class MainActivity : Activity() {
         prefs = Prefs(this)
         applyColors()
         searchField = null // holds the old colors
+        notesSearch = null
         buildRoot()
         render()
         if (scroll > 0) (content.getChildAt(0) as? ScrollView)?.let { it.post { it.scrollTo(0, scroll) } }
@@ -565,9 +574,18 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Opens one note on its own page (its player, summary and index). */
-    fun openNote(id: Long) {
+    /** Opens one note on its own page (its player, summary and index), with the words of [find] highlighted. */
+    fun openNote(id: Long, find: String = "") {
         openNote = id
+        openNoteFind = find
+        render()
+    }
+
+    /** Back to the Notes list showing only the notes tagged [tag]. */
+    fun showTag(tag: String) {
+        notesFilter = notesFilter.copy(tag = tag)
+        openNote = null
+        tab = Tab.NOTES
         render()
     }
 
@@ -652,7 +670,7 @@ class MainActivity : Activity() {
         noteScreen?.release()
         noteScreen = null
         val screen = if (inWelcome) WelcomeScreen(this).build() else if (inSettings) SettingsScreen(this).build() else if (inStats) StatsScreen(this).build()
-        else if (note != null) NoteScreen(this, note).also { noteScreen = it }.build() else when (tab) {
+        else if (note != null) NoteScreen(this, note, openNoteFind).also { noteScreen = it }.build() else when (tab) {
             Tab.HOME -> buildHome()
             Tab.DICTIONARY -> DictionaryScreen(this).build()
             Tab.STYLE -> StyleScreen(this).build()

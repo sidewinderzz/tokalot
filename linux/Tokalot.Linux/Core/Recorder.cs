@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.IO;
 using System.Threading;
 using Tokalot.Desktop.Platform;
@@ -8,7 +9,7 @@ using Tokalot.Desktop.Platform;
 namespace Tokalot.Desktop.Core;
 
 /**
- * Records 16 kHz mono 16-bit audio (what Whisper wants) from the default microphone.
+ * Records 16 kHz mono 16-bit audio (what Whisper wants) from the default microphone, or the one picked in Settings (Mics).
  * Linux: the sound server's own recorder program does the capturing (pw-record for PipeWire,
  * parec for PulseAudio, arecord for plain ALSA) and its raw output is read here in 50 ms chunks.
  */
@@ -65,6 +66,43 @@ public sealed class Recorder : IDisposable
         }
     }
 
+    /**
+     * The microphones the sound server has (PipeWire or PulseAudio, through pactl), by their names there. Monitors (what
+     * the speakers play) are left out. Empty without pactl, and then only the default is used.
+     */
+    public static List<Mic> Mics()
+    {
+        var output = new List<Mic>();
+        if (Sh.Which("pactl") is not { } pactl) return output;
+        void Add(string name, string desc)
+        {
+            if (name.Length == 0 || name.EndsWith(".monitor", StringComparison.Ordinal) || output.Any(m => m.Id == name)) return;
+            output.Add(new Mic(name, desc.Length > 0 ? desc : name, name.Contains("bluez", StringComparison.OrdinalIgnoreCase) || Core.Mics.LooksLikeHeadset(desc)));
+        }
+        // Newer pactl can say it as JSON, with each mic's readable name.
+        var json = Sh.Run(pactl, new[] { "-f", "json", "list", "sources" });
+        if (json.Exit == 0 && json.Out.TrimStart().StartsWith('['))
+        {
+            try
+            {
+                foreach (var o in System.Text.Json.Nodes.JsonNode.Parse(json.Out)!.AsArray().OfType<System.Text.Json.Nodes.JsonObject>())
+                    Add(o["name"]?.ToString() ?? "", o["description"]?.ToString() ?? "");
+                return output;
+            }
+            catch { output.Clear(); }
+        }
+        // Older: names only (index, name, driver… separated by tabs).
+        foreach (var line in Sh.Run(pactl, new[] { "list", "short", "sources" }).Out.Split('\n'))
+        {
+            var cols = line.Split('\t');
+            if (cols.Length >= 2) Add(cols[1].Trim(), "");
+        }
+        return output;
+    }
+
+    /** The mic the last recording used: null when it was the default. */
+    public Mic? Using { get; private set; }
+
     /** How much has been recorded so far, in samples. */
     public int Count { get { lock (gate) return samples.Count; } }
 
@@ -94,7 +132,14 @@ public sealed class Recorder : IDisposable
             LateSpeechChunks = 0;
             floor = 0.002f;
 
-            var order = new List<(string Tool, string[] Args)>(Tools);
+            // The picked (or headset) mic: pw-record and parec are pointed at it; arecord only knows the default.
+            Using = Core.Mics.ForRecording(Mics);
+            var order = Tools.Select(t => (t.Tool, Args: Using == null ? t.Args : t.Tool switch
+            {
+                "pw-record" => new[] { "--target", Using.Id }.Concat(t.Args).ToArray(),
+                "parec" => new[] { "--device=" + Using.Id }.Concat(t.Args).ToArray(),
+                _ => t.Args,
+            })).ToList();
             order.Sort((a, b) => (b.Tool == proven).CompareTo(a.Tool == proven));
             // First pass: a recorder has 450 ms to deliver. If none does, a second pass gives each up to 3 s,
             // which a Bluetooth headset switching to its microphone mode can need.

@@ -7,7 +7,7 @@ using Tokalot.Desktop.Platform;
 namespace Tokalot.Desktop.Core;
 
 /**
- * Records 16 kHz mono 16-bit audio (what Whisper wants) from the default microphone.
+ * Records 16 kHz mono 16-bit audio (what Whisper wants) from the default microphone, or the one picked in Settings (Mics).
  * Mac: Core Audio's AudioQueue does the capturing and converts from the microphone's own rate;
  * it hands over 50 ms chunks on its own thread. The first recording makes macOS ask whether
  * Tokalot may use the microphone (the reason shown comes from the app's Info.plist).
@@ -38,6 +38,7 @@ public sealed unsafe class Recorder : IDisposable
     [DllImport(Native.AudioToolbox)] private static extern int AudioQueueStart(IntPtr queue, IntPtr startTime);
     [DllImport(Native.AudioToolbox)] private static extern int AudioQueueStop(IntPtr queue, byte immediate);
     [DllImport(Native.AudioToolbox)] private static extern int AudioQueueDispose(IntPtr queue, byte immediate);
+    [DllImport(Native.AudioToolbox)] private static extern int AudioQueueSetProperty(IntPtr queue, uint id, void* data, uint size);
 
     private IntPtr queue;
     private GCHandle self;
@@ -96,6 +97,14 @@ public sealed unsafe class Recorder : IDisposable
             mine = ++session;
             int err = AudioQueueNewInput(ref format, &OnBuffer, GCHandle.ToIntPtr(self), IntPtr.Zero, IntPtr.Zero, 0, out var q);
             if (err != 0) { Fail("AudioQueueNewInput", err); return false; }
+            // The picked (or headset) mic, by its Core Audio UID. If it won't take it, the queue stays on the default.
+            Using = Core.Mics.ForRecording(Mics);
+            if (Using != null)
+            {
+                var uid = Native.Str(Using.Id);
+                if (AudioQueueSetProperty(q, 0x61716364 /* 'aqcd' current device */, &uid, (uint)IntPtr.Size) != 0) Using = null;
+                Native.CFRelease(uid);
+            }
             for (int i = 0; i < Buffers; i++)
             {
                 if ((err = AudioQueueAllocateBuffer(q, ChunkBytes, out var buf)) != 0) { AudioQueueDispose(q, 1); Fail("AudioQueueAllocateBuffer", err); return false; }
@@ -236,6 +245,51 @@ public sealed unsafe class Recorder : IDisposable
 
     [DllImport(CoreAudio)]
     private static extern int AudioObjectGetPropertyData(uint objectId, ref Address address, uint qualifierSize, IntPtr qualifier, ref uint dataSize, void* data);
+
+    [DllImport(CoreAudio)]
+    private static extern int AudioObjectGetPropertyDataSize(uint objectId, ref Address address, uint qualifierSize, IntPtr qualifier, out uint dataSize);
+
+    private const uint Global = 0x676C6F62; // 'glob'
+    private const uint InputScope = 0x696E7074; // 'inpt'
+
+    /** A device's string property (its name or UID), or null. */
+    private static string? DeviceText(uint id, uint selector)
+    {
+        var a = new Address { Selector = selector, Scope = Global, Element = 0 };
+        IntPtr text = IntPtr.Zero;
+        uint size = (uint)IntPtr.Size;
+        if (AudioObjectGetPropertyData(id, ref a, 0, IntPtr.Zero, ref size, &text) != 0 || text == IntPtr.Zero) return null;
+        var s = Native.Text(text);
+        Native.CFRelease(text);
+        return s;
+    }
+
+    /** The mic the last recording used: null when it was the default. */
+    public Mic? Using { get; private set; }
+
+    /** The Mac's microphones (devices with an input), by their Core Audio UID. Bluetooth ones count as headsets. */
+    public static List<Mic> Mics()
+    {
+        var output = new List<Mic>();
+        if (!OperatingSystem.IsMacOS()) return output;
+        var all = new Address { Selector = 0x64657623 /* 'dev#' */, Scope = Global, Element = 0 };
+        if (AudioObjectGetPropertyDataSize(1, ref all, 0, IntPtr.Zero, out var size) != 0 || size == 0) return output;
+        var ids = new uint[size / 4];
+        fixed (uint* p = ids) if (AudioObjectGetPropertyData(1, ref all, 0, IntPtr.Zero, ref size, p) != 0) return output;
+        foreach (var id in ids)
+        {
+            var streams = new Address { Selector = 0x73746D23 /* 'stm#' */, Scope = InputScope, Element = 0 };
+            if (AudioObjectGetPropertyDataSize(id, ref streams, 0, IntPtr.Zero, out var n) != 0 || n == 0) continue;
+            if (DeviceText(id, 0x75696420 /* 'uid ' */) is not { } uid) continue;
+            var name = DeviceText(id, 0x6C6E616D /* 'lnam' */) ?? uid;
+            var tran = new Address { Selector = 0x7472616E /* 'tran' */, Scope = Global, Element = 0 };
+            uint transport = 0, ts = 4;
+            AudioObjectGetPropertyData(id, ref tran, 0, IntPtr.Zero, ref ts, &transport);
+            var bluetooth = transport is 0x626C7565 /* 'blue' */ or 0x626C6561 /* 'blea' */;
+            output.Add(new Mic(uid, name, bluetooth || Core.Mics.LooksLikeHeadset(name)));
+        }
+        return output;
+    }
 
     /** The name of the default input device ("MacBook Air Microphone"), or null when there is none. */
     public static string? InputDevice()

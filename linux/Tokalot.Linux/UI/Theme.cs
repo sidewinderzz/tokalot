@@ -174,9 +174,9 @@ public static class Ui
 
     /**
      * A small modal in the app's own style. Returns true for the main button. cancel: null shows a
-     * single button. (Windows' version blocks until it closes; here it is awaited.)
+     * single button; [extra] goes under the message. (Windows' version blocks until it closes; here it is awaited.)
      */
-    public static async Task<bool> Dialog(Window? owner, string message, string ok = "OK", string? cancel = "Cancel", string? title = null)
+    public static async Task<bool> Dialog(Window? owner, string message, string ok = "OK", string? cancel = "Cancel", string? title = null, Control? extra = null)
     {
         var result = false;
         var w = new Window
@@ -202,7 +202,8 @@ public static class Ui
             h.Margin = new Thickness(0, 0, 0, 8);
             body.Children.Add(h);
         }
-        body.Children.Add(Text(message, 15));
+        if (message.Length > 0) body.Children.Add(Text(message, 15));
+        if (extra != null) body.Children.Add(extra);
         body.Children.Add(buttons);
         w.Content = new Border
         {

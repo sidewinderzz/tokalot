@@ -16,6 +16,10 @@
     <!-- Tokalot Keyboard offers a screenshot you just took on its bar, ready to paste (Settings › Keyboard). -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- Recording from a Bluetooth headset's mic (Settings › Recording › Microphone): opening the headset's call
+         link. Neither asks anything; BLUETOOTH is only needed for that on Android 11 and older. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <!-- In-app updates: lets Tokalot hand a newer signed APK to Android's installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Optional, never granted by installing: only if you run the adb command in Settings › Setup. Then, when an

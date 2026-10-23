@@ -268,6 +268,46 @@ class SyncTest {
         assertEquals(state.copy(instructions = ""), SyncFormat.parseBase(SyncFormat.encodeBase(state), "default"))
     }
 
+    // ---------- note tags ----------
+
+    private val farm = listOf("Farm")
+    private val shop = listOf("Shop")
+
+    @Test fun tagsChangedOnOneSideWin() {
+        val base = listOf(a.copy(tags = farm))
+        assertEquals(listOf(a.copy(tags = shop)), notes(listOf(a.copy(tags = shop)), listOf(a.copy(tags = farm)), base)) // here
+        assertEquals(listOf(a.copy(tags = shop)), notes(listOf(a.copy(tags = farm)), listOf(a.copy(tags = shop)), base)) // there
+        assertEquals(listOf(a.copy(tags = emptyList())), notes(listOf(a.copy(tags = emptyList())), listOf(a.copy(tags = farm)), base)) // removed here
+    }
+
+    /** An older Tokalot doesn't know tags: it writes notes without them, and that never clears the tags. */
+    @Test fun aSideWithoutTagsNeverClearsThem() {
+        val base = listOf(a.copy(tags = farm))
+        assertEquals(listOf(a.copy(tags = farm)), notes(listOf(a.copy(tags = farm)), listOf(a), base))
+        assertEquals(listOf(a.copy(tags = farm)), notes(listOf(a.copy(tags = farm)), listOf(a), listOf(a)))
+    }
+
+    /** The first sync after updating has no tags in the base: a device with tags isn't undone by one with none yet. */
+    @Test fun theFirstSyncWithTagsKeepsThem() {
+        assertEquals(listOf(a.copy(tags = farm)), notes(listOf(a.copy(tags = emptyList())), listOf(a.copy(tags = farm)), listOf(a)))
+        assertEquals(listOf(a.copy(tags = farm)), notes(listOf(a.copy(tags = farm)), listOf(a.copy(tags = emptyList())), listOf(a)))
+        assertEquals(listOf(a.copy(tags = listOf("Farm", "Shop"))), notes(listOf(a.copy(tags = farm)), listOf(a.copy(tags = shop)), listOf(a)))
+    }
+
+    @Test fun tagsSurviveTheFileAndTheBase() {
+        val state = SyncState(notes = listOf(b.copy(tags = listOf("Equipment", "Shop")), a.copy(tags = emptyList())))
+        val r = SyncFormat.parse(SyncFormat.encode(state, null, 1, "Android"))!!
+        assertEquals(state.notes, r.notes)
+        assertEquals(state.notes, SyncFormat.parseBase(SyncFormat.encodeBase(state), "").notes)
+    }
+
+    @Test fun tagsAreTidied() {
+        // The first spelling of a tag is the one kept; sorted A to Z whatever the capitals.
+        assertEquals(listOf("farm", "north 80", "Shop"), SyncMerge.cleanTags(listOf(" Shop ", "farm", "Farm", "north   80", "", "FARM")))
+        assertEquals(listOf("a b"), SyncMerge.cleanTags(listOf("a,b")))
+        assertEquals(30, SyncMerge.cleanTags(listOf("x".repeat(50))).single().length)
+    }
+
     // ---------- usage ----------
 
     private val oct = mapOf("2026-10" to UsageMonth(words = 500, dictations = 20))

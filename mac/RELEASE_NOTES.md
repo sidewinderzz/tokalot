@@ -2,6 +2,13 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.12.0
+
+- Tag your voice notes: **Tags…** in a note's ⋮ menu, or **+ Tag** under its date. Click a tag to see every note with it. Tags sync with your phone and other computers.
+- The Notes page has a search box that looks through the words in every note, its title and its tags. Matching words are highlighted, and opening a result shows them marked; on a voice note, Play starts at the first one.
+- Tag chips above the list filter it, and a sort menu puts notes newest first, oldest first or by title, or shows only a day or a date range.
+- New in Settings › Recording › **Microphone**: pick which mic to record from, and **Prefer a headset when one is connected** to use a headset's mic whenever it's plugged in or paired. Off by default.
+
 ## New in 0.10.0
 
 - Settings is now split into pages, listed down the left with a line saying what each is set to. Click one to open it. No more long scroll.

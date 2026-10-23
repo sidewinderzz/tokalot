@@ -13,8 +13,9 @@ import org.json.JSONTokener
 /**
  * One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one.
  * Title: null when the note has none, "" when it was cleared on purpose (so no device makes a new one).
+ * Tags: null when the side doesn't know tags (a file written by a version from before them), so it never clears any.
  */
-data class SyncNote(val id: Long, val time: Long, val text: String, val title: String? = null)
+data class SyncNote(val id: Long, val time: Long, val text: String, val title: String? = null, val tags: List<String>? = null)
 
 /** One month of one device's counts, as the sync file holds them. */
 data class UsageMonth(
@@ -111,11 +112,11 @@ object SyncFormat {
     const val TOO_NEW = "Update Tokalot to sync with this file"
     /**
      * What this version puts in the file, for telling an older Tokalot it is missing out. 1: dictionary,
-     * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history.
+     * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history. 3: note tags.
      * Raise it whenever something new goes in the file, on every platform at once. [FORMAT] only changes for a
      * change an older version would get wrong, since that one locks older versions out of the file.
      */
-    const val LEVEL = 2
+    const val LEVEL = 3
 
     val CATEGORIES = listOf("MESSAGING", "EMAIL", "AI_CODE", "OTHER")
     val STYLES = listOf("FORMAL", "CASUAL", "VERY_CASUAL")
@@ -166,7 +167,8 @@ object SyncFormat {
                 val n = arr.optJSONObject(i) ?: return@mapNotNull null
                 val id = (n.opt("id") as? Number)?.toLong() ?: return@mapNotNull null
                 val t = n.opt("text") as? String ?: return@mapNotNull null
-                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t, n.opt("title") as? String)
+                val tags = n.optJSONArray("tags")?.let { a -> SyncMerge.cleanTags((0 until a.length()).mapNotNull { j -> a.opt(j) as? String }) }
+                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t, n.opt("title") as? String, tags)
             }
         }
         val settings = o.optJSONObject("settings")?.let { s ->
@@ -282,7 +284,10 @@ object SyncFormat {
         o.put("instructions", state.instructions)
         o.put("notes", JSONArray().also { arr ->
             state.notes.forEach { n ->
-                arr.put(JSONObject().put("id", n.id).put("time", n.time).put("text", n.text).also { o -> n.title?.let { o.put("title", it) } })
+                arr.put(JSONObject().put("id", n.id).put("time", n.time).put("text", n.text).also { o ->
+                    n.title?.let { o.put("title", it) }
+                    n.tags?.let { o.put("tags", JSONArray(it)) }
+                })
             }
         })
         state.settings?.let { s ->
@@ -429,8 +434,8 @@ object SyncMerge {
 
     /**
      * Notes match by id. One that a side had at the last sync and no longer has was deleted there; a text
-     * changed since the last sync wins over the unchanged one, and so does a title, on its own. A side that doesn't
-     * know titles (an older version) never clears one. Newest first.
+     * changed since the last sync wins over the unchanged one, and so does a title, on its own, and so do tags. A side that
+     * doesn't know titles or tags (an older version) never clears them. Newest first.
      */
     private fun notes(l: List<SyncNote>, r: List<SyncNote>?, b: List<SyncNote>): List<SyncNote> {
         if (r == null) return l
@@ -445,13 +450,33 @@ object SyncMerge {
             when {
                 here != null && there != null -> {
                     val title = if (here.title != was?.title) here.title ?: there.title else there.title ?: here.title
-                    out.add((if (was != null && here.text == was.text) there else here).copy(title = title))
+                    out.add((if (was != null && here.text == was.text) there else here).copy(title = title, tags = tags(here.tags, there.tags, was?.tags)))
                 }
                 here != null -> if (was == null) out.add(here) // else: deleted elsewhere
                 there != null -> if (was == null) out.add(there) // else: deleted here
             }
         }
         return out.sortedWith(compareByDescending<SyncNote> { it.time }.thenByDescending { it.id })
+    }
+
+    /**
+     * One note's tags. Changed here since the last sync: this side's. Otherwise the other side's, unless it doesn't know
+     * tags. With no tags in the base (the first sync after updating), a side that has some wins over one that has none.
+     */
+    private fun tags(here: List<String>?, there: List<String>?, was: List<String>?): List<String>? = when {
+        there == null -> here
+        here == null -> there
+        was == null -> if (there.isEmpty()) here else if (here.isEmpty()) there else cleanTags(here + there)
+        here != was -> here
+        else -> there
+    }
+
+    /** Tags as every app keeps them: spaces tidied, no commas, at most 30 characters, no repeats whatever the capitals, A to Z. */
+    fun cleanTags(tags: List<String>): List<String> {
+        val seen = HashSet<String>()
+        return tags.map { it.replace(",", " ").trim().replace(Regex("\\s+"), " ").take(30).trim() }
+            .filter { it.isNotEmpty() && seen.add(it.lowercase()) }
+            .sortedWith(compareBy<String> { it.lowercase() }.thenBy { it })
     }
 
     private fun styles(l: Map<String, String>, r: Map<String, String>?, b: Map<String, String>): Map<String, String> {
