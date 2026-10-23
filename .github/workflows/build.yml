@@ -118,9 +118,11 @@ jobs:
           {
             echo "A beta of Tokalot $BASE, built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA::7}. Less tested than a release."
             echo
-            awk -v v="$BASE" '
-              /^## / { split(substr($0, 4), h, " "); on = (h[1] == v); next }
-              on && /^- / { print }
+            # Every changelog section newer than the latest release, as a beta can carry several.
+            LATEST=$(gh release view --json tagName -q .tagName 2>/dev/null | sed 's/^v//')
+            awk -v last="$LATEST" '
+              /^## / { split(substr($0, 4), h, " "); if (h[1] == last) exit; print "### " h[1]; next }
+              /^- / { print }
             ' app/src/main/assets/CHANGELOG.md
           } > beta-notes.md
           gh release delete "android-beta" --cleanup-tag --yes > /dev/null 2>&1 || true
