@@ -339,10 +339,18 @@ class Prefs(ctx: Context) {
         set(v) = sp.edit().putString("dismissed_words", JSONArray(v.toList()).toString()).apply()
 
     /** Offers [found] for the dictionary, leaving out words already there, offered or turned down. */
-    fun suggestWords(found: List<String>) {
+    /**
+     * Words spelled out while dictating: added to the dictionary (marked learned) when [learnWords] is on, else
+     * offered with Add and Not now. Returns the words that were added.
+     */
+    fun suggestWords(found: List<String>): List<String> {
         val have = (words + suggestedWords + dismissedWords).map { it.lowercase() }.toSet()
-        val fresh = found.filter { it.lowercase() !in have }
-        if (fresh.isNotEmpty()) suggestedWords = suggestedWords + fresh
+        val fresh = found.filter { it.lowercase() !in have }.distinctBy { it.lowercase() }
+        if (fresh.isEmpty()) return emptyList()
+        if (!learnWords) { suggestedWords = suggestedWords + fresh; return emptyList() }
+        words = words + fresh
+        learnedWords = learnedWords + fresh
+        return fresh
     }
 
     var snippets: List<Snippet>
@@ -664,10 +672,30 @@ class Prefs(ctx: Context) {
         get() = sp.safeString("shortcut_action", "off") ?: "off"
         set(v) = sp.edit().putString("shortcut_action", v).apply()
 
-    /** The Settings categories left open (see SettingsScreen.CATEGORIES); all closed until one is opened. */
-    var openSettings: Set<String>
-        get() = sp.getStringSet("open_settings", emptySet())?.toSet() ?: emptySet()
-        set(v) = sp.edit().putStringSet("open_settings", v).apply()
+    /** The cloud speech service in use before cloud speech was switched off on the Privacy page, to go back to. This phone only. */
+    var lastCloudStt: SttChoice
+        get() = enumOr(sp.safeString("last_cloud_stt", null), SttChoice.GROQ)
+        set(v) = sp.edit().putString("last_cloud_stt", v.name).apply()
+
+    /** Same for the AI cleanup service. */
+    var lastCleanup: CleanupChoice
+        get() = enumOr(sp.safeString("last_cleanup", null), CleanupChoice.GROQ)
+        set(v) = sp.edit().putString("last_cleanup", v.name).apply()
+
+    /** The first-run welcome (privacy level and setup) was finished or skipped, or wasn't needed (see [Welcome]). */
+    var welcomeDone: Boolean
+        get() = sp.safeBoolean("welcome_done", false)
+        set(v) = sp.edit().putBoolean("welcome_done", v).apply()
+
+    /** The welcome has started, and set the level it opens on. */
+    var welcomeStarted: Boolean
+        get() = sp.safeBoolean("welcome_started", false)
+        set(v) = sp.edit().putBoolean("welcome_started", v).apply()
+
+    /** The one-time Home card that introduces privacy levels to people who updated (see [Welcome]). */
+    var privacyCardSeen: Boolean
+        get() = sp.safeBoolean("privacy_card_seen", false)
+        set(v) = sp.edit().putBoolean("privacy_card_seen", v).apply()
 
     /** How long to keep recordings: 0 = don't save, Int.MAX_VALUE = forever. */
     var audioKeepDays: Int

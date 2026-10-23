@@ -65,7 +65,7 @@ object Tour {
             "Voice notes (beta)",
             "Save what you say as a note instead: from the Voice note tile, or start any dictation with \"Note this\". Off until you turn it on.",
             { notePicture() },
-            "Turn it on" to { a.openSettings(SettingsScreen.RECORDING) },
+            "Turn it on" to { a.openSettings(SettingsScreen.SHORTCUTS) },
         ),
     )
 
