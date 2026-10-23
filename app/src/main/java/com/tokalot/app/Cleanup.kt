@@ -74,6 +74,7 @@ object Cleanup {
             appendLine("- Keep the user's own words, meaning and voice: never swap a word for a better, more precise or more technical one, and keep vague or casual phrasing exactly as typed. Do not add information, summarize, or change what they said.")
         }
         appendLine("- Keep the user's line breaks, lists, emoji, links, email addresses and numbers as they are.")
+    }
 
     /**
      * Terminal command mode: the speech describes a command (or is one, spoken) and the output is that one command line,
