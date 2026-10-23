@@ -12,6 +12,9 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Tag chips above the list filter it, and a sort menu puts notes newest first, oldest first or by title, or shows only a day or a date range.
 - Record from a Bluetooth headset: Settings › Recording › Microphone › Bluetooth headset first. When a headset is connected its mic is used, otherwise the phone's. Choose whether that's for voice notes only or for dictation too. Off until you turn it on, because music pauses while the headset mic is in use.
 
+## 1.47 · 2026-10-23
+- A tidier Settings › About: the version and Check for updates sit together at the top, and What's new, Changelog, Open-source licenses and Source code are rows you tap, like the rest of Settings.
+
 ## 1.46 · 2026-10-23
 - New: Tokalot Keyboard, an optional keyboard in the style of Gboard. Turn it on in Settings › Keyboard.
 - It autocorrects as you type (teh becomes the, dont becomes don't), and a backspace straight after puts back what you typed. Three suggestions sit above the keys, and between words it guesses the next one.
