@@ -13,7 +13,8 @@ import java.io.File
  * the other devices through the sync file when one is set up.
  */
 object Notes {
-    class Note(val id: Long, val time: Long, val text: String)
+    /** [tags]: the user's own labels, as [cleanTags] leaves them (sorted, no repeats). */
+    class Note(val id: Long, val time: Long, val text: String, val tags: List<String> = emptyList())
 
     const val FILE = "notes.json"
     private val main by lazy { Handler(Looper.getMainLooper()) }
@@ -28,13 +29,19 @@ object Notes {
         val arr = JSONArray(json)
         return List(arr.length()) {
             val o = arr.getJSONObject(it)
-            Note(o.getLong("id"), o.getLong("time"), o.getString("text"))
+            val t = o.optJSONArray("tags")
+            Note(o.getLong("id"), o.getLong("time"), o.getString("text"),
+                if (t == null) emptyList() else cleanTags(List(t.length()) { i -> t.optString(i) }))
         }
     }
 
     private fun toJson(list: List<Note>): String {
         val arr = JSONArray()
-        list.forEach { arr.put(JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)) }
+        list.forEach {
+            val o = JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)
+            if (it.tags.isNotEmpty()) o.put("tags", JSONArray(it.tags))
+            arr.put(o)
+        }
         return arr.toString()
     }
 
@@ -77,10 +84,27 @@ object Notes {
         Sync.changed(ctx)
     }
 
+    /** Gives note [id] these tags (cleaned up first). Syncs. */
+    @Synchronized
+    fun setTags(ctx: Context, id: Long, tags: List<String>) {
+        val clean = cleanTags(tags)
+        save(ctx, forChange(ctx).map { if (it.id == id) Note(it.id, it.time, it.text, clean) else it })
+        Sync.changed(ctx)
+    }
+
+    /** Every tag used on any note, A to Z. */
+    fun allTags(notes: List<Note>): List<String> = cleanTags(notes.flatMap { it.tags })
+
+    /**
+     * Tags as they're kept: spaces tidied, commas dropped (the sync file and the desktop keep them in one line), at most
+     * 30 characters, no repeats whatever the capitals, sorted A to Z. Same rules as Notes.CleanTags on the desktop.
+     */
+    fun cleanTags(tags: List<String>): List<String> = SyncMerge.cleanTags(tags)
+
     @Synchronized
     private fun texts(ctx: Context): List<SyncNote> {
         val f = file(ctx)
-        return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text) } else emptyList()
+        return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text, tags = it.tags) } else emptyList()
     }
 
     /**
@@ -105,7 +129,7 @@ object Notes {
     @Synchronized
     private fun store(ctx: Context, before: List<SyncNote>, after: List<SyncNote>): Boolean {
         if (texts(ctx) != before.map { it.copy(title = null) }) return false
-        save(ctx, after.map { Note(it.id, it.time, it.text) })
+        save(ctx, after.map { Note(it.id, it.time, it.text, it.tags.orEmpty()) })
         return true
     }
 

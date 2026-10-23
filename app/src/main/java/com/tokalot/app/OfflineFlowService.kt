@@ -991,9 +991,11 @@ class OfflineFlowService : AccessibilityService() {
         setState(State.STARTING)
         // Start the mic foreground service first, then open the mic once Android confirms it.
         var began = false
-        val begin = {
-            if (!began && state == State.STARTING) {
-                began = true
+        // Settings › Recording › Microphone: a connected Bluetooth headset's mic first, for notes (or everything).
+        val headset = prefs.headsetMic && (manual == Manual.NOTE || prefs.headsetMicAll) && HeadsetMic.find(this) != null
+        val open = open@{ mic: android.media.AudioDeviceInfo? ->
+            if (state != State.STARTING) { HeadsetMic.release(this); return@open }
+            run {
                 recorder.onFull = {
                     handler.post {
                         if (state == State.RECORDING) {
@@ -1011,7 +1013,9 @@ class OfflineFlowService : AccessibilityService() {
                     }
                 }
                 recorder.cueSamples = if (prefs.sounds) Sounds.CUE_SAMPLES else 0
-                if (recorder.start()) {
+                if (recorder.start(mic) { HeadsetMic.release(this) }) {
+                    if (mic != null) toast("Recording with ${mic.productName.toString().ifBlank { "the headset" }}")
+                    else if (headset) toast("Couldn't reach the headset mic. Using the phone's.")
                     live = dictation.newLive()
                     if (live != null) handler.postDelayed(liveFeed, 300)
                     setState(State.RECORDING)
@@ -1029,6 +1033,12 @@ class OfflineFlowService : AccessibilityService() {
                     toast("Couldn't open the microphone")
                     updateButton()
                 }
+            }
+        }
+        val begin = {
+            if (!began && state == State.STARTING) {
+                began = true
+                if (headset) HeadsetMic.connect(this) { mic -> open(mic) } else open(null)
             }
         }
         RecordingService.onReady = { handler.post { begin() } }

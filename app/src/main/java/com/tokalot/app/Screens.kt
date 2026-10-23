@@ -364,42 +364,181 @@ class NotesScreen(private val a: MainActivity) {
             })
             return scroll(col)
         }
-        // A plain list grouped by day, newest first: tap a note to open it (its player, summary, timeline, copy and delete).
-        notes.groupBy { dayLabel(it.time) }.forEach { (label, group) ->
-            col.addView(text(label.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply { letterSpacing = 0.08f },
-                lp().margins(this, t = 12, b = 8, l = 4))
+        // Search, tag chips, the sort menu and dates sit above the list; typing only redraws the list under them.
+        val media = notes.associate { it.id to NoteImport.info(this, it.id) }
+        val items = notes.map { n -> NoteFind.Item(n.id, n.time, n.text, media[n.id]?.title, n.tags) }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(searchField(), lp().margins(this, b = 4))
+        col.addView(filterRow(Notes.allTags(notes)))
+        col.addView(box)
+        fun fill() = fillList(box, items, media)
+        a.notesRefill = { fill() }
+        fill()
+        scroll(col)
+    }
+
+    /** The search box: titles, the words of every note, and tags. */
+    private fun searchField(): View = with(a) {
+        val f = notesSearch ?: field("Search notes", notesFilter.query).apply {
+            background = rounded(C.CARD, 16, C.PILL, 1)
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, af: Int) {}
+                override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(e: Editable?) {
+                    notesFilter = notesFilter.copy(query = e?.toString()?.trim().orEmpty())
+                    notesRefill?.invoke()
+                }
+            })
+            notesSearch = this
+        }
+        (f.parent as? ViewGroup)?.removeView(f)
+        f
+    }
+
+    /** "All" and one chip per tag (when there are any), then the date chip if a range is on, and the sort menu at the end. */
+    private fun filterRow(tags: List<String>): View = with(a) {
+        val flow = FlowRow(this, dp(6))
+        val tag = notesFilter.tag?.takeIf { t -> tags.any { it.equals(t, ignoreCase = true) } }
+        if (tag == null && notesFilter.tag != null) notesFilter = notesFilter.copy(tag = null) // its last note was untagged
+        if (tags.isNotEmpty()) {
+            flow.addView(tagChip("All", selected = tag == null) { notesFilter = notesFilter.copy(tag = null); render() })
+            tags.forEach { t -> flow.addView(tagChip(t, selected = t.equals(tag, ignoreCase = true)) {
+                notesFilter = notesFilter.copy(tag = if (t.equals(tag, ignoreCase = true)) null else t); render()
+            }) }
+        }
+        if (notesFilter.from > 0) flow.addView(tagChip(rangeLabel() + "  ✕", selected = true) {
+            notesFilter = notesFilter.copy(from = 0, to = 0); render()
+        }.apply { contentDescription = "${rangeLabel()}. Show all dates" })
+        val sort = tagChip(notesFilter.sort.label.substringBefore(" first") + " ▾") {}
+        sort.contentDescription = "Sort: ${notesFilter.sort.label}"
+        sort.setOnClickListener {
+            val items = NoteFind.Sort.values().map { s ->
+                (if (s == notesFilter.sort) "✓  " else "     ") + s.label to { notesFilter = notesFilter.copy(sort = s); render() }
+            } + ("     Pick dates…" to { pickDates() })
+            popupMenu(sort, items)
+        }
+        flow.addView(sort)
+        flow
+    }
+
+    private fun day(t: Long) = java.text.SimpleDateFormat("MMM d", java.util.Locale.US).format(java.util.Date(t))
+
+    private fun rangeLabel(): String {
+        val f = a.notesFilter
+        val last = f.to - 1
+        return if (day(f.from) == day(last)) day(f.from) else "${day(f.from)} – ${day(last)}"
+    }
+
+    /** Quick ranges, or one day from the calendar. */
+    private fun pickDates(): Unit = with(a) {
+        fun midnight(daysAgo: Int) = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0); add(java.util.Calendar.DAY_OF_YEAR, -daysAgo)
+        }.timeInMillis
+        val tomorrow = midnight(-1)
+        val month = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.DAY_OF_MONTH, 1); set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val ranges = listOf(
+            "Any time" to (0L to 0L), "Today" to (midnight(0) to tomorrow), "Yesterday" to (midnight(1) to midnight(0)),
+            "Last 7 days" to (midnight(6) to tomorrow), "Last 30 days" to (midnight(29) to tomorrow), "This month" to (month to tomorrow),
+        )
+        fun set(from: Long, to: Long) { notesFilter = notesFilter.copy(from = from, to = to); render() }
+        choose("Show notes from", ranges.map { it.first } + "Pick a day…",
+            ranges.indexOfFirst { it.second == (notesFilter.from to notesFilter.to) }) { i ->
+            if (i < ranges.size) set(ranges[i].second.first, ranges[i].second.second)
+            else {
+                val c = java.util.Calendar.getInstance()
+                android.app.DatePickerDialog(this, { _, y, m, d ->
+                    val from = java.util.Calendar.getInstance().apply { clear(); set(y, m, d) }.timeInMillis
+                    val to = java.util.Calendar.getInstance().apply { clear(); set(y, m, d); add(java.util.Calendar.DAY_OF_YEAR, 1) }.timeInMillis
+                    set(from, to)
+                }, c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH), c.get(java.util.Calendar.DAY_OF_MONTH)).show()
+            }
+        }
+        Unit
+    }
+
+    /**
+     * The notes the filter lets through. By date: grouped by day, as before. By title: one list. While searching, each
+     * note shows the bit of it that matched, with the words marked; opening it marks them there too.
+     */
+    private fun fillList(box: LinearLayout, items: List<NoteFind.Item>, media: Map<Long, NoteImport.Info?>) = with(a) {
+        box.removeAllViews()
+        val f = notesFilter
+        val words = NoteFind.words(f.query)
+        val shown = NoteFind.apply(items, f)
+        if (shown.isEmpty()) {
+            box.addView(card(22).apply {
+                addView(text(when {
+                    f.query.isNotEmpty() -> "No notes match “${f.query}”."
+                    f.tag != null -> "No notes tagged ${f.tag} here."
+                    else -> "No notes from then."
+                }, 16f, C.SUB))
+            }, lp().margins(this, t = 12))
+            return
+        }
+        fun cap(s: String) = box.addView(text(s.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply { letterSpacing = 0.08f },
+            lp().margins(this, t = 12, b = 8, l = 4))
+        if (words.isNotEmpty()) cap(if (shown.size == 1) "1 note" else "${shown.size} notes")
+        val groups = if (f.sort == NoteFind.Sort.TITLE || words.isNotEmpty()) listOf("" to shown)
+        else shown.groupBy { dayLabel(it.time) }.toList()
+        groups.forEach { (label, group) ->
+            if (label.isNotEmpty()) cap(label)
             val c = card()
             group.forEachIndexed { i, n ->
                 if (i > 0) c.addView(divider())
-                val media = NoteImport.info(this, n.id)
-                val voice = media?.audio != null
-                val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
-                val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}${media.source?.let { " · from $it" } ?: ""}" else time
-                val preview = n.text.trim().replace(Regex("\\s+"), " ")
-                // A titled note leads with its title, then its first line.
-                val title = media?.title
-                c.addView(LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(20), dp(14), dp(16), dp(14))
-                    minimumHeight = dp(TOUCH_DP)
-                    background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
-                        android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
-                    if (title != null) {
-                        addView(text(title, 16f, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
-                        addView(text(n.text.trim().lineSequence().first().trim(), 15f, C.SUB).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
-                            lp().margins(this@with, t = 2))
-                    } else addView(text(preview, 16f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
-                    addView(row(
-                        if (voice) icon(R.drawable.ic_play, 14, C.SUB).apply { setPadding(0, 0, dp(4), 0) } else spacer(wDp = 0),
-                        text(meta, 13f, C.SUB),
-                    ).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this@with, t = 4))
-                    contentDescription = "${title?.let { "$it. " } ?: ""}$meta. $preview"
-                    setOnClickListener { openNote(n.id) }
-                })
+                c.addView(noteRow(n, media[n.id], words))
             }
-            col.addView(c)
+            box.addView(c)
         }
-        scroll(col)
+    }
+
+    private fun noteRow(n: NoteFind.Item, media: NoteImport.Info?, words: List<String>): View = with(a) {
+        val voice = media?.audio != null
+        val time = if (words.isNotEmpty() || notesFilter.sort == NoteFind.Sort.TITLE)
+            java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
+        else java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
+        val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}${media.source?.let { " · from $it" } ?: ""}" else time
+        val preview = n.text.trim().replace(Regex("\\s+"), " ")
+        fun marked(s: String): CharSequence {
+            if (words.isEmpty()) return s
+            val sp = android.text.SpannableString(s)
+            val hl = (C.visible(prefs.accent) and 0x00FFFFFF) or 0x44000000
+            NoteFind.hits(s, words).forEach { r ->
+                sp.setSpan(android.text.style.BackgroundColorSpan(hl), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                sp.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            return sp
+        }
+        // A titled note leads with its title, then its first line (or, while searching, the bit that matched).
+        val title = n.title
+        val snip = if (words.isNotEmpty()) NoteFind.snippet(n.text, words)?.text else null
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(16), dp(14))
+            minimumHeight = dp(TOUCH_DP)
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
+                android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
+            if (title != null) {
+                addView(text(marked(title), 16f, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+                addView(text(marked(snip ?: n.text.trim().lineSequence().first().trim()), 15f, C.SUB).apply {
+                    maxLines = if (snip != null) 2 else 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                }, lp().margins(this@with, t = 2))
+            } else addView(text(marked(snip ?: preview), 16f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
+            if (n.tags.isNotEmpty()) addView(FlowRow(this@with, dp(4)).apply {
+                n.tags.forEach { addView(tagChip(it)) }
+            }, lp().margins(this@with, t = 6))
+            addView(row(
+                if (voice) icon(R.drawable.ic_play, 14, C.SUB).apply { setPadding(0, 0, dp(4), 0) } else spacer(wDp = 0),
+                text(meta, 13f, C.SUB),
+            ).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this@with, t = 4))
+            contentDescription = "${title?.let { "$it. " } ?: ""}$meta. ${if (n.tags.isNotEmpty()) "Tags: ${n.tags.joinToString()}. " else ""}${snip ?: preview}"
+            setOnClickListener { openNote(n.id, notesFilter.query) }
+        }
     }
 }
 
@@ -551,7 +690,7 @@ class SettingsScreen(private val a: MainActivity) {
             PRIVACY to listOf("Privacy"),
             SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "Speed"),
             KEYS to listOf("API keys"),
-            RECORDING to listOf("Recording"),
+            RECORDING to listOf("Recording", "Microphone"),
             SHORTCUTS to listOf("Shortcuts"),
             "Appearance" to listOf("Appearance"),
             DATA to listOf("Sync", "Backup"),
@@ -761,6 +900,40 @@ class SettingsScreen(private val a: MainActivity) {
                 android.widget.Toast.makeText(this, "Back at the right edge, just above the keyboard", android.widget.Toast.LENGTH_SHORT).show()
             }
         ), lp().margins(this, t = 8, l = 4))
+
+        // --- Microphone: a Bluetooth headset's, when one is connected
+        section(col, "Microphone")
+        val mic = card()
+        mic.addView(choiceRow("Bluetooth headset first", "Uses a connected headset's mic, and the phone's when none is connected. Music pauses while you record, and it takes about a second to start.", prefs.headsetMic) {
+            if (!prefs.headsetMic) { prefs.headsetMic = true; render() }
+        })
+        mic.addView(divider())
+        mic.addView(choiceRow("Phone mic only", "Always the phone's own mic.", !prefs.headsetMic) {
+            if (prefs.headsetMic) { prefs.headsetMic = false; render() }
+        })
+        if (prefs.headsetMic) {
+            mic.addView(divider())
+            val uses = listOf("Voice notes only", "Voice notes and dictation")
+            mic.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(20), dp(14), dp(16), dp(14))
+                minimumHeight = dp(TOUCH_DP)
+                background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
+                    android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
+                addView(LinearLayout(this@with).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(text("Use it for", 17f))
+                    addView(text(uses[if (prefs.headsetMicAll) 1 else 0], 14f, C.SUB))
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(text("›", 22f, C.SUB))
+                contentDescription = "Use it for: ${uses[if (prefs.headsetMicAll) 1 else 0]}"
+                setOnClickListener {
+                    choose("Use the headset mic for", uses, if (prefs.headsetMicAll) 1 else 0) { i -> prefs.headsetMicAll = i == 1; render() }
+                }
+            })
+        }
+        col.addView(mic)
 
         // --- Shortcuts, for when there is no text box: the Quick Settings tiles, voice notes (beta) and the accessibility shortcut
         section(col, "Shortcuts")
@@ -1216,7 +1389,7 @@ class SettingsScreen(private val a: MainActivity) {
                 val have = Services.all.filter { prefs.key(it.first).isNotEmpty() }.map { it.second }
                 if (have.isEmpty()) "None added yet" to (prefs.stt != SttChoice.LOCAL) else have.joinToString(", ") to false
             }
-            RECORDING -> "${if (prefs.holdToTalk) "Hold to talk" else "Tap to talk"} · sounds ${yes(prefs.sounds)} · haptics ${yes(prefs.haptics)}" to false
+            RECORDING -> "${if (prefs.holdToTalk) "Hold to talk" else "Tap to talk"} · sounds ${yes(prefs.sounds)} · ${if (prefs.headsetMic) "headset mic" else "phone mic"}" to false
             SHORTCUTS -> (if (prefs.notesBeta) "Dictate tile, voice notes, volume keys" else "Dictate tile, volume keys") to false
             "Appearance" -> when (prefs.theme) { "light" -> "Light"; "dark" -> "Dark"; else -> "Match phone" } to false
             DATA -> (if (prefs.syncUri == null) "Sync off" else if (prefs.syncError != null) "Sync needs attention" else Sync.ago(prefs.syncLast)) to (prefs.syncError != null)

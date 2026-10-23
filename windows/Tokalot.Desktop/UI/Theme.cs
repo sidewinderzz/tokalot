@@ -90,9 +90,9 @@ public static class Ui
     /**
      * A small modal in the app's own style (the stock message box is white and square).
      * Returns true for the main button. cancel: null shows a single button. input: a box under the message, which
-     * gets the focus and takes Enter for the main button.
+     * gets the focus and takes Enter for the main button. extra: anything else, under the message (the tag picker).
      */
-    public static bool Dialog(Window? owner, string message, string ok = "OK", string? cancel = "Cancel", string? title = null, (Border Box, TextBox Input)? input = null)
+    public static bool Dialog(Window? owner, string message, string ok = "OK", string? cancel = "Cancel", string? title = null, (Border Box, TextBox Input)? input = null, FrameworkElement? extra = null)
     {
         var result = false;
         var w = new Window
@@ -118,7 +118,8 @@ public static class Ui
             h.Margin = new Thickness(0, 0, 0, 8);
             body.Children.Add(h);
         }
-        body.Children.Add(Text(message, 15));
+        if (message.Length > 0) body.Children.Add(Text(message, 15));
+        if (extra != null) body.Children.Add(extra);
         if (input is { } inp)
         {
             var (box, tb) = inp;

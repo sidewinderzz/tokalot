@@ -25,10 +25,10 @@ public static class Sync
     private const int Format = 1;
     /**
      * What this version puts in the file, for telling an older Tokalot it is missing out. 1: dictionary,
-     * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history.
+     * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history. 3: note tags.
      * Raise it whenever something new goes in the file, on every platform at once (SyncFormat.LEVEL on Android).
      */
-    public const int Level = 2;
+    public const int Level = 3;
 
     /** The synced part of the settings. Styles holds only the categories the user set themselves. */
     public sealed record Data(List<string> Words, List<Snippet> Snippets, Dictionary<string, string> Styles, string Instructions)
@@ -67,13 +67,16 @@ public static class Sync
     /**
      * One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one.
      * Title: null when the note has none, "" when it was cleared on purpose (so no device makes a new one).
+     * Tags: comma-separated (Notes.TagLine), "" for none, null when the side doesn't know tags (a file written by a
+     * version from before them), so it never clears any.
      */
-    public sealed record SyncNote(long Id, long Time, string Text, string? Title = null);
+    public sealed record SyncNote(long Id, long Time, string Text, string? Title = null, string? Tags = null);
 
     private static JsonNode? NoteJson(SyncNote n)
     {
         var o = new JsonObject { ["id"] = n.Id, ["time"] = n.Time, ["text"] = n.Text };
         if (n.Title != null) o["title"] = n.Title;
+        if (n.Tags != null) o["tags"] = new JsonArray(Notes.TagList(n.Tags).Select(t => (JsonNode?)t).ToArray());
         return o;
     }
 
@@ -344,8 +347,8 @@ public static class Sync
 
     /**
      * Notes match by id. One that a side had at the last sync and no longer has was deleted there; a text
-     * changed since the last sync wins over the unchanged one, and so does a title, on its own. A side that doesn't
-     * know titles (an older version) never clears one. Newest first.
+     * changed since the last sync wins over the unchanged one, and so does a title, on its own, and so do tags. A side
+     * that doesn't know titles or tags (an older version) never clears them. Newest first.
      */
     private static List<SyncNote> MergeNotes(List<SyncNote> local, List<SyncNote>? remote, List<SyncNote> basis)
     {
@@ -360,11 +363,23 @@ public static class Sync
             if (here != null && there != null)
             {
                 var title = here.Title != b?.Title ? here.Title ?? there.Title : there.Title ?? here.Title;
-                output.Add((b != null && here.Text == b.Text ? there : here) with { Title = title });
+                output.Add((b != null && here.Text == b.Text ? there : here) with { Title = title, Tags = MergeTags(here.Tags, there.Tags, b?.Tags) });
             }
             else if (b == null) output.Add((here ?? there)!); // else: deleted on one side
         }
         return output.OrderByDescending(n => n.Time).ThenByDescending(n => n.Id).ToList();
+    }
+
+    /**
+     * One note's tags. Changed here since the last sync: this side's. Otherwise the other side's, unless it doesn't know
+     * tags. With no tags in the basis (the first sync after updating), a side that has some wins over one that has none.
+     */
+    private static string? MergeTags(string? here, string? there, string? was)
+    {
+        if (there == null) return here;
+        if (here == null) return there;
+        if (was == null) return there.Length == 0 ? here : here.Length == 0 ? there : Notes.TagLine(Notes.CleanTags(Notes.TagList(here).Concat(Notes.TagList(there))));
+        return here != was ? here : there;
     }
 
     /**
@@ -435,7 +450,12 @@ public static class Sync
         var styles = (file["styles"] as JsonObject)?.Where(kv => kv.Value != null).ToDictionary(kv => kv.Key, kv => kv.Value!.ToString()) ?? new();
         var notes = (file["notes"] as JsonArray)?.OfType<JsonObject>()
             .Where(o => Num(o["id"]) != null && o["text"] is JsonValue)
-            .Select(o => { var id = Num(o["id"])!.Value; return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString(), o["title"] is JsonValue t ? t.ToString() : null); })
+            .Select(o =>
+            {
+                var id = Num(o["id"])!.Value;
+                var tags = o["tags"] is JsonArray ta ? Notes.TagLine(Notes.CleanTags(ta.OfType<JsonValue>().Where(v => v.GetValueKind() == JsonValueKind.String).Select(v => v.ToString()))) : null;
+                return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString(), o["title"] is JsonValue t ? t.ToString() : null, tags);
+            })
             .ToList();
         SortedDictionary<string, string>? settings = null;
         if (file["settings"] is JsonObject so)

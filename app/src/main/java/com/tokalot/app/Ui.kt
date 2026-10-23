@@ -250,6 +250,65 @@ fun Context.weightSpacer() = View(this).apply {
     layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
 }
 
+/** Lays its children out left to right and starts a new line when one doesn't fit (tag chips). */
+class FlowRow(ctx: Context, private val gapPx: Int) : ViewGroup(ctx) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val max = MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight
+        var x = 0; var y = 0; var line = 0; var widest = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == GONE) continue
+            c.measure(MeasureSpec.makeMeasureSpec(max, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            if (x > 0 && x + c.measuredWidth > max) { y += line + gapPx; x = 0; line = 0 }
+            x += c.measuredWidth + gapPx
+            line = maxOf(line, c.measuredHeight)
+            widest = maxOf(widest, x - gapPx)
+        }
+        val w = if (MeasureSpec.getMode(widthMeasureSpec) == MeasureSpec.EXACTLY) MeasureSpec.getSize(widthMeasureSpec) else widest + paddingLeft + paddingRight
+        setMeasuredDimension(w, y + line + paddingTop + paddingBottom)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val max = r - l - paddingLeft - paddingRight
+        var x = 0; var y = 0; var line = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == GONE) continue
+            if (x > 0 && x + c.measuredWidth > max) { y += line + gapPx; x = 0; line = 0 }
+            c.layout(paddingLeft + x, paddingTop + y, paddingLeft + x + c.measuredWidth, paddingTop + y + c.measuredHeight)
+            x += c.measuredWidth + gapPx
+            line = maxOf(line, c.measuredHeight)
+        }
+    }
+}
+
+/**
+ * A small rounded tag. [onClick] null: just a label (in a list row). With one it's a 40dp-tall button; [dashed] for
+ * "+ Tag". [selected] fills it, like a picked filter.
+ */
+fun Context.tagChip(label: String, selected: Boolean = false, dashed: Boolean = false, onClick: (() -> Unit)? = null): TextView =
+    text(label, if (onClick == null) 12f else 14f, if (selected) C.CARD else C.TEXT).apply {
+        gravity = Gravity.CENTER
+        val bg = when {
+            selected -> rounded(C.TEXT, 100)
+            dashed -> GradientDrawable().apply { cornerRadius = dpf(100); setColor(C.CARD); setStroke(dp(1), C.PILL, dpf(4), dpf(3)) }
+            onClick != null -> rounded(C.CARD, 100, C.PILL, 1)
+            else -> rounded(C.FIELD, 100)
+        }
+        if (onClick == null) {
+            background = bg
+            setPadding(dp(8), dp(2), dp(8), dp(2))
+        } else {
+            val gap = dp(4)
+            background = InsetDrawable(pressable(bg), 0, gap, 0, gap)
+            setPadding(dp(14), dp(6) + gap, dp(14), dp(6) + gap)
+            minHeight = dp(40)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { onClick() }
+        }
+    }
+
 fun lp(w: Int = ViewGroup.LayoutParams.MATCH_PARENT, h: Int = ViewGroup.LayoutParams.WRAP_CONTENT) =
     LinearLayout.LayoutParams(w, h)
 
