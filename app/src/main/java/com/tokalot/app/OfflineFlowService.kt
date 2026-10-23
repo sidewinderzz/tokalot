@@ -1025,6 +1025,7 @@ class OfflineFlowService : AccessibilityService() {
                         pendingStop -> stopAndTranscribe()
                         // Started by hand there's nothing to hold, so it works like tap mode.
                         prefs.autoStop && (!prefs.holdToTalk || manual != null) -> handler.postDelayed(silenceCheck, 1000)
+                        else -> {}
                     }
                 } else {
                     RecordingService.stop(this)
