@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.47 · 2026-10-23
+- A tidier Settings › About: the version and Check for updates sit together at the top, and What's new, Changelog, Open-source licenses and Source code are rows you tap, like the rest of Settings.
+
 ## 1.45 · 2026-10-23
 - Settings is now a short list of pages, like Android's own Settings. Each row says what it's set to; tap one to open it. No more folding sections that stay open.
 - New Privacy page with three levels: Everything on, Balanced and Most private. A level sets the privacy switches all at once, and you can still change any switch. A change made anywhere shows up there, and a mix that matches no level shows as Custom.
