@@ -322,8 +322,14 @@ class Dictation(context: Context) {
 
         stageChars = base.length
         stage = 1
-        // A word spelled out letter by letter is offered for the dictionary in the app (nothing is added unasked).
-        runCatching { prefs.suggestWords(Learn.spelled(base, prefs.words)) }
+        // A word spelled out letter by letter goes into the dictionary when Learn from my corrections is on,
+        // and is offered there (Add or Not now) when it's off.
+        runCatching {
+            val added = prefs.suggestWords(Learn.spelled(base, prefs.words))
+            if (added.isNotEmpty()) android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(app, "Tokalot learned ${added.joinToString(", ") { "“$it”" }}. Remove it in Dictionary if that's wrong.", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
 
         // 2-4. Snippets + cleanup
         val snippets = prefs.snippets

@@ -342,6 +342,7 @@ public sealed class MainWindow : Window
 
     public void Go(Page p)
     {
+        if (!S.WelcomeDone && WelcomeDue()) { S.WelcomeDone = true; S.Save(); } // clicked away from the welcome: it's skipped
         if (openNoteId != null) { NotePlayer.Stop(false); openNoteId = null; } // the sidebar's Notes goes back to the list too
         if (p != Page.Notes) CommitDelete();
         if (p != CurrentPage) scroller.ScrollToTop();
@@ -356,8 +357,10 @@ public sealed class MainWindow : Window
         if (CurrentPage == Page.Notes && !S.NotesBeta) CurrentPage = Page.Home; // voice notes were switched off (or restored away)
         RenderNav();
         playerHost.Visibility = Visibility.Collapsed; // the note page puts it back
-        var col = new StackPanel { MaxWidth = 760, Margin = new Thickness(36, 10, 36, 48) };
-        switch (CurrentPage)
+        var welcome = WelcomeDue();
+        var col = new StackPanel { MaxWidth = !welcome && CurrentPage == Page.Settings ? 1100 : 760, Margin = new Thickness(36, 10, 36, 48) };
+        if (welcome) BuildWelcome(col);
+        else switch (CurrentPage)
         {
             case Page.Home: BuildHome(col); break;
             case Page.Dictionary: BuildDictionary(col); break;
@@ -368,7 +371,7 @@ public sealed class MainWindow : Window
             case Page.Stats: BuildStats(col); break;
         }
         wideLayout = IsWide;
-        scroller.Content = wideLayout && !(CurrentPage == Page.Notes && openNoteId != null) ? TwoColumns(col) : StripMarkers(col);
+        scroller.Content = wideLayout && !welcome && CurrentPage != Page.Settings && !(CurrentPage == Page.Notes && openNoteId != null) ? TwoColumns(col) : StripMarkers(col);
         scroller.UpdateLayout();
         scroller.ScrollToVerticalOffset(offset);
         NoteChip();
@@ -551,6 +554,17 @@ public sealed class MainWindow : Window
         }
 
         SpelledCard(col);
+
+        // For people who updated: privacy levels are new, and their settings didn't change.
+        if (!S.PrivacyCardSeen)
+        {
+            var c = Ui.Stack(
+                Ui.Text("New: privacy levels", 16, bold: true),
+                Spaced(Ui.Text("Settings now has a Privacy page with three levels (Everything on, Balanced and Most private) and every privacy switch in one place. Your settings didn't change.", 14, C.Sub), 0, 4, 0, 12),
+                Ui.Row(Ui.Button("Have a look", () => { S.PrivacyCardSeen = true; S.Save(); OpenSettingsAt(PrivacyPage); }, filled: true),
+                    Spaced(Ui.Button("Dismiss", () => { S.PrivacyCardSeen = true; S.Save(); Render(); }), 8, 0, 0, 0)));
+            col.Children.Add(Spaced(Ui.Card(c, 20), 0, 0, 0, 14));
+        }
 
         if (!SetupComplete)
         {
@@ -861,9 +875,9 @@ public sealed class MainWindow : Window
         col.Children.Add(Spaced(add, 0, 10, 0, 16));
 
         col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Learn from my corrections",
-            "Off unless you turn it on. After Tokalot pastes a dictation, it looks at that text box again for up to two minutes. " +
+            "After Tokalot pastes a dictation, it looks at that text box again for up to two minutes. " +
             "If you respell one word into a name or a term (Kaitlin to Caitlyn, get hub to GitHub), the new spelling is added here, " +
-            "and a note lets you undo it. Ordinary words are left alone. The text is only compared on this PC, never saved or sent; " +
+            "and a note lets you undo it. A word you spell out while dictating (K-U-B-O-T-A) is added too. Ordinary words are left alone. The text is only compared on this PC, never saved or sent; " +
             "the learned word is all that's kept. Works in most apps, but not ones that don't let other programs read their text boxes.",
             Ui.Switch(S.LearnWords, v => { S.LearnWords = v; S.Save(); }))), 0, 0, 0, 16));
 
@@ -1786,34 +1800,30 @@ public sealed class MainWindow : Window
 
     // ---------- Settings ----------
 
-    private const string SetupCategory = "Setup", SpeechCategory = "Speech & cleanup", DataCategory = "Your data";
+    private const string SetupCategory = "Setup", PrivacyPage = "Privacy", SpeechCategory = "Speech & AI", KeysPage = "API keys";
 
-    /** Settings categories, in order, each with its sections in the order shown when it's open. Same as the Android app. */
-    private static readonly (string Name, string[] Sections)[] Categories =
+    /** Settings pages, in order, each with its sections in the order shown on it. Same pages as the Android app, less what only a phone has. */
+    private static readonly (string Name, string[] Sections)[] Pages =
     {
         (SetupCategory, new[] { "Setup" }),
-        (SpeechCategory, new[] { "Speech to text", "Offline model", "AI cleanup", "API keys", "Speed" }),
-        ("Recording & look", new[] { "Recording", "Recording indicator", "Appearance" }),
-        (DataCategory, new[] { "Recordings", "Sync", "AI assistants", "Backup", "Usage" }),
+        (PrivacyPage, new[] { "Privacy" }),
+        (SpeechCategory, new[] { "Speech to text", "Offline model", "AI cleanup", "Speed" }),
+        (KeysPage, new[] { "API keys" }),
+        ("Recording", new[] { "Recording", "Recording indicator" }),
+        ("Appearance", new[] { "Appearance" }),
+        ("Sync & backup", new[] { "Sync", "Backup" }),
+        ("Recordings & usage", new[] { "Recordings", "Usage" }),
+        ("AI assistants", new[] { "AI assistants" }),
         ("About", new[] { "About" }),
     };
 
-    /** On a wide window the categories from this one on go in the right column. A fixed split, so opening one never moves the others across. */
-    private const string RightColumnFrom = "Recording & look";
-
-    /** Screenshot mode shows every category open, so the pictures cover everything. */
+    /** Screenshot mode shows every page one after another, so the pictures cover everything. */
     private static readonly bool ShotMode = Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() == "--screenshots";
 
-    /**
-     * Setup opens by itself while setup isn't finished. It then stays open for the rest of this run, so adding a
-     * key doesn't fold it away under the pointer, unless it's closed by hand.
-     */
-    private static bool setupHeld, setupFolded;
+    /** The Settings page showing on the right. Null until Settings is first opened: then Setup while it isn't finished, else Privacy. */
+    private string? settingsPage;
 
-    /** Each category as last built (header first), for focus and scrolling after a rebuild. */
-    private readonly Dictionary<string, StackPanel> categoryViews = new();
-
-    /** Marks a section's small heading with its title, so Fold can tell where each section starts. */
+    /** Marks a section's small heading with its title, so Pages can tell where each section starts. */
     private sealed record SectionStart(string Title);
 
     private static void Section(StackPanel col, string title)
@@ -1823,23 +1833,21 @@ public sealed class MainWindow : Window
         col.Children.Add(l);
     }
 
-    /** Opens Settings with one category open and in view, for links that send the user there to fix something. */
-    internal void OpenSettingsAt(string category)
+    /** Opens Settings on one page, for links that send the user there to fix something. */
+    internal void OpenSettingsAt(string page)
     {
-        if (category == SetupCategory) setupFolded = false;
-        if (!S.OpenSettings.Contains(category)) { S.OpenSettings.Add(category); S.Save(); }
+        settingsPage = page;
+        scroller.ScrollToTop();
         Go(Page.Settings);
-        if (!categoryViews.TryGetValue(category, out var panel)) return;
-        // Its header near the top, and as much of what's inside as fits.
-        panel.BringIntoView(new Rect(0, 0, panel.ActualWidth, Math.Min(panel.ActualHeight, scroller.ViewportHeight * 0.8)));
     }
 
     /**
-     * Regroups the finished Settings page into Categories: each a header you click to open or close, holding its
-     * sections. The sections are built as before; this only moves each one (its heading and everything up to the
-     * next heading) under its category. Anything before the first section (the page title) stays on top.
+     * Lays the finished Settings page out as pages: a list of them down the left, each with a line saying what
+     * it's set to, and the open page's sections on the right. The sections are built as before; this only keeps
+     * the open page's (each heading and everything up to the next heading). Anything before the first section
+     * (the page title) stays on top.
      */
-    private void Fold(StackPanel col)
+    private void BuildPages(StackPanel col)
     {
         var items = col.Children.Cast<UIElement>().ToList();
         col.Children.Clear(); // an element can only have one parent, so let go of them all before moving them
@@ -1850,69 +1858,214 @@ public sealed class MainWindow : Window
             if (e is FrameworkElement { Tag: SectionStart start }) sections[start.Title] = current = new List<UIElement>();
             if (current != null) current.Add(e); else col.Children.Add(e);
         }
+        var shown = Pages.Where(p => p.Sections.Any(sections.ContainsKey)).ToList();
+        if (shown.All(p => p.Name != settingsPage)) settingsPage = SetupComplete ? PrivacyPage : SetupCategory;
 
-        if (!SetupComplete && !setupFolded) setupHeld = true;
-        var open = new HashSet<string>(S.OpenSettings);
-        if (setupHeld) open.Add(SetupCategory);
-        if (ShotMode) open.UnionWith(Categories.Select(c => c.Name));
-
-        categoryViews.Clear();
-        foreach (var (name, titles) in Categories)
+        var body = new StackPanel();
+        foreach (var (name, titles) in shown)
         {
+            if (!ShotMode && name != settingsPage) continue;
+            body.Children.Add(Spaced(Ui.Heading(name, 30), 0, body.Children.Count == 0 ? 0 : 36, 0, 0));
             var parts = titles.Where(sections.ContainsKey).ToList();
-            if (parts.Count == 0) continue;
-            if (name == RightColumnFrom) col.Children.Add(new ColBreak());
-            var isOpen = open.Contains(name);
-            var panel = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
-            panel.Children.Add(CategoryHeader(name, parts, isOpen));
-            if (isOpen)
+            foreach (var title in parts)
             {
-                var body = new StackPanel { Margin = new Thickness(0, 0, 0, 8) };
-                foreach (var title in parts)
+                var part = sections[title];
+                // A page holding one section of its own name doesn't need the small heading as well.
+                var skipHeading = parts.Count == 1;
+                for (int i = skipHeading ? 1 : 0; i < part.Count; i++)
                 {
-                    var part = sections[title];
-                    // A category holding one section of its own name doesn't need the small heading as well.
-                    var skipHeading = parts.Count == 1 && title == name;
-                    for (int i = skipHeading ? 1 : 0; i < part.Count; i++)
-                    {
-                        // The first thing inside sits a little closer to the header than headings between sections.
-                        if (body.Children.Count == 0 && part[i] is FrameworkElement first)
-                            first.Margin = new Thickness(first.Margin.Left, skipHeading ? 12 : 18, first.Margin.Right, first.Margin.Bottom);
-                        body.Children.Add(part[i]);
-                    }
+                    if (i == (skipHeading ? 1 : 0) && title == parts[0] && part[i] is FrameworkElement first)
+                        first.Margin = new Thickness(first.Margin.Left, 14, first.Margin.Right, first.Margin.Bottom);
+                    body.Children.Add(part[i]);
                 }
-                panel.Children.Add(body);
             }
-            col.Children.Add(panel);
-            categoryViews[name] = panel;
         }
+
+        var list = new StackPanel();
+        foreach (var (name, _) in shown) list.Children.Add(PageItem(name, name == settingsPage));
+        var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition());
+        grid.Children.Add(list);
+        Grid.SetColumn(body, 2);
+        grid.Children.Add(body);
+        col.Children.Add(grid);
     }
 
-    /** A category's header: its name, the sections inside, and a chevron. Click it (or Enter) to open or close it. */
-    private FrameworkElement CategoryHeader(string name, List<string> parts, bool isOpen)
+    /** One page in the list on the left: its name and what it's set to. Click it (or Enter) to open it. */
+    private FrameworkElement PageItem(string name, bool active)
     {
-        var texts = Ui.Stack(Ui.Text(name, 17.5, bold: true));
-        if (parts.Count > 1 || parts[0] != name) texts.Children.Add(Ui.Text(string.Join(" · ", parts), 13, C.Sub));
-        var chevron = Icons.Get("expand", 22, C.Sub);
-        chevron.RenderTransformOrigin = new Point(0.5, 0.5);
-        if (isOpen) chevron.RenderTransform = new RotateTransform(180); // points up while open
-        var inner = new Border { CornerRadius = new CornerRadius(20), Padding = new Thickness(20, 15, 16, 15), Background = Brushes.Transparent, Child = Spread(texts, chevron) };
-        var header = new Border { CornerRadius = new CornerRadius(20), Background = C.Card, Cursor = Cursors.Hand, Child = inner };
-        header.MouseEnter += (_, _) => inner.Background = C.Hover;
-        header.MouseLeave += (_, _) => inner.Background = Brushes.Transparent;
-        void Toggle()
+        var (sub, warn) = PageSummary(name);
+        var texts = Ui.Stack(Ui.Text(name, 15.5, C.Text, bold: active));
+        if (sub.Length > 0) texts.Children.Add(Ui.Text(sub, 12.5, warn ? C.Warn : C.Sub));
+        if (texts.Children.Count > 1 && texts.Children[1] is TextBlock t) t.TextWrapping = TextWrapping.Wrap;
+        var b = new Border
         {
-            var keyboard = header.IsKeyboardFocused;
-            if (isOpen) S.OpenSettings.Remove(name);
-            else if (!S.OpenSettings.Contains(name)) S.OpenSettings.Add(name);
-            if (name == SetupCategory) { setupFolded = isOpen; setupHeld = false; }
+            Child = texts, CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 9, 14, 9), Margin = new Thickness(0, 0, 0, 4),
+            Background = active ? C.NavActive : Brushes.Transparent, Cursor = Cursors.Hand,
+        };
+        b.MouseEnter += (_, _) => { if (!active) b.Background = C.Hover; };
+        b.MouseLeave += (_, _) => { if (!active) b.Background = Brushes.Transparent; };
+        void OpenPage() { settingsPage = name; scroller.ScrollToTop(); Render(); }
+        b.MouseLeftButtonUp += (_, _) => OpenPage();
+        return Ui.Keys(b, OpenPage, sub.Length > 0 ? $"{name}, {sub}" : name);
+    }
+
+    /** The line under a page's name in the list, and whether it needs attention. */
+    private (string Text, bool Warn) PageSummary(string name)
+    {
+        static string OnOff(bool on) => on ? "on" : "off";
+        return name switch
+        {
+            SetupCategory => SetupComplete ? ("All set", false) : ("Add a key or the offline model", true),
+            PrivacyPage => (Privacy.Current(S) is { } l ? Privacy.Label(l) : "Custom", false),
+            SpeechCategory => ($"{(S.Stt == "LOCAL" ? "On this computer" : S.SttOption.Label)} · cleanup {(S.Cleanup == "OFF" ? "off" : S.CleanupOption.Label)}", false),
+            KeysPage => Catalog.Services.Where(v => S.Key(v.Id).Length > 0).Select(v => v.Name).ToList() is { Count: > 0 } have
+                ? (string.Join(", ", have), false) : ("None added yet", S.Stt != "LOCAL"),
+            "Recording" => ($"Auto-stop {OnOff(S.AutoStop)} · sounds {OnOff(S.Sounds)}", false),
+            "Appearance" => (S.Theme switch { "light" => "Light", "dark" => "Dark", _ => "Match Windows" }, false),
+            "Sync & backup" => (S.SyncFile.Length == 0 ? "Sync off" : "Sync on", false),
+            "Recordings & usage" => (S.AudioKeepDays switch { 0 => "Audio not saved", int.MaxValue => "Audio kept forever", var d => $"Audio kept {d} days" }, false),
+            "AI assistants" => ($"Read my notes: {OnOff(S.NotesMcp)}", false),
+            "About" => ("Tokalot " + Updater.CurrentVersion, false),
+            _ => ("", false),
+        };
+    }
+
+    // ---------- Privacy ----------
+
+    /** The privacy levels and the switches they set, on Settings › Privacy and the welcome. */
+    private void BuildPrivacy(StackPanel col)
+    {
+        var level = Privacy.Current(S);
+        var rows = Enum.GetValues<Privacy.Level>()
+            .Select(l => (UIElement)Ui.Choice(Privacy.Label(l), Privacy.Blurb(l), level == l, () => { if (level != l) SetLevel(l); }))
+            .ToList();
+        if (level == null) rows.Add(Ui.Choice("Custom", "Your own mix of the switches below.", true, () => { }));
+        col.Children.Add(Ui.List(rows.ToArray()));
+        col.Children.Add(Spaced(Ui.Text("What's on", 14, C.Sub), 4, 16, 0, 8));
+        col.Children.Add(Ui.List(Privacy.Here
+            .Select(w => (UIElement)Ui.SettingRow(w.Title, w.Note, Ui.Switch(w.IsOn(S), v => { w.Set(S, v); PrivacyChanged(); })))
+            .ToArray()));
+    }
+
+    private void SetLevel(Privacy.Level l)
+    {
+        var days = Privacy.KeepDays(l);
+        if (days < S.AudioKeepDays && AudioStore.TotalBytes() > 0 && !Ui.Dialog(this,
+                days == 0 ? $"{Privacy.Label(l)} doesn't keep recordings. Delete all saved recordings now? Transcripts stay."
+                    : $"{Privacy.Label(l)} keeps recordings for {days} days. Delete older ones now? Transcripts stay.", "Delete")) return;
+        Privacy.Apply(S, l);
+        PrivacyChanged();
+    }
+
+    /** After a privacy switch changed: on-device speech needs its model, so the download starts if it isn't here. */
+    private void PrivacyChanged()
+    {
+        S.Save();
+        if (S.Stt == "LOCAL" && !ModelManager.IsReady && modelDownloading == null) StartDownload(ModelManager.Of(S.LocalModel));
+        else Render();
+    }
+
+    /** How long recordings are kept, on Recordings & usage and on Privacy. */
+    private Border KeepList() =>
+        Ui.List(new[] { (0, "Don't save audio"), (7, "Keep 7 days"), (30, "Keep 30 days"), (int.MaxValue, "Keep forever") }
+            .Select(t => (UIElement)Ui.Choice(t.Item2, "", S.AudioKeepDays == t.Item1, () =>
+            {
+                if (t.Item1 < S.AudioKeepDays && AudioStore.TotalBytes() > 0 && !Ui.Dialog(this,
+                        t.Item1 == 0 ? "Delete all saved recordings now? Transcripts stay."
+                            : $"Delete recordings older than {t.Item1} days now? Transcripts stay.", "Delete")) return;
+                S.AudioKeepDays = t.Item1; S.Save();
+                Task.Run(() => AudioStore.Prune(t.Item1)).ContinueWith(_ => Dispatcher.BeginInvoke(Render));
+                Render();
+            })).ToArray());
+
+    // ---------- Welcome ----------
+
+    /** 0: pick a level, 1: setup. */
+    private int welcomeStep;
+
+    /**
+     * Whether the first-run welcome shows instead of the page: only on a new install (no settings file when
+     * Tokalot started). Someone who updated keeps their settings and gets one Home card about the levels instead.
+     */
+    private bool WelcomeDue()
+    {
+        if (S.WelcomeDone || ShotMode) return false;
+        if (!S.Fresh) { S.WelcomeDone = true; S.Save(); return false; }
+        if (!S.WelcomeStarted)
+        {
+            // A new install starts on Everything on, the level picked when the welcome opens.
+            S.WelcomeStarted = true;
+            Privacy.Apply(S, Privacy.Level.Full);
             S.Save();
-            Render();
-            // The page was rebuilt: put the keyboard back on the same header.
-            if (keyboard && categoryViews.TryGetValue(name, out var panel)) panel.Children[0].Focus();
         }
-        header.MouseLeftButtonUp += (_, _) => Toggle();
-        return Ui.Keys(header, Toggle, $"{name}, {(isOpen ? "open" : "closed")}");
+        return true;
+    }
+
+    private void FinishWelcome()
+    {
+        S.WelcomeDone = true;
+        S.PrivacyCardSeen = true; // they've just picked a level
+        S.Save();
+        welcomeStep = 0;
+        scroller.ScrollToTop();
+        Render();
+    }
+
+    private void BuildWelcome(StackPanel col)
+    {
+        if (welcomeStep == 0)
+        {
+            col.Children.Add(Ui.Heading("Welcome to Tokalot", 36));
+            col.Children.Add(Spaced(Ui.Text("How private should it be? Pick a level, and change any switch below if you like. You can change all of this later in Settings › Privacy.", 15, C.Sub), 0, 6, 0, 18));
+            BuildPrivacy(col);
+            var keep = S.AudioKeepDays switch
+            {
+                0 => "Recordings aren't saved.",
+                int.MaxValue => "Recordings are kept until you delete them.",
+                var d => $"Recordings are kept for {d} days, so you can play one back or transcribe it again.",
+            };
+            col.Children.Add(Spaced(Ui.Text(keep + " Change it in Settings › Privacy.", 13, C.Sub), 4, 8, 0, 0));
+            col.Children.Add(Spaced(Ui.Text("Whatever you pick: no Tokalot account or server, your keys stay on this computer, and dictations go only to the services you choose.", 13, C.Sub), 4, 8, 0, 0));
+            col.Children.Add(Spaced(Spread(Link("Skip setup", FinishWelcome), Ui.Button("Next", () => { welcomeStep = 1; scroller.ScrollToTop(); Render(); }, filled: true)), 0, 22, 0, 0));
+            return;
+        }
+        col.Children.Add(Ui.Heading("Set it up", 36));
+        col.Children.Add(Spaced(Ui.Text("Then hold Ctrl+Win in any app and talk.", 15, C.Sub), 0, 6, 0, 18));
+        var rows = new List<UIElement>();
+        if (S.Stt == "LOCAL")
+        {
+            var active = ModelManager.Active;
+            var text = active != null ? active.Label + " downloaded" : downloadPct != null ? $"Downloading {downloadPct}%" : downloadError != null ? "Failed: " + downloadError : "Speech to text runs on this computer.";
+            var st = Ui.Text(text, 13.5, active != null ? C.Good : C.Sub);
+            modelStatus = st;
+            var m = ModelManager.Of(S.LocalModel);
+            rows.Add(Spaced(Spread(Ui.Stack(Ui.Text("Offline model (" + m.Label + ")", 15.5), st),
+                active != null || downloadPct != null ? new Border() : Ui.Button("Download", () => StartDownload(m), filled: true)), 20, 13, 16, 13));
+        }
+        rows.Add(Ui.SettingRow("Start with Windows", Updater.CanUpdate ? "Runs quietly in the tray so Ctrl+Win always works." : "Available in the installed version.",
+            Ui.Switch(S.LaunchAtStartup, v => { S.LaunchAtStartup = v; S.Save(); if (Updater.CanUpdate) Startup.Apply(v); })));
+        col.Children.Add(Ui.List(rows.ToArray()));
+
+        // The keys the chosen services need, pasted right here.
+        foreach (var id in new[] { S.SttOption.Service, S.CleanupOption.Service }.Where(v => v != null).Distinct())
+        {
+            var (_, name, page) = Catalog.Services.First(v => v.Id == id);
+            var (box, input) = Ui.Secret(S.Key(id), "Paste key");
+            input.PasswordChanged += (_, _) => { S.SetKey(id!, input.Password); SaveSoon(); };
+            var k = new StackPanel();
+            k.Children.Add(Ui.Text(name + " key", 15.5, bold: true));
+            k.Children.Add(Spaced(Ui.Text(id == "groq" ? "Free, and covers most people." : "Pay as you go, with your own account.", 13.5, C.Sub), 0, 2, 0, 0));
+            var pageLink = Link("Get one at " + page, () => Open("https://" + page));
+            pageLink.FontSize = 13;
+            k.Children.Add(pageLink);
+            k.Children.Add(Spaced(box, 0, 6, 0, 0));
+            col.Children.Add(Spaced(Ui.Card(k, 20), 0, 12, 0, 0));
+        }
+        col.Children.Add(Spaced(Ui.Text("Anything you skip stays on Home under Finish setup.", 13, C.Sub), 4, 12, 0, 0));
+        col.Children.Add(Spaced(Spread(Link("Back", () => { welcomeStep = 0; Render(); }), Ui.Button("Done", FinishWelcome, filled: true)), 0, 22, 0, 0));
     }
 
     private void BuildSettings(StackPanel col)
@@ -1934,12 +2087,20 @@ public sealed class MainWindow : Window
         col.Children.Add(Ui.List(
             Status("Ctrl+Win shortcut", hookOk, "Working", "Not working. Restart Tokalot."),
             Status("Speech-to-text key", S.CloudSttReady, "Added", "Add a Groq key (free)",
-                S.CloudSttReady ? null : Ui.Button("Add key", () => OpenSettingsAt(SpeechCategory))),
+                S.CloudSttReady ? null : Ui.Button("Add key", () => OpenSettingsAt(KeysPage))),
             Status("Offline backup model", active != null || downloadPct != null, modelText, modelText,
                 active != null || downloadPct != null ? null : Ui.Button("Download", () => StartDownload(ModelManager.Of(S.LocalModel)))),
             Ui.SettingRow("Start with Windows", Updater.CanUpdate ? "Runs quietly in the tray so Ctrl+Win always works." : "Available in the installed version.",
                 Ui.Switch(S.LaunchAtStartup, v => { S.LaunchAtStartup = v; S.Save(); if (Updater.CanUpdate) Startup.Apply(v); }))));
         col.Children.Add(Spaced(Ui.Text("Windows asks before any app can use the microphone. If dictation hears nothing, check Settings › Privacy & security › Microphone and allow desktop apps.", 13, C.Sub), 4, 8, 0, 0));
+
+        // --- Privacy: the level, and every switch a level sets (see Privacy)
+        Section(col, "Privacy");
+        col.Children.Add(Spaced(Ui.Text("A level sets everything below at once. Then change any switch you like: a change made here or on another page shows up here too.", 14, C.Sub), 4, 0, 0, 10));
+        BuildPrivacy(col);
+        col.Children.Add(Spaced(Ui.Text("Keep recordings", 14, C.Sub), 4, 16, 0, 8));
+        col.Children.Add(KeepList());
+        col.Children.Add(Spaced(Ui.Text("At every level there's no Tokalot account or server, your keys stay on this PC, and dictations go only to the services you picked.", 13, C.Sub), 4, 8, 0, 0));
 
         // --- Appearance
         Section(col, "Appearance");
@@ -2105,20 +2266,11 @@ public sealed class MainWindow : Window
             keys.Children.Add(Spaced(box, 0, 6, 0, 0));
         }
         col.Children.Add(Ui.Card(keys, 20));
-        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync (in Your data) and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
+        col.Children.Add(Spaced(Ui.Text("Keys are stored only on this PC, encrypted with your Windows account. They never leave it unless you turn on Sync (in Sync & backup) and choose to include them.", 13, C.Sub), 4, 8, 0, 0));
 
         // --- Recordings
         Section(col, "Recordings");
-        col.Children.Add(Ui.List(new[] { (0, "Don't save audio"), (7, "Keep 7 days"), (30, "Keep 30 days"), (int.MaxValue, "Keep forever") }
-            .Select(t => (UIElement)Ui.Choice(t.Item2, "", S.AudioKeepDays == t.Item1, () =>
-            {
-                if (t.Item1 < S.AudioKeepDays && AudioStore.TotalBytes() > 0 && !Ui.Dialog(this,
-                        t.Item1 == 0 ? "Delete all saved recordings now? Transcripts stay."
-                            : $"Delete recordings older than {t.Item1} days now? Transcripts stay.", "Delete")) return;
-                S.AudioKeepDays = t.Item1; S.Save();
-                Task.Run(() => AudioStore.Prune(t.Item1)).ContinueWith(_ => Dispatcher.BeginInvoke(Render));
-                Render();
-            })).ToArray()));
+        col.Children.Add(KeepList());
         var mb = AudioStore.TotalBytes() / 1_048_576.0;
         col.Children.Add(Spaced(Spread(Ui.Text($"Using {mb:0.0} MB", 14, C.Sub), Ui.Button("Delete all", () =>
         {
@@ -2228,7 +2380,7 @@ public sealed class MainWindow : Window
         about.Children.Add(Spaced(Link("Quit Tokalot", () => App.Current.Quit()), 0, 12, 0, 0));
         col.Children.Add(Ui.Card(about, 20));
 
-        Fold(col);
+        BuildPages(col);
     }
 
     /** One choosable indicator style with a live preview on a little dark "screen". */

@@ -86,6 +86,7 @@ class MainActivity : Activity() {
         savedInstanceState?.let { s ->
             tab = Tab.values().getOrElse(s.getInt("tab")) { Tab.HOME }
             inSettings = s.getBoolean("settings")
+            SettingsScreen.page = s.getString("settingsPage")
             inStats = s.getBoolean("stats")
             backupAudio = s.getBoolean("backupAudio")
             backupKeys = s.getBoolean("backupKeys")
@@ -104,6 +105,7 @@ class MainActivity : Activity() {
         super.onSaveInstanceState(outState)
         outState.putInt("tab", tab.ordinal)
         outState.putBoolean("settings", inSettings)
+        outState.putString("settingsPage", SettingsScreen.page)
         outState.putBoolean("stats", inStats)
         outState.putBoolean("backupAudio", backupAudio)
         outState.putBoolean("backupKeys", backupKeys)
@@ -544,6 +546,9 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
+            inWelcome && WelcomeScreen.back(this) -> {}
+            inWelcome -> @Suppress("DEPRECATION") super.onBackPressed()
+            inSettings && SettingsScreen.page != null -> { SettingsScreen.page = null; render() }
             inSettings -> { inSettings = false; render() }
             inStats -> { inStats = false; render() }
             openNote != null -> { openNote = null; render() }
@@ -552,7 +557,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Opens Settings, with [category] (one of SettingsScreen.CATEGORIES) opened if given. */
     /** Opens one note on its own page (its player, summary and index). */
     fun openNote(id: Long) {
         openNote = id
@@ -600,8 +604,9 @@ class MainActivity : Activity() {
             .apply { setMargins(dp(12), 0, dp(12), dp(12)) }
     }
 
-    fun openSettings(category: String? = null) {
-        if (category != null) prefs.openSettings = prefs.openSettings + category
+    /** Opens Settings: the list of pages, or the page named [page] (one of SettingsScreen.PAGES). */
+    fun openSettings(page: String? = null) {
+        SettingsScreen.page = page
         inSettings = true
         render()
     }
@@ -611,15 +616,17 @@ class MainActivity : Activity() {
         if (tab == Tab.NOTES && !prefs.notesBeta) tab = Tab.HOME // the beta was switched off
         if (inSettings || inStats || tab != Tab.NOTES) finishDelete() // left the notes: Undo goes with them
         logoBars?.accentColor = C.visible(prefs.accent) // follows the button color picked in Settings
+        inWelcome = WelcomeScreen.due(this)
         headerLeft.removeAllViews()
         val back = inSettings || inStats || openNote != null
         val leftIcon = if (back) R.drawable.ic_back else R.drawable.ic_menu
-        headerLeft.addView(icon(leftIcon, 28).apply {
+        if (!inWelcome) headerLeft.addView(icon(leftIcon, 28).apply {
             setPadding(dp(10), dp(10), dp(10), dp(10))
             layoutParams = FrameLayout.LayoutParams(dp(48), dp(48))
             contentDescription = if (back) "Back" else "Settings"
             setOnClickListener {
                 when {
+                    inSettings && SettingsScreen.page != null -> { SettingsScreen.page = null; render() }
                     inSettings -> { inSettings = false; render() }
                     inStats -> { inStats = false; render() }
                     openNote != null -> { openNote = null; render() }
@@ -630,13 +637,13 @@ class MainActivity : Activity() {
         renderNav()
         // Keep the scroll position when redrawing the same screen (expanding an entry, download progress…).
         val note = openNote.takeIf { !inSettings && !inStats && tab == Tab.NOTES }
-        val key = if (inSettings) "settings" else if (inStats) "stats" else if (note != null) "note$note" else tab.name
+        val key = if (inWelcome) "welcome${WelcomeScreen.step}" else if (inSettings) "settings:${SettingsScreen.page}" else if (inStats) "stats" else if (note != null) "note$note" else tab.name
         val prevScroll = if (key == lastScreen) (content.getChildAt(0) as? ScrollView)?.scrollY ?: 0 else 0
         lastScreen = key
         content.removeAllViews()
         noteScreen?.release()
         noteScreen = null
-        val screen = if (inSettings) SettingsScreen(this).build() else if (inStats) StatsScreen(this).build()
+        val screen = if (inWelcome) WelcomeScreen(this).build() else if (inSettings) SettingsScreen(this).build() else if (inStats) StatsScreen(this).build()
         else if (note != null) NoteScreen(this, note).also { noteScreen = it }.build() else when (tab) {
             Tab.HOME -> buildHome()
             Tab.DICTIONARY -> DictionaryScreen(this).build()
@@ -651,9 +658,12 @@ class MainActivity : Activity() {
 
     private var lastScreen = ""
 
+    /** The first-run welcome is showing instead of the tabs (see [WelcomeScreen]). */
+    private var inWelcome = false
+
     private fun renderNav() {
         nav.removeAllViews()
-        nav.visibility = if (inSettings || inStats || openNote != null) View.GONE else View.VISIBLE
+        nav.visibility = if (inWelcome || inSettings || inStats || openNote != null) View.GONE else View.VISIBLE
         for (t in Tab.values()) {
             if (t == Tab.NOTES && !prefs.notesBeta) continue
             val active = t == tab
@@ -866,6 +876,7 @@ class MainActivity : Activity() {
         }
 
         suggestionsCard()?.let { col.addView(it, lp().margins(this, b = 12)) }
+        privacyCard()?.let { col.addView(it, lp().margins(this, b = 12)) }
 
         if (setupComplete() && serviceStuck()) {
             val c = card(20)
