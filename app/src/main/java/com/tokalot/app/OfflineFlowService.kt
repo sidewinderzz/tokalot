@@ -1297,9 +1297,9 @@ class OfflineFlowService : AccessibilityService() {
         // Typed into the selected text box, keyboard or not, except in the apps set to get the clipboard
         // (launchers to start with: Niagara's home screen keeps its app search selected out of sight).
         val node = focusedEditable()?.takeIf { mayType(it) }
-        // A terminal gets the text as typed keys, where a line break is Enter and would run what came before it.
-        if (node != null && AppContext.isTerminal(node.packageName?.toString()) && '\n' in text) {
-            return deliver(text.replace(Regex("""\s*\n\s*"""), " ").trim(), null, entryId, fitted)
+        // A terminal gets the text as typed keys, where a line break (\n or \r) is Enter and would run what came before it.
+        if (node != null && AppContext.isTerminal(node.packageName?.toString()) && (text.contains('\n') || text.contains('\r'))) {
+            return deliver(text.replace(Regex("""\s*[\r\n]+\s*"""), " ").trim(), null, entryId, fitted)
         }
         fitCaps = !fitted
         lastFitted = null
