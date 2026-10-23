@@ -12,6 +12,36 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Tag chips above the list filter it, and a sort menu puts notes newest first, oldest first or by title, or shows only a day or a date range.
 - Record from a Bluetooth headset: Settings › Recording › Microphone › Bluetooth headset first. When a headset is connected its mic is used, otherwise the phone's. Choose whether that's for voice notes only or for dictation too. Off until you turn it on, because music pauses while the headset mic is in use.
 
+## 1.47 · 2026-10-23
+- A tidier Settings › About: the version and Check for updates sit together at the top, and What's new, Changelog, Open-source licenses and Source code are rows you tap, like the rest of Settings.
+- Less clutter everywhere: switches keep a one-line description, and the longer explanation is behind a small ⓘ. Fewer grey notes under the cards.
+- Home: anything that needs you (finishing setup, words to add, what's new in Settings) is one short list instead of a pile of cards, and the days in your history are small labels instead of big headings.
+- Settings › Setup: Stay on after updates reads like the other rows; How shows the command to copy.
+- Settings › Speech & AI: model names and the timings of your last dictations moved under Advanced.
+- Settings › Recording: one Sound style row with a picker, and Reset position for the floating button inside the card.
+- Settings › Shortcuts: tidied into Tiles, Voice notes and Volume keys. Clipboard-only apps and note phrases open from their own rows.
+- Usage shows this month in full and older months on one line each; tap one for its breakdown. Sync and backup buttons sit inside their cards.
+- Dictionary: the Add button sits next to the box. Notes: a one-line intro once you have notes.
+
+## 1.46 · 2026-10-23
+- New: Tokalot Keyboard, an optional keyboard in the style of Gboard. Turn it on in Settings › Keyboard.
+- It autocorrects as you type (teh becomes the, dont becomes don't), and a backspace straight after puts back what you typed. Three suggestions sit above the keys, and between words it guesses the next one.
+- Swipe typing: slide from letter to letter, in any text box but a password one. Slide along the space bar to move the cursor (an emoji or accented letter is one step), and left from backspace to select whole words, which go when you let go (slide back to keep them). Slide all the way to the left edge to delete everything in the box, and tap Undo on the bar to bring it back.
+- Long-press a letter for its symbol or accents. There's a symbols page, a number pad in number fields, an optional number row, and an emoji page with search and skin tones.
+- The mic on the keyboard's bar is Tokalot's own five bars, which bounce with your voice while it records and ripple while it transcribes. It dictates the same as the floating button, which hides while the keyboard is up.
+- A clipboard: the button next to ✨ opens what you copied in the last hour, and a long press pins one so it stays. Something you just copied shows on the bar, ready to paste, with a link, email address or phone number in it on its own button. It stays on this phone and skips passwords.
+- Themes: light, dark, or matching your phone, in four styles (Classic, Tinted, Borderless, High contrast) and your choice of colour, under Settings › Keyboard.
+- The keyboard's own menu: tap the four-squares button at the left of its top bar to move, remove or add the bar's buttons (clipboard, AI fix, emoji, light/dark, number row, settings; the mic always stays), change the keyboard's height, switch its look, and flip the common settings.
+- A screenshot you just took, or a picture you copied, shows on the bar as a tiny preview; tap it to paste the picture into apps that take pictures. A sign-in code texted to you shows on the bar too, ready to tap. Both are optional: allow photos and "Codes from texts" once in Settings › Keyboard.
+- Suggestions show in every text box but password ones, and the number row is shorter than the letter rows, as on Gboard.
+- The ✨ button fixes what you typed with your AI cleanup: spelling, typos, capitals and punctuation. It works on the selected text, or the whole text box, and Undo puts it back.
+- Get beta updates, under Settings › About: try new features before they're released. Turn it off to go back at the next release.
+- Words the keyboard doesn't know, such as names and farm terms, go into your dictionary once you've kept them twice, so they sync and dictation spells them right too. What else it learns from your typing stays on this phone.
+- Light and dark to match the app, in your Tokalot color, with key sound and vibration switches. Its settings sync to your other devices.
+- New: Terminal commands (beta), in Settings › Style, off until you turn it on. In Termux, start with "shell" and say what you want ("shell, show me the ten biggest files in this folder") or speak a command ("shell git commit dash m quote fix the paste bug quote"), and a shell command is typed in. Anything that doesn't start with "shell" is typed as normal text, so prompts for Claude Code and the like are left alone (Start commands with "shell" turns that off). It is never run: you read it and press Enter yourself. It knows Termux has no root and installs with pkg, and is told your Android version and whether the Termux:API app is installed. It needs AI cleanup.
+- The mic button now shows in Termux too, and dictation is typed straight into the terminal (Android 13 and newer; older phones get it on the clipboard). Line breaks become spaces there, so nothing ever presses Enter for you.
+- Both Terminal commands switches sync with your computers (Windows, Linux and Mac) when sync is on. Terminal commands is also on the Privacy page, where Everything on turns it on.
+
 ## 1.45 · 2026-10-23
 - Settings is now a short list of pages, like Android's own Settings. Each row says what it's set to; tap one to open it. No more folding sections that stay open.
 - New Privacy page with three levels: Everything on, Balanced and Most private. A level sets the privacy switches all at once, and you can still change any switch. A change made anywhere shows up there, and a mix that matches no level shows as Custom.

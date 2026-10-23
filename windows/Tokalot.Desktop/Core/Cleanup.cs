@@ -53,7 +53,8 @@ public static class Cleanup
 
     public static string ShellPrompt(string? appLabel, IList<string> words, bool hasSnippets)
     {
-        var shell = System.OperatingSystem.IsWindows() ? "PowerShell on Windows" : "bash on Linux";
+        var mac = System.OperatingSystem.IsMacOS();
+        var shell = System.OperatingSystem.IsWindows() ? "PowerShell on Windows" : mac ? "zsh on macOS" : "bash on Linux";
         string env = "";
         try { env = ShellEnvironment?.Invoke() ?? ""; } catch { }
         var b = new StringBuilder();
@@ -63,8 +64,17 @@ public static class Cleanup
         b.AppendLine("Rules:");
         b.AppendLine("- Output only the command, on a single line: no code fence, no explanation, no prompt character, no trailing newline.");
         b.AppendLine("- If the user describes what they want (\"show me the ten biggest files here\"), write the command that does it. Pick the best option, not the first that works: sensible defaults and flags (human-readable sizes, sorted output, limited length, recursive or case-insensitive where it obviously helps), and pipes over temporary files.");
-        b.AppendLine("- Prefer the installed tools listed above over their older equivalents when they fit (fd over find, rg over grep -r, bat over cat, eza over ls); otherwise use the standard tool. Package and service tasks use this machine's own package manager and systemd tools, never another distribution's.");
-        b.AppendLine("- Add sudo when the task needs root (installing, updating, restarting a system service) and not otherwise. \"This folder\", \"here\" and \"these files\" mean the current directory.");
+        if (mac)
+        {
+            b.AppendLine("- Prefer the installed tools listed above over their older equivalents when they fit (fd over find, rg over grep -r, bat over cat, eza over ls); otherwise use the tools macOS ships. Those are the BSD versions, so write flags they accept (sed -i '', stat -f, date -v, no GNU-only options such as find -printf or ls --color) unless the GNU ones (gsed, gls) are listed as installed.");
+            b.AppendLine("- Install, update and remove software with the package manager listed above (brew install, brew upgrade, brew services for background services; never apt, dnf or another Linux tool). Use macOS's own tools where they are the right one: open, pbcopy, pbpaste, mdfind, defaults, diskutil, launchctl, softwareupdate.");
+            b.AppendLine("- Add sudo only when the task needs root (system files, softwareupdate -i, diskutil on a system disk), never with brew. \"This folder\", \"here\" and \"these files\" mean the current directory.");
+        }
+        else
+        {
+            b.AppendLine("- Prefer the installed tools listed above over their older equivalents when they fit (fd over find, rg over grep -r, bat over cat, eza over ls); otherwise use the standard tool. Package and service tasks use this machine's own package manager and systemd tools, never another distribution's.");
+            b.AppendLine("- Add sudo when the task needs root (installing, updating, restarting a system service) and not otherwise. \"This folder\", \"here\" and \"these files\" mean the current directory.");
+        }
         b.AppendLine("- If the speech already is a command, keep it and clean it up: remove fillers and apply spoken self-corrections (\"no wait\", \"scratch that\"). Spoken symbols become the symbol: \"dash dash\" is --, \"dash\" is -, slash is /, backslash is \\, tilde is ~, pipe is |, dot is a period, star is *, \"quote ... quote\" wraps what is between in double quotes, \"greater than\" is >.");
         b.AppendLine("- Never add destructive flags (-f, --force, rm -rf) the user didn't ask for. Prefer the safer form when two would do.");
         b.AppendLine("- If the transcript is not a command request at all (a sentence or a question for someone else), output it unchanged apart from fillers.");

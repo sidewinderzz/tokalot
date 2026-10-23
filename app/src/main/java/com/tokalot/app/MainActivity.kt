@@ -269,6 +269,14 @@ class MainActivity : Activity() {
 
     /** Opened on a given page (tapping "Saved to Notes" opens Notes). True if the intent asked for one. */
     private fun openTab(intent: Intent?): Boolean {
+        if (intent?.getBooleanExtra(EXTRA_SETTINGS, false) == true) {
+            // From the keyboard (long press on the comma): Settings, on its Keyboard page.
+            SettingsScreen.page = SettingsScreen.KEYBOARD
+            inSettings = true
+            inStats = false
+            openNote = null
+            return true
+        }
         val t = intent?.getStringExtra(EXTRA_TAB)?.let { name -> Tab.values().firstOrNull { it.name == name } } ?: return false
         tab = t
         inSettings = false
@@ -439,7 +447,7 @@ class MainActivity : Activity() {
         body.addView(link("github.com/${Updater.REPO}", 15f) {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/${Updater.REPO}")))
         })
-        body.addView(text("On the next screen: tap Tokalot › turn it on › Allow. If it's greyed out, open this phone's Settings › Apps › Tokalot › ⋮ › Allow restricted settings first.", 14f, C.SUB), lp().margins(this, t = 4, b = 8))
+        body.addView(text("On the next screen: tap Tokalot › turn it on › Allow. If it's greyed out, open this phone's Settings › Apps › Tokalot › ⋮ › Allow restricted settings first. Also set Tokalot's battery usage to Unrestricted, so Android doesn't stop it.", 14f, C.SUB), lp().margins(this, t = 4, b = 8))
         sheet("Before you turn this on", body, positive = "Continue", negative = "Not now") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
@@ -882,37 +890,7 @@ class MainActivity : Activity() {
             col.addView(banner, lp().margins(this, b = 12))
         }
 
-        // Another device runs a newer Tokalot that syncs things this one can't: worth updating even before a release shows up here.
-        if (Updater.available(this) == null && prefs.syncUri != null && prefs.syncNewer) {
-            val c = card(20)
-            c.addView(text("Update Tokalot to sync everything", 17f))
-            c.addView(text("Another device that shares your sync file has a newer Tokalot. This one keeps syncing what it knows, but settings or history added since then only reach this phone once it's updated.", 14f, C.SUB), lp().margins(this, t = 4))
-            c.addView(row(pill("Check for updates") {
-                Thread { Updater.check(applicationContext, force = true); runOnUiThread { if (!isDestroyed) render() } }.start()
-            }), lp().margins(this, t = 10))
-            col.addView(c, lp().margins(this, b = 12))
-        }
-
-        suggestionsCard()?.let { col.addView(it, lp().margins(this, b = 12)) }
-        privacyCard()?.let { col.addView(it, lp().margins(this, b = 12)) }
-
-        if (setupComplete() && serviceStuck()) {
-            val c = card(20)
-            c.addView(text("The mic button isn't running", 17f))
-            c.addView(text("Tokalot's accessibility switch is on, but Android hasn't started it, so the floating button won't show. This can happen after an update. Turn Tokalot off and back on on the next screen. Settings › Setup shows how to make Tokalot do this itself.", 14f, C.SUB), lp().margins(this, t = 4))
-            c.addView(row(pill("Fix it", filled = true) { openShortcutSettings() }), lp().margins(this, t = 10))
-            col.addView(c, lp().margins(this, b = 12))
-        }
-
-        if (!setupComplete()) {
-            val c = card(20)
-            c.addView(heading("Finish setup", 28f))
-            c.addView(text("Tokalot needs the microphone, the accessibility switch, and a Groq key (or the offline model) before the mic button will appear.", 15f, C.SUB).apply {
-                setPadding(0, dp(6), 0, dp(14))
-            })
-            c.addView(row(pill("Open setup", filled = true) { openSettings(SettingsScreen.SETUP) }))
-            col.addView(c, lp().margins(this, b = 16))
-        }
+        needsYouCard()?.let { col.addView(it, lp().margins(this, b = 16)) }
 
         // This month at a glance.
         val m = Usage.month(this)
@@ -956,6 +934,60 @@ class MainActivity : Activity() {
         return scroll(col)
     }
 
+    /**
+     * Everything on Home that wants the user, as one card with a row each, most urgent first, instead of a stack of
+     * cards above the stats. Each row opens where it's dealt with. Null when there's nothing.
+     */
+    private fun needsYouCard(): View? {
+        class Item(val title: String, val sub: String, val warn: Boolean, val dismiss: (() -> Unit)? = null, val open: () -> Unit)
+        val items = ArrayList<Item>()
+        if (!setupComplete()) {
+            val left = listOf(micGranted(), serviceEnabled(), prefs.cloudSttReady || ModelManager.isReady(this)).count { !it }
+            items += Item("Finish setup", "$left ${if (left == 1) "thing" else "things"} left before the mic button appears", true) { openSettings(SettingsScreen.SETUP) }
+        }
+        if (setupComplete() && serviceStuck()) {
+            // The switch is on but Android hasn't started the service (some phones, after an update).
+            items += Item("The mic button isn't running", "Turn Tokalot off and back on on the next screen", true) { openShortcutSettings() }
+        }
+        // Another device runs a newer Tokalot that syncs things this one can't: worth updating even before a release shows up here.
+        if (Updater.available(this) == null && prefs.syncUri != null && prefs.syncNewer) {
+            items += Item("Update Tokalot to sync everything", "Another device has a newer Tokalot. Tap to check for updates", false) {
+                toast("Checking for updates…")
+                Thread { Updater.check(applicationContext, force = true); runOnUiThread { if (!isDestroyed) render() } }.start()
+            }
+        }
+        val words = prefs.suggestedWords
+        if (words.isNotEmpty()) {
+            items += Item(if (words.size == 1) "You spelled out “${words[0]}”" else "You spelled out ${words.size} words",
+                "Add to your dictionary so it's spelled right next time", false) { tab = Tab.DICTIONARY; render() }
+        }
+        if (!prefs.privacyCardSeen) {
+            items += Item("New: privacy levels", "Settings › Privacy. Your settings didn't change.", false,
+                dismiss = { prefs.privacyCardSeen = true; render() }) { prefs.privacyCardSeen = true; openSettings(SettingsScreen.PRIVACY) }
+        }
+        if (items.isEmpty()) return null
+        val c = card()
+        items.forEachIndexed { i, item ->
+            if (i > 0) c.addView(divider())
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(item.title, 17f))
+                addView(text(item.sub, 14f, if (item.warn) C.WARN else C.SUB))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            val end = item.dismiss?.let { d -> iconButton(R.drawable.ic_close, "Dismiss", 20, C.SUB) { d() } }
+                ?: icon(R.drawable.ic_expand, 20, C.SUB).apply { rotation = -90f }
+            c.addView(row(texts, end).apply {
+                background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
+                    android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
+                setPadding(dp(20), dp(14), dp(if (item.dismiss != null) 4 else 16), dp(14))
+                minimumHeight = dp(TOUCH_DP + 8)
+                setOnClickListener { item.open() }
+            })
+        }
+        return c
+    }
+
     /** (Re)builds just the history list, filtered by the search box. */
     private fun fillHistory() {
         val box = historyBox ?: return
@@ -967,7 +999,7 @@ class MainActivity : Activity() {
                 (it.app.isNotEmpty() && AppContext.label(this, it.app).lowercase().contains(q))
         }
         if (list.isEmpty()) {
-            box.addView(heading(if (q.isEmpty()) "Today" else "No matches"), lp().margins(this, t = 24, b = 12))
+            box.addView(dayHeading(if (q.isEmpty()) "Today" else "No matches"))
             val c = card(24)
             c.addView(text(
                 if (q.isEmpty()) "Nothing yet. Tap any text field in any app and hit the button." else "Nothing matches “$query”.",
@@ -981,7 +1013,7 @@ class MainActivity : Activity() {
         for (e in list.take(historyLimit)) {
             val day = dayLabel(e.time)
             if (day != lastDay) {
-                box.addView(heading(day), lp().margins(this, t = 24, b = 12))
+                box.addView(dayHeading(day))
                 group = card()
                 box.addView(group)
                 lastDay = day
@@ -997,6 +1029,13 @@ class MainActivity : Activity() {
             })
         }
     }
+
+    /** A day's small uppercase label over its dictations, like the Notes list. */
+    private fun dayHeading(day: String): View =
+        text(day.uppercase(Locale.US), 12f, C.SUB, bold = true).apply {
+            letterSpacing = 0.08f
+            layoutParams = lp().margins(this@MainActivity, t = 22, b = 8, l = 4)
+        }
 
     private fun entryView(e: Entry): View {
         val box = LinearLayout(this).apply {
@@ -1102,6 +1141,8 @@ class MainActivity : Activity() {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
         /** Which page to open (a [Tab] name). */
         const val EXTRA_TAB = "com.tokalot.app.TAB"
+        /** Open Settings at the Keyboard part. */
+        const val EXTRA_SETTINGS = "com.tokalot.app.SETTINGS"
         private const val UNDO_TAG = "undo-delete"
         private const val STUCK_GRACE_MS = 4000L // how long Android gets to start the accessibility service after the app
         private const val REQ_BACKUP = 41
