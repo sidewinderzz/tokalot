@@ -6,6 +6,19 @@
 - New **Privacy** page with three levels: **Everything on**, **Balanced** and **Most private**. A level sets the privacy switches all at once, and you can still change any switch. A change made anywhere shows up there, and a mix that matches no level shows as Custom.
 - A new install starts with a short welcome: pick a level, then set up what it needs (a key, or the offline model). If you updated, your settings didn't change; a card on Home points to the new page.
 
+## New in 0.13.0
+
+- New: **Terminal commands (beta)**, in Settings › Style, off until you turn it on. In a terminal, start with "shell" and say what you want ("shell, show me the ten biggest files in this folder") or speak a command ("shell git commit dash m quote fix the paste bug quote") and a shell command is pasted. Anything that doesn't start with "shell" is dictated as normal text, so prompts for Claude Code and the like are left alone (**Start commands with "shell"** turns that off). It is never run: you read it and press Enter yourself. It knows your distribution, its package manager and which handier tools you have installed (`fd`, `rg`, `bat`…), which are sent to your cleanup AI with the request, so "update the system" gives the right command for your system. It needs AI cleanup and a desktop where Tokalot can tell the window in front is a terminal (X11, KDE, Sway, Hyprland, niri).
+- Both Terminal commands switches sync between your computers (Windows and Linux) when sync is on.
+- For testing: `Tokalot --transcribe <recording>` runs a whole dictation on an audio file and prints the text (`--terminal` to dictate as if into a terminal).
+
+## New in 0.12.0
+
+- Pasting into a terminal works on Wayland. Terminals paste with Ctrl+Shift+V, and Tokalot used to press Ctrl+V because a Wayland desktop doesn't say which window is in front. It now asks the desktop itself: **KDE Plasma** (through a one-off KWin script), **Sway**, **Hyprland** and **niri**. On GNOME and other desktops nothing changes.
+- That also turns on per-app styles (messages, email, AI and code) on those desktops; before, every dictation on Wayland used "Everything else".
+- `Tokalot --diagnose` now says which window it sees in front ("Active-app detection") instead of just "off" on Wayland.
+- Checked on KDE Plasma 6 on Wayland. The Sway, Hyprland and niri readers follow what their tools print and haven't been run on those desktops, so please say if one doesn't work.
+
 ## New in 0.11.0
 
 - Notes get a short title, written by the AI when a note is made or first opened. It shows on the note and in the list. Rename it from the **⋮** menu.

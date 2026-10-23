@@ -250,6 +250,7 @@ public static class Sync
         "stt", "cleanup", "sttModels", "cleanupModels", "autoStop", "quickSkip", "liveStt", "weakSignal", "autoLanguage",
         "polish", "sounds", "soundSet", "theme", "accent", "learnWords", "learnedWords", "dismissedWords", "notesBeta",
         "indicatorStyle", "showIdleIndicator", "appOverrides", "noteSkipSilence", "noteSkipUms", "noteSummaryLevel", "noteSpeed",
+        "shellCommands", "shellCue",
     };
 
     /** The playback speeds a voice note offers, in the order the speed button steps through them. */

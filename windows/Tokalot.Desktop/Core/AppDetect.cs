@@ -88,6 +88,12 @@ public static class AppDetect
         return char.ToUpperInvariant(fallback[0]) + fallback[1..];
     }
 
+    private static readonly string[] Terminals = { "windowsterminal", "wt", "cmd", "powershell", "pwsh", "conhost", "alacritty", "wezterm-gui", "mintty", "tabby", "hyper", "warp" };
+
+    /** True when the app is a terminal (what Terminal command mode applies to). */
+    public static bool IsTerminal(ActiveApp? app) =>
+        app != null && app.Key.StartsWith("app:") && Terminals.Contains(app.Key[4..]);
+
     public static AppCategory Categorize(ActiveApp? app, Settings s)
     {
         if (app == null) return Catalog.CategoryById("OTHER");

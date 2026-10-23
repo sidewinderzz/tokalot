@@ -56,6 +56,13 @@ public static class AudioStore
         catch { return null; }
     }
 
+    /** Reads any audio file the same way (WAV directly, anything else through ffmpeg), for "Tokalot --transcribe". Blocking. */
+    public static float[]? LoadFile(string path)
+    {
+        try { return path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase) ? ReadWav(File.ReadAllBytes(path)) : Decode(path); }
+        catch { return null; }
+    }
+
     /** 16-bit PCM WAV -> mono floats at 16 kHz (first channel; whole-number rate reductions only, which is all Tokalot writes). */
     private static float[]? ReadWav(byte[] b)
     {

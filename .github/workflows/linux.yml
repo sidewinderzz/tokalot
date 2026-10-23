@@ -10,6 +10,12 @@ on:
 permissions:
   contents: write
 
+# A newer push to the same branch replaces an unfinished build of it. Never on main,
+# where a cancelled run could leave a release half-published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   # Built and tested on each kind of processor: Intel/AMD PCs, and ARM64 (Raspberry Pi 4/5, ARM laptops and servers).
   build:

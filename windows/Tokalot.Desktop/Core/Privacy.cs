@@ -30,12 +30,13 @@ public static class Privacy
     };
 
     /**
-     * One switch on the Privacy page, and the levels that turn it on. A WindowsOnly switch is still set by a level
-     * elsewhere (it syncs to the devices that have it), but only Windows shows it or counts it for the level.
+     * One switch on the Privacy page, and the levels that turn it on. A WindowsOnly (or NotMac) switch is still set
+     * by a level everywhere (it syncs to the devices that have it), but only those computers show it or count it.
      */
-    public sealed record Switch(string Title, string Note, Level[] Levels, Func<Settings, bool> IsOn, Action<Settings, bool> Set, bool WindowsOnly = false)
+    public sealed record Switch(string Title, string Note, Level[] Levels, Func<Settings, bool> IsOn, Action<Settings, bool> Set,
+        bool WindowsOnly = false, bool NotMac = false)
     {
-        public bool Shown => !WindowsOnly || OperatingSystem.IsWindows();
+        public bool Shown => (!WindowsOnly || OperatingSystem.IsWindows()) && (!NotMac || !OperatingSystem.IsMacOS());
     }
 
     private static readonly Level[] Cloud = { Level.Full, Level.Balanced };
@@ -52,6 +53,8 @@ public static class Privacy
             s => s.LiveStt, (s, on) => s.LiveStt = on),
         new("Learn from my corrections", "Looks at the text box again for two minutes after a dictation and adds names you respell, and words you spell out, to your dictionary.", new[] { Level.Full },
             s => s.LearnWords, (s, on) => s.LearnWords = on, WindowsOnly: true),
+        new("Terminal commands (beta)", "In a terminal, what you say becomes a shell command. Sends your system's name, package manager and installed tools to your AI cleanup with the request.", new[] { Level.Full },
+            s => s.ShellCommands, (s, on) => s.ShellCommands = on, NotMac: true),
     };
 
     /** The switches this computer shows. */

@@ -66,6 +66,9 @@ public sealed class Dictation : IDisposable
     }
 
     /** For the progress line: 0 while the speech is being recognised, 1 during cleanup, 2 when the text is ready. */
+    /** "shell" as the first word, with whatever punctuation the recognizer put after it. */
+    private static readonly System.Text.RegularExpressions.Regex ShellCue = new(@"^\s*shell\b[\s,.:;!-]*", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
     public static volatile int Stage;
     /** How long the recognised text is, once Stage is 1 (the cleanup's wait grows with it). */
     public static volatile int StageChars;
@@ -156,6 +159,16 @@ public sealed class Dictation : IDisposable
         StageChars = baseText.Length;
         Stage = 1;
         if (baseText.Length == 0 || (sparse && TextTools.IsPhantom(baseText)) || TextTools.IsEcho(baseText, s.Words, sparse)) return new Outcome("", warnings.FirstOrDefault(), null);
+        // Terminal commands (a setting, off by default): the dictation becomes a shell command that is pasted, never run. With the cue on,
+        // only one that starts with "shell" does ("shell, show me the biggest files"), so prompts for an AI tool stay as said.
+        var shell = s.ShellCommands && AppDetect.IsTerminal(app);
+        if (shell && s.ShellCue)
+        {
+            var cue = ShellCue.Match(baseText);
+            if (cue.Success) baseText = baseText[cue.Length..].Trim();
+            else shell = false;
+            if (baseText.Length == 0) return new Outcome("", warnings.FirstOrDefault(), null);
+        }
         // A word spelled out letter by letter is offered for the dictionary in the app (nothing is added unasked).
         try { Heard?.Invoke(baseText); } catch { }
 
@@ -165,14 +178,14 @@ public sealed class Dictation : IDisposable
         string? final = null;
         string? cleanupErr = null;
         // Quick mode: a short dictation with nothing for the AI to fix skips it and is tidied here, at once.
-        var quick = s.QuickSkip && !s.Polish && !inPieces && s.Cleanup != "OFF"
+        var quick = !shell && s.QuickSkip && !s.Polish && !inPieces && s.Cleanup != "OFF"
             && TextTools.NothingToFix(baseText, map.Count > 0, s.StyleFor(category).Id, category.Id, s.CustomInstructions);
         // The link was too poor for the speech step: waiting on the cleanup service too would only add delay.
         foreach (var c in quick || weakSwitch ? Array.Empty<CleanupOption>() : CleanupOrder(s))
         {
             try
             {
-                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label, ct, inPieces);
+                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label, ct, inPieces, shell);
                 Usage.RecordLlm(c.Id, r.InTokens, r.OutTokens);
                 cleaned = true;
                 final = TextTools.Restore(r.Text, map);
@@ -187,6 +200,7 @@ public sealed class Dictation : IDisposable
             }
         }
         if (!cleaned && cleanupErr != null) warnings.Add(cleanupErr);
+        if (shell && !cleaned && cleanupErr == null) warnings.Add("Command mode needs AI cleanup: turn it on and add its key in Settings");
         final ??= TextTools.Restore(TextTools.BasicClean(protectedText), map);
 
         var inv = System.Globalization.CultureInfo.InvariantCulture;

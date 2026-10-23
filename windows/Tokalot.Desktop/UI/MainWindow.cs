@@ -1718,6 +1718,16 @@ public sealed class MainWindow : Window
             "and for a few seconds after each dictation Ctrl+Win+Z puts your own words back.",
             Ui.Switch(S.Polish, v => { S.Polish = v; S.Save(); }))), 0, 0, 0, 18));
 
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Terminal commands (beta)",
+            "In a terminal, what you say becomes a shell command: say what you want (\"show the ten biggest files here\") or speak a command (\"git commit dash m quote fix quote\"). " +
+            "It is only pasted, never run, so you read it and press Enter yourself. Needs AI cleanup.",
+            Ui.Switch(S.ShellCommands, v => { S.ShellCommands = v; S.Save(); }))), 0, 0, 0, 18));
+
+        col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Start commands with \"shell\"",
+            "On: in a terminal only a dictation that starts with \"shell\" becomes a command (\"shell, show me the ten biggest files\"); anything else is dictated normally, so prompts for Claude Code or another AI tool stay as you said them. " +
+            "Off: everything you say in a terminal becomes a command.",
+            Ui.Switch(S.ShellCue, v => { S.ShellCue = v; S.Save(); }))), 0, 0, 0, 18));
+
         var tabs = new WrapPanel();
         foreach (var c in Catalog.Categories)
         {
