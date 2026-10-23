@@ -6,6 +6,11 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.44 · 2026-10-23
+- New: Terminal commands (beta), in Style, off until you turn it on. In Termux, start with "shell" and say what you want ("shell, show me the ten biggest files in this folder") or speak a command ("shell git commit dash m quote fix the paste bug quote"), and a shell command is typed in. Anything that doesn't start with "shell" is typed as normal text, so prompts for Claude Code and the like are left alone (Start commands with "shell" turns that off). It is never run: you read it and press Enter yourself. It knows Termux has no root and installs with pkg, and is told your Android version and whether the Termux:API app is installed. It needs AI cleanup.
+- The mic button now shows in Termux too, and dictation is typed straight into the terminal (Android 13 and newer; older phones get it on the clipboard). Line breaks become spaces there, so nothing ever presses Enter for you.
+- Both Terminal commands switches sync with your computers (Windows, Linux and Mac) when sync is on.
+
 ## 1.43 · 2026-10-20
 - After an update, Tokalot checks that the floating mic button came back. Some phones, such as Samsung, switch it off with every update. If that happens you get a notification that takes you straight to the switch.
 - New in Settings › Setup: Stay on after updates. Run one command from a computer once (Tokalot shows it, with a Copy button), and from then on Tokalot turns the mic button back on by itself after an update.

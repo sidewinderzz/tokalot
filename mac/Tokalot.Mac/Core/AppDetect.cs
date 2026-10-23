@@ -167,8 +167,17 @@ public static class AppDetect
     private static string[] Parts(string name) =>
         new[] { name }.Concat(name.Split(new[] { '.', '-', '_', ' ' }, StringSplitOptions.RemoveEmptyEntries)).ToArray();
 
-    /** Never a terminal for pasting purposes: ⌘V works in Mac terminals. */
-    public static bool IsTerminal(ActiveApp? app) => false;
+    // Terminal app names (lowercase), whole or one of their words, for when the bundle id isn't known (history, backups, tests).
+    private static readonly string[] TerminalNames = { "terminal", "iterm", "iterm2", "ghostty", "wezterm", "alacritty", "kitty", "warp", "hyper", "tabby" };
+
+    /** True when the app is a terminal, which is what Terminal commands applies to. (⌘V pastes in Mac terminals as everywhere else.) */
+    public static bool IsTerminal(ActiveApp? app)
+    {
+        if (app == null || !app.Key.StartsWith("app:")) return false;
+        var proc = app.Key[4..];
+        if (BundleFor(proc) is { } bundle && Terminals.Contains(bundle)) return true;
+        return Parts(proc).Any(TerminalNames.Contains);
+    }
 
     public static AppCategory Categorize(ActiveApp? app, Settings s)
     {

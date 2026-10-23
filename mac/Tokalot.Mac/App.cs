@@ -33,6 +33,7 @@ public sealed partial class App : Application
     [STAThread]
     public static int Main(string[] args)
     {
+        Cleanup.ShellEnvironment = ShellContext.Describe;
         // "Tokalot --diagnose" prints what this Mac lets Tokalot do (keyboard, paste, microphone…) and exits.
         if (args.Contains("--diagnose")) { Diagnose(args.Contains("--download-model")); return 0; }
 
@@ -43,7 +44,8 @@ public sealed partial class App : Application
         if (args.Contains("--selftest")) return SelfTest.Run(args);
 
         // "Tokalot --transcribe <file.wav>" runs a recording through the same pipeline a dictation takes and prints the text.
-        if (args.Length >= 2 && args[0] == "--transcribe") return SelfTest.Transcribe(args[1]);
+        // "--terminal" dictates as if into Terminal, to try Terminal commands.
+        if (args.Length >= 2 && args[0] == "--transcribe") return SelfTest.Transcribe(args[1], args.Contains("--terminal"));
 
         // Build-machine checks that drive other apps: paste into TextEdit, hold the shortcut, press ⌘S.
         // They press keys with Tokalot's Accessibility permission, so they only run on a build machine (CI=true).

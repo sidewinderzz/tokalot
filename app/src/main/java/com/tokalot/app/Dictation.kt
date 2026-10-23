@@ -54,6 +54,8 @@ class Dictation(context: Context) {
     )
 
     companion object {
+        /** "shell" as the first word, with whatever punctuation the recognizer put after it. */
+        private val SHELL_CUE = Regex("""^\s*shell\b[\s,.:;!-]*""", RegexOption.IGNORE_CASE)
         private const val IDLE_UNLOAD_MS = 60_000L
         /** From this length on, the audio is compressed to AAC before it's uploaded (see [run]). */
         private const val COMPRESS_FROM_S = 30
@@ -303,10 +305,20 @@ class Dictation(context: Context) {
         if (heard.isBlank() || (sparse && TextTools.isPhantom(heard)) || TextTools.isEcho(heard, prefs.words, sparse)) return Outcome("", warnings.firstOrNull())
         // Voice notes (beta): "Note this…" at the very start makes it a note, written in the plain style.
         val asNote = if (prefs.notesBeta) TextTools.noteTrigger(heard, prefs.notePhrases.split(',')) else null
-        val base = asNote ?: heard
+        var base = asNote ?: heard
         if (base.isBlank()) return Outcome("", warnings.firstOrNull()) // only the note phrase was said
         if (asNote != null) { category = AppCategory.OTHER; appLabel = null }
         val spot = if (asNote != null) null else job.spot // a note isn't going into the sentence around the cursor
+
+        // Terminal commands (a setting, off by default): in Termux the dictation becomes a shell command that is typed, never
+        // run. With the cue on, only one that starts with "shell" does ("shell, show me the biggest files"), so prompts for
+        // an AI tool stay as said.
+        var shell = asNote == null && prefs.shellCommands && AppContext.isTerminal(appPkg)
+        if (shell && prefs.shellCue) {
+            val cue = SHELL_CUE.find(base)
+            if (cue != null) base = base.substring(cue.range.last + 1).trim() else shell = false
+            if (base.isBlank()) return Outcome("", warnings.firstOrNull())
+        }
 
         stageChars = base.length
         stage = 1
@@ -321,16 +333,17 @@ class Dictation(context: Context) {
         var finalText: String? = null
         var cleanupErr: String? = null
         // Quick mode: a short dictation with nothing for the AI to fix skips it and is tidied here, at once.
-        val quick = prefs.quickSkip && !polish && !inPieces && prefs.cleanup != CleanupChoice.OFF &&
+        val quick = !shell && prefs.quickSkip && !polish && !inPieces && prefs.cleanup != CleanupChoice.OFF &&
             TextTools.nothingToFix(base, map.isNotEmpty(), prefs.styleFor(category).name, category.name, prefs.customInstructions)
         // With the connection down, waiting on the cleanup service too would only use up the time limit: basic cleanup.
         // But if the service answered a moment ago (the ping taken while talking), one failed upload isn't
         // "down": cleanup is small and still worth asking for.
         val noCleanup = offline && pingMs !in 1..800
+        val shellEnv = if (shell) runCatching { AppContext.shellEnvironment(app) }.getOrDefault("") else null
         for (c in if (noCleanup || quick) emptyList() else cleanupOrder(prefs)) {
             call.check()
             try {
-                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces, spot)
+                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces, spot, shellEnv)
                 Usage.recordLlm(app, c, r.inTokens, r.outTokens)
                 cleaned = true
                 finalText = TextTools.restore(r.text, map)
@@ -342,9 +355,10 @@ class Dictation(context: Context) {
             }
         }
         if (!cleaned && cleanupErr != null) warnings += cleanupErr
+        if (shell && !cleaned && cleanupErr == null) warnings += "Command mode needs AI cleanup: turn it on and add its key in Settings"
         val basic = TextTools.restore(TextTools.basicClean(protectedText), map)
         if (finalText == null) finalText = basic
-        val plain = basic.takeIf { polish && cleaned && it != finalText }
+        val plain = basic.takeIf { polish && cleaned && !shell && it != finalText }
 
         stage = 2
         runCatching {
@@ -379,7 +393,8 @@ class Dictation(context: Context) {
         runCatching { History.put(app, Entry(id, retry?.time ?: id, finalText, base, audioMs, cleaned, appPkg ?: "")) }
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
         Usage.recordEdits(app, AppContext.fillerCount(base), if (cleaned) AppContext.correctionCount(base) else 0)
-        return Outcome(finalText, warnings.firstOrNull(), id, plain, fitted = cleaned && spot?.mid == true, note = asNote != null)
+        // A command keeps its letters as they are (fitted: nothing for the sentence fitting to change).
+        return Outcome(finalText, warnings.firstOrNull(), id, plain, fitted = shell || (cleaned && spot?.mid == true), note = asNote != null)
     }
 
     /**
