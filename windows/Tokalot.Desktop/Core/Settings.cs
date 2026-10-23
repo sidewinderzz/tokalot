@@ -82,7 +82,7 @@ public sealed class Settings
     public bool HideShortcutTip { get; set; }
     /** The "Hands-free · Ctrl+Win to finish" reminder above the indicator was closed. */
     public bool HideHandsFreeHint { get; set; }
-    /** Learn names and terms from the user's corrections after a dictation (see Learn). Off unless switched on. */
+    /** Learn names and terms from the user's corrections after a dictation (see Learn), and words spelled out. Off unless switched on (or a privacy level turns it on). */
     public bool LearnWords { get; set; }
     /** The dictionary words that were learned rather than typed in, so the Dictionary page can mark them. */
     public List<string> LearnedWords { get; set; } = new();
@@ -105,8 +105,18 @@ public sealed class Settings
     public bool NotesFeedbackDone { get; set; }
     /** "Let AI assistants read my notes": whether "Tokalot --mcp" answers (see NotesMcp). Off unless turned on. This PC only: not synced. */
     public bool NotesMcp { get; set; }
-    /** The Settings categories left open, so the page opens the way it was left. This PC only: not synced. */
-    public List<string> OpenSettings { get; set; } = new();
+    /** The cloud speech service in use before cloud speech was switched off on the Privacy page, to go back to. Not synced. */
+    public string LastCloudStt { get; set; } = "GROQ";
+    /** Same for the AI cleanup service. */
+    public string LastCleanup { get; set; } = "GROQ";
+    /** The first-run welcome (privacy level and setup) was finished or skipped, or wasn't needed. Not synced. */
+    public bool WelcomeDone { get; set; }
+    /** The welcome has started, and set the level it opens on. */
+    public bool WelcomeStarted { get; set; }
+    /** The one-time card that introduces privacy levels to people who updated. */
+    public bool PrivacyCardSeen { get; set; }
+    /** No settings file existed when this run started: a new install (see the welcome). */
+    [JsonIgnore] public bool Fresh { get; private set; }
     /** Optional sync: the shared file's path on this PC ("" = off), and whether this PC puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }
@@ -144,13 +154,20 @@ public sealed class Settings
 
     // ---------- spelled-out words ----------
 
-    /** Offers found words for the dictionary, leaving out words already there, offered or turned down. True when any were added. */
+    /**
+     * Words spelled out while dictating, leaving out words already there, offered or turned down: added to the
+     * dictionary (marked learned) when LearnWords is on, else offered with Add and Not now. True when any were taken.
+     */
     public bool SuggestWords(IEnumerable<string> found)
     {
         var have = new HashSet<string>(Words.Concat(SuggestedWords).Concat(DismissedWords), StringComparer.OrdinalIgnoreCase);
         var added = false;
         foreach (var w in found)
-            if (have.Add(w)) { SuggestedWords.Add(w); added = true; }
+        {
+            if (!have.Add(w)) continue;
+            if (LearnWords) { Words.Add(w); LearnedWords.Add(w); } else SuggestedWords.Add(w);
+            added = true;
+        }
         return added;
     }
 
@@ -199,7 +216,7 @@ public sealed class Settings
                     {
                         current = System.IO.File.Exists(f)
                             ? JsonSerializer.Deserialize<Settings>(Files.ReadText(f), Json) ?? new Settings()
-                            : new Settings();
+                            : new Settings { Fresh = true };
                         break;
                     }
                     catch (IOException) when (attempt < 2 && current == null)

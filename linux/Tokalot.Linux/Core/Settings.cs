@@ -128,6 +128,18 @@ public sealed class Settings
     public bool NotesFeedbackDone { get; set; }
     /** "Let AI assistants read my notes": whether "Tokalot --mcp" answers (see NotesMcp). Off unless turned on. This PC only: not synced. */
     public bool NotesMcp { get; set; }
+    /** The cloud speech service in use before cloud speech was switched off on the Privacy page, to go back to. Not synced. */
+    public string LastCloudStt { get; set; } = "GROQ";
+    /** Same for the AI cleanup service. */
+    public string LastCleanup { get; set; } = "GROQ";
+    /** The first-run welcome (privacy level and setup) was finished or skipped, or wasn't needed. Not synced. */
+    public bool WelcomeDone { get; set; }
+    /** The welcome has started, and set the level it opens on. */
+    public bool WelcomeStarted { get; set; }
+    /** The one-time card that introduces privacy levels to people who updated. */
+    public bool PrivacyCardSeen { get; set; }
+    /** No settings file existed when this run started: a new install (see the welcome). */
+    [JsonIgnore] public bool Fresh { get; private set; }
     /** Optional sync: the shared file's path on this computer ("" = off), and whether this computer puts its API keys in it. */
     public string SyncFile { get; set; } = "";
     public bool SyncKeys { get; set; }
@@ -225,7 +237,7 @@ public sealed class Settings
                 {
                     current = System.IO.File.Exists(f)
                         ? JsonSerializer.Deserialize<Settings>(Files.ReadText(f, current == null ? 6 : 1), Json) ?? new Settings()
-                        : new Settings();
+                        : new Settings { Fresh = true };
                 }
                 catch (JsonException)
                 {
