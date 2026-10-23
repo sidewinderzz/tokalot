@@ -12,6 +12,12 @@ permissions:
   # To see whether the other apps' builds of the same commit passed, before publishing.
   actions: read
 
+# A newer push to the same branch replaces an unfinished build of it. Never on main,
+# where a cancelled run could leave a release half-published.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   build:
     # Apple silicon, macOS 15.

@@ -21,7 +21,7 @@ private fun EditText.onChange(block: (String) -> Unit) = addTextChangedListener(
 })
 
 /** A title/subtitle row with an on/off switch. */
-private fun MainActivity.switchRow(title: String, sub: String, on: Boolean, onChange: (Boolean) -> Unit): View {
+internal fun MainActivity.switchRow(title: String, sub: String, on: Boolean, onChange: (Boolean) -> Unit): View {
     val sw = themedSwitch(on, prefs.accent)
     val texts = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
@@ -40,7 +40,7 @@ private fun MainActivity.switchRow(title: String, sub: String, on: Boolean, onCh
 }
 
 /** A tappable row with a round selection dot, used for picking providers and styles. */
-private fun MainActivity.choiceRow(title: String, sub: String, selected: Boolean, onPick: () -> Unit): View {
+internal fun MainActivity.choiceRow(title: String, sub: String, selected: Boolean, onPick: () -> Unit): View {
     val dot = View(this).apply {
         background = if (selected) rounded(C.TEXT, 100) else rounded(C.CARD, 100, C.PILL, 2)
     }
@@ -114,10 +114,10 @@ class DictionaryScreen(private val a: MainActivity) {
         col.addView(card().apply {
             addView(switchRow(
                 "Learn from my corrections",
-                "Off unless you turn it on. After Tokalot types a dictation, it looks at that text box again for up to two minutes. " +
+                "After Tokalot types a dictation, it looks at that text box again for up to two minutes. " +
                     "If you respell one word into a name or a term (Kaitlin to Caitlyn, get hub to GitHub), the new spelling is added here, " +
-                    "and a note lets you undo it. Ordinary words are left alone. The text is only compared on this phone, " +
-                    "never saved or sent; the learned word is all that's kept.",
+                    "and a note lets you undo it. A word you spell out while dictating (K-U-B-O-T-A) is added too. Ordinary words are left alone. " +
+                    "The text is only compared on this phone, never saved or sent; the learned word is all that's kept. Part of Settings › Privacy.",
                 prefs.learnWords
             ) { prefs.learnWords = it })
         }, lp().margins(this, b = 16))
@@ -534,21 +534,35 @@ class SettingsScreen(private val a: MainActivity) {
 
     companion object {
         const val SETUP = "Setup"
+        const val PRIVACY = "Privacy"
         const val KEYBOARD = "Keyboard"
-        const val SPEECH = "Speech & cleanup"
-        const val DATA = "Your data"
-        const val RECORDING = "Recording & look"
+        const val SPEECH = "Speech & AI"
+        const val KEYS = "API keys"
+        const val RECORDING = "Recording"
+        const val SHORTCUTS = "Shortcuts"
+        const val DATA = "Sync & backup"
         private const val SECTION = "section:"
 
-        /** Settings categories, in order, each with its sections in the order shown when it's open. */
-        val CATEGORIES = listOf(
+        /**
+         * Settings pages, in order, each with its sections in the order shown on it. The main Settings screen lists
+         * the pages (each with a line saying what it's set to); tapping one shows just its sections.
+         */
+        val PAGES = listOf(
             SETUP to listOf("Setup"),
+            PRIVACY to listOf("Privacy"),
             KEYBOARD to listOf("Keyboard"),
-            SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "API keys", "Speed"),
-            RECORDING to listOf("Recording", "Without a text box", "Appearance"),
-            DATA to listOf("Recordings", "Sync", "Backup", "Usage"),
+            SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "Speed"),
+            KEYS to listOf("API keys"),
+            RECORDING to listOf("Recording"),
+            SHORTCUTS to listOf("Shortcuts"),
+            "Appearance" to listOf("Appearance"),
+            DATA to listOf("Sync", "Backup"),
+            "Recordings & usage" to listOf("Recordings", "Usage"),
             "About" to listOf("About"),
         )
+
+        /** The page open in Settings, or null for the list of pages. Kept while the app runs, like the tab. */
+        var page: String? = null
 
         /** The on-device model being downloaded (one at a time), and how far along it is. */
         @Volatile var downloading: LocalModel? = null
@@ -584,7 +598,6 @@ class SettingsScreen(private val a: MainActivity) {
 
     fun build(): View = with(a) {
         val col = column()
-        col.addView(heading("Settings"), lp().margins(this, t = 8, b = 16))
 
         // --- Setup
         section(col, "Setup")
@@ -761,6 +774,31 @@ class SettingsScreen(private val a: MainActivity) {
             }
         ), lp().margins(this, t = 8, l = 4))
 
+        // --- Privacy: the level, and every switch a level sets (see Privacy)
+        section(col, "Privacy")
+        val level = Privacy.current(prefs)
+        col.addView(text("A level sets everything below at once. Then change any switch you like: a change made here or on another page shows up here too.", 14f, C.SUB), lp().margins(this, b = 10, l = 4))
+        val lv = card()
+        Privacy.Level.values().forEachIndexed { i, l ->
+            if (i > 0) lv.addView(divider())
+            lv.addView(choiceRow(l.label, l.blurb, level == l) { if (level != l) setLevel(l) })
+        }
+        if (level == null) {
+            lv.addView(divider())
+            lv.addView(choiceRow("Custom", "Your own mix of the switches below.", true) {})
+        }
+        col.addView(lv)
+        col.addView(text("What's on", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
+        val pv = card()
+        Privacy.switches.forEachIndexed { i, s ->
+            if (i > 0) pv.addView(divider())
+            pv.addView(switchRow(s.title, s.note, s.isOn(prefs)) { on -> s.set(prefs, on); privacyChanged() })
+        }
+        col.addView(pv)
+        col.addView(text("Keep recordings", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
+        col.addView(keepCard())
+        col.addView(text("At every level there's no Tokalot account or server, your keys stay on this phone, and dictations go only to the services you picked.", 13f, C.SUB), lp().margins(this, t = 8))
+
         // --- Appearance
         section(col, "Appearance")
         val ap = card()
@@ -841,8 +879,8 @@ class SettingsScreen(private val a: MainActivity) {
             }
         ), lp().margins(this, t = 8, l = 4))
 
-        // --- Without a text box: the Quick Settings tiles, voice notes (beta) and the accessibility shortcut
-        section(col, "Without a text box")
+        // --- Shortcuts, for when there is no text box: the Quick Settings tiles, voice notes (beta) and the accessibility shortcut
+        section(col, "Shortcuts")
         val hand = card()
         hand.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1078,26 +1116,7 @@ class SettingsScreen(private val a: MainActivity) {
 
         // --- Recordings
         section(col, "Recordings")
-        val rec = card()
-        listOf(0 to "Don't save audio", 7 to "Keep 7 days", 30 to "Keep 30 days", Int.MAX_VALUE to "Keep forever")
-            .forEachIndexed { i, (days, label) ->
-                if (i > 0) rec.addView(divider())
-                rec.addView(choiceRow(label, "", prefs.audioKeepDays == days) {
-                    val keep = {
-                        prefs.audioKeepDays = days
-                        Thread { AudioStore.prune(applicationContext, days); runOnUiThread { render() } }.start()
-                        render()
-                    }
-                    if (days < prefs.audioKeepDays && AudioStore.totalBytes(this) > 0) {
-                        confirm(
-                            if (days == 0) "Delete all saved recordings now? Transcripts stay."
-                            else "Delete recordings older than $days days now? Transcripts stay.",
-                            "Delete"
-                        ) { keep() }
-                    } else keep()
-                })
-            }
-        col.addView(rec)
+        col.addView(keepCard())
         col.addView(text("A recording that failed or was cancelled is always kept until you transcribe or delete it.", 13f, C.SUB), lp().margins(this, t = 8))
         val mb = AudioStore.totalBytes(this) / 1_048_576.0
         col.addView(row(
@@ -1234,7 +1253,7 @@ class SettingsScreen(private val a: MainActivity) {
         about.addView(link("Open-source licenses") { info("Open-source licenses", Licenses.TEXT) }, lp().margins(this, t = 4))
         col.addView(about)
 
-        fold(col)
+        pages(col)
         scroll(col)
     }
 
@@ -1247,62 +1266,114 @@ class SettingsScreen(private val a: MainActivity) {
     }
 
     /**
-     * Regroups the finished page into [CATEGORIES]: each a header you tap to open or close, holding its
-     * sections. The sections are built as before; this only moves each one (its heading and everything up to
-     * the next heading) under its category. Which ones are open is remembered, and Setup stays open while
-     * setup isn't finished.
+     * Turns the finished page into [PAGES]. The sections are built as before; this keeps only what's on the open
+     * [page] (each section's heading and everything up to the next heading), or, with no page open, swaps them all
+     * for the list of pages, each with a line saying what it's set to.
      */
-    private fun fold(col: LinearLayout) = with(a) {
+    private fun pages(col: LinearLayout) = with(a) {
         val views = (0 until col.childCount).map { col.getChildAt(it) }
         val sections = LinkedHashMap<String, MutableList<View>>()
-        val top = mutableListOf<View>()
         var current: MutableList<View>? = null
         for (v in views) {
             val t = v.tag as? String
             if (t != null && t.startsWith(SECTION)) current = mutableListOf<View>().also { sections[t.removePrefix(SECTION)] = it }
-            (current ?: top).add(v)
+            current?.add(v)
         }
         col.removeAllViews()
-        top.forEach { col.addView(it) }
-        val open = prefs.openSettings + if (setupComplete()) emptySet() else setOf(SETUP)
-        for ((name, titles) in CATEGORIES) {
-            val parts = titles.filter { it in sections }
-            if (parts.isEmpty()) continue
-            val isOpen = name in open
-            val chevron = icon(R.drawable.ic_expand, 22, C.SUB).apply { rotation = if (isOpen) 180f else 0f }
-            val texts = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(text(name, 20f, bold = true))
-                if (parts.size > 1 || parts[0] != name) addView(text(parts.joinToString(" · "), 13f, C.SUB))
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        val open = PAGES.firstOrNull { it.first == page }
+        if (open == null) {
+            page = null
+            col.addView(heading("Settings"), lp().margins(this, t = 8, b = 8))
+            for ((name, titles) in PAGES) {
+                if (titles.none { it in sections }) continue
+                col.addView(pageRow(name), lp().margins(this, t = 10))
             }
-            col.addView(row(texts, chevron).apply {
-                background = pressable(rounded(C.CARD, 20))
-                setPadding(dp(20), dp(16), dp(16), dp(16))
-                minimumHeight = dp(TOUCH_DP)
-                contentDescription = "$name, ${if (isOpen) "open" else "closed"}"
-                setOnClickListener {
-                    prefs.openSettings = if (name in prefs.openSettings) prefs.openSettings - name else prefs.openSettings + name
-                    render()
-                }
-            }, lp().margins(this, t = 12))
-            if (!isOpen) continue
-            val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 0, 0, dp(8)) }
-            for (title in parts) {
-                val part = sections.getValue(title)
-                // A category holding one section of its own name doesn't need the small heading as well.
-                val skipHeading = parts.size == 1 && title == name
-                part.forEachIndexed { i, v ->
-                    if (i == 0 && skipHeading) return@forEachIndexed
-                    val p = v.layoutParams as? LinearLayout.LayoutParams
-                    // The first heading sits closer to the category header than headings between sections.
-                    if (i == 0 && title == parts[0] && p != null) p.topMargin = dp(16)
-                    if (i == 1 && skipHeading && p != null) p.topMargin = dp(12)
-                    body.addView(v)
-                }
-            }
-            col.addView(body)
+            return@with
         }
+        val (name, titles) = open
+        col.addView(heading(name, 32f), lp().margins(this, t = 8, b = 4))
+        for (title in titles) {
+            val part = sections[title] ?: continue
+            // A page holding one section of its own name doesn't need the small heading as well.
+            val skipHeading = titles.size == 1
+            part.forEachIndexed { i, v ->
+                if (i == 0 && skipHeading) return@forEachIndexed
+                val p = v.layoutParams as? LinearLayout.LayoutParams
+                if (i == 0 && title == titles[0] && p != null) p.topMargin = dp(12)
+                if (i == 1 && skipHeading && p != null) p.topMargin = dp(12)
+                col.addView(v)
+            }
+        }
+    }
+
+    /** One page on the main Settings list: its name and what it's set to. Tap to open it. */
+    private fun pageRow(name: String): View = with(a) {
+        val (sub, warn) = summary(name)
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(text(name, 18f, bold = true))
+            if (sub.isNotEmpty()) addView(text(sub, 14f, if (warn) C.WARN else C.SUB))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        row(texts, icon(R.drawable.ic_expand, 22, C.SUB).apply { rotation = -90f }).apply {
+            background = pressable(rounded(C.CARD, 20))
+            setPadding(dp(20), dp(14), dp(16), dp(14))
+            minimumHeight = dp(TOUCH_DP)
+            contentDescription = if (sub.isEmpty()) name else "$name, $sub"
+            setOnClickListener { page = name; render() }
+        }
+    }
+
+    /** The line under a page's name on the main list, and whether it needs attention. */
+    private fun summary(name: String): Pair<String, Boolean> = with(a) {
+        fun yes(on: Boolean) = if (on) "on" else "off"
+        when (name) {
+            SETUP -> {
+                val left = listOf(micGranted(), serviceEnabled(), prefs.cloudSttReady || ModelManager.isReady(this)).count { !it }
+                if (left == 0) "All set" to false else "$left ${if (left == 1) "thing" else "things"} to do" to true
+            }
+            PRIVACY -> (Privacy.current(prefs)?.label ?: "Custom") to false
+            KEYBOARD -> (if (!TokalotKeyboard.isEnabled(this)) "Off" else "On · swipe ${yes(prefs.kbSwipe)} · autocorrect ${yes(prefs.kbAutocorrect)}") to false
+            SPEECH -> "${if (prefs.stt == SttChoice.LOCAL) "On the phone" else prefs.stt.label} · cleanup ${if (prefs.cleanup == CleanupChoice.OFF) "off" else prefs.cleanup.label}" to false
+            KEYS -> {
+                val have = Services.all.filter { prefs.key(it.first).isNotEmpty() }.map { it.second }
+                if (have.isEmpty()) "None added yet" to (prefs.stt != SttChoice.LOCAL) else have.joinToString(", ") to false
+            }
+            RECORDING -> "${if (prefs.holdToTalk) "Hold to talk" else "Tap to talk"} · sounds ${yes(prefs.sounds)} · haptics ${yes(prefs.haptics)}" to false
+            SHORTCUTS -> (if (prefs.notesBeta) "Dictate tile, voice notes, volume keys" else "Dictate tile, volume keys") to false
+            "Appearance" -> when (prefs.theme) { "light" -> "Light"; "dark" -> "Dark"; else -> "Match phone" } to false
+            DATA -> (if (prefs.syncUri == null) "Sync off" else if (prefs.syncError != null) "Sync needs attention" else Sync.ago(prefs.syncLast)) to (prefs.syncError != null)
+            "Recordings & usage" -> {
+                val keep = when (prefs.audioKeepDays) { 0 -> "Audio not saved"; Int.MAX_VALUE -> "Audio kept forever"; else -> "Audio kept ${prefs.audioKeepDays} days" }
+                "$keep · ${MainActivity.money(Usage.month(this).total)} this month" to false
+            }
+            "About" -> "Tokalot ${Updater.currentVersion(this)}" to false
+            else -> "" to false
+        }
+    }
+
+    /** How long recordings are kept, on the Recordings page and on Privacy. */
+    private fun keepCard(): View = with(a) {
+        val rec = card()
+        listOf(0 to "Don't save audio", 7 to "Keep 7 days", 30 to "Keep 30 days", Int.MAX_VALUE to "Keep forever")
+            .forEachIndexed { i, (days, label) ->
+                if (i > 0) rec.addView(divider())
+                rec.addView(choiceRow(label, "", prefs.audioKeepDays == days) {
+                    val keep = {
+                        prefs.audioKeepDays = days
+                        Thread { AudioStore.prune(applicationContext, days); runOnUiThread { render() } }.start()
+                        render()
+                    }
+                    if (days < prefs.audioKeepDays && AudioStore.totalBytes(this) > 0) {
+                        confirm(
+                            if (days == 0) "Delete all saved recordings now? Transcripts stay."
+                            else "Delete recordings older than $days days now? Transcripts stay.",
+                            "Delete"
+                        ) { keep() }
+                    } else keep()
+                })
+            }
+        rec
     }
 
     /** One card: an invitation while sync is off, its status and controls once a file is chosen. */
@@ -1386,7 +1457,27 @@ class SettingsScreen(private val a: MainActivity) {
         }.start()
     }
 
-    private fun startDownload(m: LocalModel) {
+    /** Puts every switch to [level] (see [Privacy.apply]). */
+    private fun setLevel(level: Privacy.Level) = with(a) {
+        val days = Privacy.keepDays(level)
+        val go = { Privacy.apply(this, prefs, level); privacyChanged() }
+        if (days < prefs.audioKeepDays && AudioStore.totalBytes(this) > 0) {
+            confirm(
+                if (days == 0) "${level.label} doesn't keep recordings. Delete all saved recordings now? Transcripts stay."
+                else "${level.label} keeps recordings for $days days. Delete older ones now? Transcripts stay.",
+                "Delete"
+            ) { go() }
+        } else go()
+    }
+
+    /** After a privacy switch changed: on-device speech needs its model, so the download starts if it isn't here. */
+    private fun privacyChanged() {
+        val p = a.prefs
+        if (p.stt == SttChoice.LOCAL && ModelManager.active(a) == null && downloading == null) startDownload(p.localModel)
+        else a.render()
+    }
+
+    fun startDownload(m: LocalModel) {
         if (downloading != null) {
             android.widget.Toast.makeText(a, "Wait for the ${downloading?.label} download to finish", android.widget.Toast.LENGTH_SHORT).show()
             a.render()

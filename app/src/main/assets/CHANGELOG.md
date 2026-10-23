@@ -6,7 +6,7 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
-## 1.44 · 2026-10-20
+## 1.46 · 2026-10-23
 - New: Tokalot Keyboard, an optional keyboard in the style of Gboard. Turn it on in Settings › Keyboard.
 - It autocorrects as you type (teh becomes the, dont becomes don't), and a backspace straight after puts back what you typed. Three suggestions sit above the keys, and between words it guesses the next one.
 - Swipe typing: slide from letter to letter, in any text box but a password one. Slide along the space bar to move the cursor (an emoji or accented letter is one step), and left from backspace to select whole words, which go when you let go (slide back to keep them). Slide all the way to the left edge to delete everything in the box, and tap Undo on the bar to bring it back.
@@ -21,6 +21,13 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Get beta updates, under Settings › About: try new features before they're released. Turn it off to go back at the next release.
 - Words the keyboard doesn't know, such as names and farm terms, go into your dictionary once you've kept them twice, so they sync and dictation spells them right too. What else it learns from your typing stays on this phone.
 - Light and dark to match the app, in your Tokalot color, with key sound and vibration switches. Its settings sync to your other devices.
+
+## 1.45 · 2026-10-23
+- Settings is now a short list of pages, like Android's own Settings. Each row says what it's set to; tap one to open it. No more folding sections that stay open.
+- New Privacy page with three levels: Everything on, Balanced and Most private. A level sets the privacy switches all at once, and you can still change any switch. A change made anywhere shows up there, and a mix that matches no level shows as Custom.
+- A new install starts with a short welcome: pick a level, then allow the mic, turn on the accessibility switch, and paste a key (or download the on-device model). If you updated, your settings didn't change; a card on Home points to the new page.
+- With Learn from my corrections on, a word you spell out while dictating goes straight into your dictionary, marked learned, instead of waiting for you to tap Add.
+- The "Without a text box" settings are now called Shortcuts.
 
 ## 1.43 · 2026-10-20
 - After an update, Tokalot checks that the floating mic button came back. Some phones, such as Samsung, switch it off with every update. If that happens you get a notification that takes you straight to the switch.

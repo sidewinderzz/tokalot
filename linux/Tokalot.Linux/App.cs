@@ -33,8 +33,15 @@ public sealed partial class App : Application
     [STAThread]
     public static int Main(string[] args)
     {
+        Cleanup.ShellEnvironment = ShellContext.Describe;
         // "Tokalot --diagnose" prints what this computer lets Tokalot do (keyboard, paste, microphone…) and exits.
         if (args.Contains("--diagnose")) { Diagnose(args.Contains("--download-model")); return 0; }
+
+        // "Tokalot --transcribe <audio file>" runs the whole dictation pipeline on a recording (speech to text, cleanup, snippets
+        // and dictionary, with the saved settings and keys) and prints the text. Needs no display or hotkey. "--terminal" dictates as if
+        // into a terminal, to try Terminal commands. It counts as a dictation:
+        // point TOKALOT_DATA at a scratch folder to keep it out of the real history and usage.
+        if (args.Length >= 2 && args[0] == "--transcribe") return Transcribe(args[1], args.Contains("--terminal"));
 
         // "Tokalot --mcp": an AI assistant on this computer reading the voice notes (see NotesMcp). Runs beside the tray app.
         if (args.Contains(NotesMcp.Arg)) return NotesMcp.Run();
@@ -237,6 +244,23 @@ public sealed partial class App : Application
     }
 
     /** A plain-text report of what works on this computer, for setup and bug reports. Starts no windows. */
+    private static int Transcribe(string file, bool terminal)
+    {
+        var samples = AudioStore.LoadFile(file);
+        if (samples == null || samples.Length == 0) { Console.Error.WriteLine("Couldn't read " + file + " (16-bit WAV, or another format if ffmpeg is installed)."); return 2; }
+        KeyStore.Preload(Settings.Current).GetAwaiter().GetResult();
+        try
+        {
+            using var dictation = new Dictation();
+            var outcome = dictation.Process(samples, terminal ? new ActiveApp("app:konsole", "Konsole") : null).GetAwaiter().GetResult();
+            Console.WriteLine(outcome.Text);
+            if (outcome.Warning != null) Console.Error.WriteLine(outcome.Warning);
+            if (Dictation.LastTiming.Length > 0) Console.Error.WriteLine(Dictation.LastTiming);
+            return 0;
+        }
+        catch (Exception e) { Console.Error.WriteLine("Failed: " + e.Message); return 1; }
+    }
+
     private static void Diagnose(bool downloadModel)
     {
         void Line(string k, string v) => Console.WriteLine($"{k,-22} {v}");
@@ -261,7 +285,10 @@ public sealed partial class App : Application
         Line("Drawing", Sh.IsWayland ? "graphics card" : Scaling.Fractional() is { } scale
             ? $"processor, because a monitor uses fractional scaling ({scale * 100:0}%), which can freeze graphics-card drawing on X11. --gpu overrides"
             : "graphics card (--software draws with the processor if the window comes up blank or freezes)");
-        Line("Active-app detection", Sh.IsWayland ? "off (Wayland doesn't expose the focused window)" : X11.Available ? "OK (X11)" : Sh.First("xdotool", "xprop") ?? "not available");
+        Line("Active-app detection", Sh.IsWayland
+            ? (AppDetect.Detect() is { } focused ? "OK (focused window now: " + focused.Label + (AppDetect.IsTerminal(focused) ? ", a terminal" : "") + ")"
+                : "off (this Wayland compositor doesn't say which window is focused, or the tool for it is missing; works on KDE, Sway, Hyprland, niri)")
+            : X11.Available ? "OK (X11)" : Sh.First("xdotool", "xprop") ?? "not available");
         if (downloadModel && !ModelManager.IsReady)
         {
             Console.WriteLine("Downloading the offline model (60 MB)…");
