@@ -1084,14 +1084,23 @@ class SettingsScreen(private val a: MainActivity) {
             col.addView(text("Each device adds its own counts to the sync file when it syncs.", 13f, C.SUB), lp().margins(this, t = 8))
         }
 
-        // --- About
+        // --- About: the version and updates on one card, the links as rows on another, the privacy line under them.
         section(col, "About")
-        val about = card(18)
-        about.addView(text("Tokalot ${Updater.currentVersion(this)}", 17f, bold = true))
-        about.addView(text("Your recordings, history and keys stay on this phone. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking.", 14f, C.SUB), lp().margins(this, t = 4))
-        about.addView(link("Source code: github.com/${Updater.REPO}") {
-            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/${Updater.REPO}")))
-        }, lp())
+        val about = card(20)
+        about.addView(row(
+            BarsView(this).apply {
+                barColor = C.TEXT
+                accentColor = C.visible(prefs.accent)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                layoutParams = LinearLayout.LayoutParams(dp(40), dp(40))
+            },
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(14), 0, 0, 0)
+                addView(text("Tokalot", 20f, bold = true))
+                addView(text("Version ${Updater.currentVersion(this@with)}", 14f, C.SUB))
+            },
+        ))
         // A new version can be installed from here too, not only from the banner on Home.
         val ready = Updater.available(this, evenDismissed = true)
         val downloaded = Updater.progress
@@ -1099,10 +1108,12 @@ class SettingsScreen(private val a: MainActivity) {
             ready == null -> ""
             downloaded != null -> "Downloading Tokalot ${ready.version}… $downloaded%"
             else -> "Version ${ready.version} is available."
-        }, 14f, C.SUB)
+        }, 14f, C.SUB).apply { if (text.isEmpty()) visibility = View.GONE }
         settingsUpdateText = status
-        val check = pill("Check for updates") {
+        val check = pill(if (ready != null && downloaded == null) "Check again" else "Check for updates") {
             status.text = "Checking…"
+            status.setTextColor(C.SUB)
+            status.visibility = View.VISIBLE
             val app = applicationContext
             Thread {
                 Updater.check(app, force = true)
@@ -1110,26 +1121,34 @@ class SettingsScreen(private val a: MainActivity) {
                 val r = Updater.available(app, evenDismissed = true)
                 runOnUiThread {
                     if (r != null) render() // brings up the Update button
-                    else status.text = if (failed) {
-                        // Not the same as "up to date": we simply don't know.
-                        "Couldn't check for updates. Check your connection and try again."
-                    } else "You're up to date."
+                    else if (failed) status.text = "Couldn't check for updates. Check your connection and try again." // not the same as "up to date": we simply don't know
+                    else { status.text = "You're up to date."; status.setTextColor(C.GOOD) }
                 }
             }.start()
         }
+        about.addView(status, lp().margins(this, t = 14))
         about.addView(
             if (ready != null && downloaded == null) row(pill("Update", filled = true) { startUpdate(ready) }, spacer(wDp = 8), check) else row(check),
-            lp(),
+            lp().margins(this, t = 6),
         )
-        about.addView(status, lp().margins(this, t = 2))
-        about.addView(link("What's new in ${Tour.VERSION}") { Tour.show(this) }, lp().margins(this, t = 4))
-        about.addView(link("Changelog") {
+        col.addView(about)
+
+        val links = card()
+        links.addView(linkRow("What's new in ${Tour.VERSION}") { Tour.show(this) })
+        links.addView(divider())
+        links.addView(linkRow("Changelog") {
             val entries = Changelog.bundled(this)
             if (entries.isEmpty()) info("Changelog", "The changelog couldn't be read.")
             else sheet("Changelog", changeList(entries), positive = "Close", negative = null)
-        }, lp().margins(this, t = 4))
-        about.addView(link("Open-source licenses") { info("Open-source licenses", Licenses.TEXT) }, lp().margins(this, t = 4))
-        col.addView(about)
+        })
+        links.addView(divider())
+        links.addView(linkRow("Open-source licenses") { info("Open-source licenses", Licenses.TEXT) })
+        links.addView(divider())
+        links.addView(linkRow("Source code", "github.com/${Updater.REPO}") {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/${Updater.REPO}")))
+        })
+        col.addView(links, lp().margins(this, t = 12))
+        col.addView(text("Your recordings, history and keys stay on this phone. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking.", 13f, C.SUB), lp().margins(this, t = 12, l = 4))
 
         pages(col)
         scroll(col)
@@ -1181,6 +1200,24 @@ class SettingsScreen(private val a: MainActivity) {
                 if (i == 1 && skipHeading && p != null) p.topMargin = dp(12)
                 col.addView(v)
             }
+        }
+    }
+
+    /** A row on a card that opens something: its name, an optional line under it, and a chevron. */
+    private fun linkRow(title: String, sub: String? = null, onClick: () -> Unit): View = with(a) {
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(text(title, 17f))
+            if (sub != null) addView(text(sub, 14f, C.SUB))
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        row(texts, icon(R.drawable.ic_expand, 20, C.SUB).apply { rotation = -90f }).apply {
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
+                android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
+            setPadding(dp(20), dp(14), dp(16), dp(14))
+            minimumHeight = dp(TOUCH_DP + 8)
+            contentDescription = if (sub == null) title else "$title, $sub"
+            setOnClickListener { onClick() }
         }
     }
 
