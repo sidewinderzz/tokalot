@@ -261,7 +261,10 @@ public sealed partial class App : Application
         Line("Drawing", Sh.IsWayland ? "graphics card" : Scaling.Fractional() is { } scale
             ? $"processor, because a monitor uses fractional scaling ({scale * 100:0}%), which can freeze graphics-card drawing on X11. --gpu overrides"
             : "graphics card (--software draws with the processor if the window comes up blank or freezes)");
-        Line("Active-app detection", Sh.IsWayland ? "off (Wayland doesn't expose the focused window)" : X11.Available ? "OK (X11)" : Sh.First("xdotool", "xprop") ?? "not available");
+        Line("Active-app detection", Sh.IsWayland
+            ? (AppDetect.Detect() is { } focused ? "OK (focused window now: " + focused.Label + (AppDetect.IsTerminal(focused) ? ", a terminal" : "") + ")"
+                : "off (this Wayland compositor doesn't say which window is focused, or the tool for it is missing; works on KDE, Sway, Hyprland, niri)")
+            : X11.Available ? "OK (X11)" : Sh.First("xdotool", "xprop") ?? "not available");
         if (downloadModel && !ModelManager.IsReady)
         {
             Console.WriteLine("Downloading the offline model (60 MB)…");

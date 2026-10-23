@@ -1,5 +1,12 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.12.0
+
+- Pasting into a terminal works on Wayland. Terminals paste with Ctrl+Shift+V, and Tokalot used to press Ctrl+V because a Wayland desktop doesn't say which window is in front. It now asks the desktop itself: **KDE Plasma** (through a one-off KWin script), **Sway**, **Hyprland** and **niri**. On GNOME and other desktops nothing changes.
+- That also turns on per-app styles (messages, email, AI and code) on those desktops; before, every dictation on Wayland used "Everything else".
+- `Tokalot --diagnose` now says which window it sees in front ("Active-app detection") instead of just "off" on Wayland.
+- Checked on KDE Plasma 6 on Wayland. The Sway, Hyprland and niri readers follow what their tools print and haven't been run on those desktops, so please say if one doesn't work.
+
 ## New in 0.11.0
 
 - Notes get a short title, written by the AI when a note is made or first opened. It shows on the note and in the list. Rename it from the **⋮** menu.
