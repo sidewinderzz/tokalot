@@ -105,6 +105,11 @@ public sealed class Settings
     public double NoteSpeed { get; set; } = 1;
     /** The "Click any word to play from there" hint on a voice note was closed or used. This PC only: not synced. */
     public bool NoteWordHintSeen { get; set; }
+
+    /** Settings › Recording › Microphone: the mic picked (Recorder.Mics' Id), or "" for the system default. This computer only. */
+    public string MicDevice { get; set; } = "";
+    /** Record from a connected headset's mic when there is one, whatever is picked above. This computer only. */
+    public bool PreferHeadset { get; set; }
     /** The Notes beta card was answered or closed. */
     public bool NotesFeedbackDone { get; set; }
     /** "Let AI assistants read my notes": whether "Tokalot --mcp" answers (see NotesMcp). Off unless turned on. This PC only: not synced. */

@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NAudio.Wave;
 
 namespace Tokalot.Desktop.Core;
 
-/** Records 16 kHz mono 16-bit audio (what Whisper wants) from the default microphone. */
+/** Records 16 kHz mono 16-bit audio (what Whisper wants) from the default microphone, or the one picked in Settings (Mics). */
 public sealed class Recorder : IDisposable
 {
     public const int SampleRate = 16000;
@@ -32,6 +33,21 @@ public sealed class Recorder : IDisposable
     /** Audio this early may just be the start tone coming back through the speakers. */
     public int CueSamples { get; set; }
 
+    /** The microphones Windows has, by name (Windows cuts the names at 31 letters). */
+    public static List<Mic> Mics()
+    {
+        var output = new List<Mic>();
+        for (var i = 0; i < WaveInEvent.DeviceCount; i++)
+        {
+            var name = WaveInEvent.GetCapabilities(i).ProductName;
+            if (output.All(m => m.Id != name)) output.Add(new Mic(name, name, Core.Mics.LooksLikeHeadset(name)));
+        }
+        return output;
+    }
+
+    /** The mic the last recording used, for the indicator's hint: null when it was the default. */
+    public Mic? Using { get; private set; }
+
     /** Returns false if no microphone could be opened. */
     public bool Start()
     {
@@ -45,8 +61,22 @@ public sealed class Recorder : IDisposable
             SpeechChunks = 0;
             LateSpeechChunks = 0;
             wave = new WaveInEvent { WaveFormat = new WaveFormat(SampleRate, 16, 1), BufferMilliseconds = 50 };
+            // The picked (or headset) mic, found by its name since the numbers move as devices come and go.
+            Using = Core.Mics.ForRecording(Mics);
+            if (Using != null)
+                for (var i = 0; i < WaveInEvent.DeviceCount; i++)
+                    if (WaveInEvent.GetCapabilities(i).ProductName == Using.Id) { wave.DeviceNumber = i; break; }
             wave.DataAvailable += OnData;
-            wave.StartRecording();
+            try { wave.StartRecording(); }
+            catch when (Using != null)
+            {
+                // The picked mic wouldn't open: the default one instead.
+                wave.Dispose();
+                Using = null;
+                wave = new WaveInEvent { WaveFormat = new WaveFormat(SampleRate, 16, 1), BufferMilliseconds = 50 };
+                wave.DataAvailable += OnData;
+                wave.StartRecording();
+            }
             IsRecording = true;
             return true;
         }

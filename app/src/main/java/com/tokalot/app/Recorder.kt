@@ -47,25 +47,34 @@ class Recorder {
 
     private var floor = 0.002f // running estimate of the room's background level
 
-    /** Caller must already hold RECORD_AUDIO. Returns false if the mic couldn't be opened. */
-    fun start(): Boolean {
+    /** Runs once when the mic is closed (stop, or a failed start): closes the headset link [start] was given. */
+    private var afterStop: (() -> Unit)? = null
+
+    /**
+     * Caller must already hold RECORD_AUDIO. Returns false if the mic couldn't be opened. [headset]: a Bluetooth
+     * headset's mic (see [HeadsetMic]) to record from instead of the phone's, with [afterStop] to close its link.
+     * If it won't open, the phone's mic is used.
+     */
+    fun start(headset: android.media.AudioDeviceInfo? = null, afterStop: (() -> Unit)? = null): Boolean {
         if (running) return true
+        this.afterStop = afterStop
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
-        if (minBuf <= 0) return false
-        val rec = try {
-            AudioRecord(
-                MediaRecorder.AudioSource.MIC, SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 4
-            )
+        if (minBuf <= 0) { closed(); return false }
+        fun open(source: Int): AudioRecord? = try {
+            AudioRecord(source, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 4).let {
+                if (it.state == AudioRecord.STATE_INITIALIZED) it else { it.release(); null }
+            }
         } catch (e: SecurityException) {
-            return false
+            null
+        } catch (e: IllegalArgumentException) {
+            null
         }
-        if (rec.state != AudioRecord.STATE_INITIALIZED) {
-            rec.release()
-            return false
-        }
+        // A headset is reached through the "call" input, pointed at it.
+        val viaHeadset = headset?.let { h -> open(MediaRecorder.AudioSource.VOICE_COMMUNICATION)?.also { it.preferredDevice = h } }
+        if (headset != null && viaHeadset == null) closed()
+        val rec = viaHeadset ?: open(MediaRecorder.AudioSource.MIC) ?: run { closed(); return false }
         chunks.clear()
         total = 0
         lastVoiceAt = System.currentTimeMillis()
@@ -79,6 +88,7 @@ class Recorder {
             // The mic is busy or was taken away between creating and starting.
             rec.release()
             record = null
+            closed()
             return false
         }
         running = true
@@ -153,12 +163,18 @@ class Recorder {
             it.release()
         }
         record = null
+        closed()
         return synchronized(chunks) {
             val taken = Taken(ArrayList(chunks), total)
             chunks.clear()
             total = 0
             taken
         }
+    }
+
+    private fun closed() {
+        afterStop?.invoke()
+        afterStop = null
     }
 
     /** The audio as floats in [-1, 1], and its loudest sample. */

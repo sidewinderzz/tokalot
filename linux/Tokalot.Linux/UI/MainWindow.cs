@@ -43,6 +43,10 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer undoTimer = new() { Interval = TimeSpan.FromSeconds(6) };
     private readonly TextBox search;
     private readonly Border searchBox;
+    /** The Notes search box, kept across redraws so typing isn't interrupted, and what the Notes list shows. */
+    private readonly TextBox notesSearch;
+    private readonly Border notesSearchBox;
+    private NoteFind.Filter notesFilter = new();
     private readonly List<Control> grips = new();
     private StackPanel? historyBox;
     private TextBlock? bannerText;
@@ -94,6 +98,17 @@ public sealed partial class MainWindow : Window
 
         (searchBox, search) = Ui.Field("", "Search your dictations");
         search.TextChanged += (_, _) => FillHistory();
+        (notesSearchBox, notesSearch) = Ui.Field("", "Search notes: words, titles or tags");
+        notesSearch.TextChanged += (_, _) =>
+        {
+            var q = (notesSearch.Text ?? "").Trim();
+            if (q == notesFilter.Query) return;
+            notesFilter = notesFilter with { Query = q };
+            if (CurrentPage != Page.Notes || openNoteId != null) return;
+            // The whole page is drawn again (so wide windows keep their two columns); the box keeps the focus.
+            Render();
+            notesSearch.Focus();
+        };
 
         toastText = new TextBlock { Foreground = Brushes.White, FontSize = 13.5, FontFamily = C.Sans };
         toast = Ui.Stadium(new Border
@@ -1018,30 +1033,223 @@ public sealed partial class MainWindow : Window
                 : "No notes yet. Add a recording, or set up sync in Settings to see the notes from your other devices.", 16, C.Sub), 24));
             return;
         }
+        // Search, tag chips, the sort menu and dates, then the notes they let through.
+        (notesSearchBox.Parent as Panel)?.Children.Remove(notesSearchBox);
+        col.Children.Add(Spaced(notesSearchBox, 0, 0, 0, 10));
+        var tags = Notes.AllTags(notes);
+        if (notesFilter.Tag != null && !tags.Any(t => string.Equals(t, notesFilter.Tag, StringComparison.OrdinalIgnoreCase)))
+            notesFilter = notesFilter with { Tag = null }; // its last note lost the tag
+        col.Children.Add(Spaced(NotesFilterRow(tags), 0, 0, 0, 4));
+        var info = notes.ToDictionary(n => n.Id, n => NoteImport.Get(n.Id));
+        var words = NoteFind.Words(notesFilter.Query);
+        var shown = NoteFind.Apply(notes.Select(n => new NoteFind.Item(n.Id, n.Time, n.Text, info[n.Id]?.Title, n.Tags ?? new())), notesFilter);
+        if (shown.Count == 0)
+        {
+            var why = notesFilter.Query.Length > 0 ? $"No notes match “{notesFilter.Query}”." : notesFilter.Tag != null ? $"No notes tagged {notesFilter.Tag} then." : "No notes from then.";
+            col.Children.Add(Spaced(Ui.Card(Ui.Text(why, 16, C.Sub), 24), 0, 12, 0, 0));
+            return;
+        }
+        if (words.Count > 0) col.Children.Add(Ui.Label(shown.Count == 1 ? "1 note" : $"{shown.Count} notes"));
+        // By date: a section per day, so on a wide window the days fill both columns. By title, or searching: one list.
+        var byDay = notesFilter.Order != NoteFind.Sort.Title && words.Count == 0;
         string lastDay = "";
         StackPanel? group = null;
-        foreach (var n in notes.Take(notesLimit))
+        foreach (var n in shown.Take(notesLimit))
         {
-            var day = DayLabel(n.Time);
-            if (day != lastDay)
+            var day = byDay ? DayLabel(n.Time) : "";
+            if (group == null || day != lastDay)
             {
-                // Each day is a section, so on a wide window the days fill both columns.
-                var heading = Spaced(Ui.Heading(day, 30), 0, group == null ? 0 : 24, 0, 12);
-                heading.Tag = "section";
-                col.Children.Add(heading);
+                if (byDay)
+                {
+                    var heading = Spaced(Ui.Heading(day, 30), 0, group == null ? 8 : 24, 0, 12);
+                    heading.Tag = "section";
+                    col.Children.Add(heading);
+                }
                 group = new StackPanel();
-                col.Children.Add(Ui.Card(group));
+                col.Children.Add(Spaced(Ui.Card(group), 0, byDay ? 0 : 8, 0, 0));
                 lastDay = day;
             }
-            else group!.Children.Add(Ui.Divider());
-            group!.Children.Add(NoteRow(n));
+            else group.Children.Add(Ui.Divider());
+            group.Children.Add(NoteRow(n, info[n.Id], words, !byDay));
         }
-        if (notes.Count > notesLimit)
+        if (shown.Count > notesLimit)
         {
             var more = Ui.Button("Show older", () => { notesLimit += 200; Render(); });
             more.HorizontalAlignment = HorizontalAlignment.Center;
             col.Children.Add(Spaced(more, 0, 20, 0, 0));
         }
+    }
+
+    /** A tag: a small label in a list row, or (with onClick) a button; selected ones are filled. [quiet]: grey text ("+ Tag"). */
+    private static Border TagChip(string label, Action? onClick = null, bool selected = false, bool quiet = false)
+    {
+        var small = onClick == null;
+        var b = Ui.Stadium(new Border
+        {
+            Background = selected ? C.Text : small ? C.Field : C.Card,
+            BorderBrush = selected ? C.Text : C.Pill, BorderThickness = new Thickness(small ? 0 : 1),
+            Padding = small ? new Thickness(9, 2, 9, 3) : new Thickness(14, 6, 14, 7), Margin = new Thickness(0, 0, 6, 6),
+            Child = Ui.Text(label, small ? 12.5 : 14, selected ? C.Card : quiet ? C.Sub : C.Text),
+            HorizontalAlignment = HorizontalAlignment.Left,
+        });
+        if (onClick == null) return b;
+        b.Cursor = Cursors.Hand;
+        b.OnEnter(() => b.Opacity = 0.82);
+        b.OnLeave(() => b.Opacity = 1);
+        b.OnClick(onClick, handled: true);
+        return Ui.Keys(b, onClick, label);
+    }
+
+    /** "All" and a chip per tag, a chip for the dates when a range is on, and the sort menu (with the dates) at the end. */
+    private Control NotesFilterRow(List<string> tags)
+    {
+        var row = new WrapPanel();
+        bool Is(string t) => string.Equals(t, notesFilter.Tag, StringComparison.OrdinalIgnoreCase);
+        if (tags.Count > 0)
+        {
+            row.Children.Add(TagChip("All", () => { notesFilter = notesFilter with { Tag = null }; Render(); }, notesFilter.Tag == null));
+            foreach (var t in tags)
+                row.Children.Add(TagChip(t, () => { notesFilter = notesFilter with { Tag = Is(t) ? null : t }; Render(); }, Is(t)));
+        }
+        if (notesFilter.From > 0)
+            row.Children.Add(TagChip(RangeLabel() + "  ✕", () => { notesFilter = notesFilter with { From = 0, To = 0 }; Render(); }, true));
+        var menu = Ui.Menu();
+        foreach (var o in Enum.GetValues<NoteFind.Sort>())
+        {
+            var item = new MenuItem { Header = NoteFind.Label(o), ToggleType = MenuItemToggleType.Radio, IsChecked = notesFilter.Order == o };
+            item.Click += (_, _) => { notesFilter = notesFilter with { Order = o }; Render(); };
+            menu.Items.Add(item);
+        }
+        menu.Items.Add(new Separator());
+        var dates = new MenuItem { Header = "Show dates" };
+        foreach (var (label, from, to) in DateRanges())
+        {
+            var item = new MenuItem { Header = label, ToggleType = MenuItemToggleType.Radio, IsChecked = notesFilter.From == from && notesFilter.To == to };
+            item.Click += (_, _) => { notesFilter = notesFilter with { From = from, To = to }; Render(); };
+            dates.Items.Add(item);
+        }
+        var pick = new MenuItem { Header = "Pick a day…" };
+        pick.Click += (_, _) => PickDay();
+        dates.Items.Add(pick);
+        menu.Items.Add(dates);
+        Border sort = null!;
+        sort = TagChip(NoteFind.Label(notesFilter.Order).Replace(" first", "") + " ▾", () => menu.Open(sort));
+        sort.ContextMenu = menu;
+        Avalonia.Automation.AutomationProperties.SetName(sort, "Sort: " + NoteFind.Label(notesFilter.Order));
+        row.Children.Add(sort);
+        return row;
+    }
+
+    /** The quick date ranges, in unix ms (the end is the start of the day after). */
+    private static List<(string Label, long From, long To)> DateRanges()
+    {
+        static long Ms(DateTime d) => new DateTimeOffset(d).ToUnixTimeMilliseconds();
+        var today = DateTime.Today;
+        var tomorrow = Ms(today.AddDays(1));
+        return new()
+        {
+            ("Any time", 0, 0),
+            ("Today", Ms(today), tomorrow),
+            ("Yesterday", Ms(today.AddDays(-1)), Ms(today)),
+            ("Last 7 days", Ms(today.AddDays(-6)), tomorrow),
+            ("Last 30 days", Ms(today.AddDays(-29)), tomorrow),
+            ("This month", Ms(new DateTime(today.Year, today.Month, 1)), tomorrow),
+        };
+    }
+
+    private async void PickDay()
+    {
+        var cal = new Avalonia.Controls.Calendar { SelectionMode = CalendarSelectionMode.SingleDate, DisplayDateEnd = DateTime.Today, Margin = new Thickness(0, 4, 0, 0) };
+        if (!await Ui.Dialog(this, "", "Show", title: "Show notes from", extra: cal) || cal.SelectedDate is not { } day) return;
+        notesFilter = notesFilter with
+        {
+            From = new DateTimeOffset(day.Date).ToUnixTimeMilliseconds(), To = new DateTimeOffset(day.Date.AddDays(1)).ToUnixTimeMilliseconds(),
+        };
+        Render();
+    }
+
+    private string RangeLabel()
+    {
+        static string Day(long t) => DateTimeOffset.FromUnixTimeMilliseconds(t).LocalDateTime.ToString("MMM d", CultureInfo.InvariantCulture);
+        var a = Day(notesFilter.From);
+        var b = Day(notesFilter.To - 1);
+        return a == b ? a : a + " – " + b;
+    }
+
+    /** Back to the Notes list showing only the notes tagged [tag]. */
+    private void ShowTag(string tag)
+    {
+        notesFilter = notesFilter with { Tag = tag };
+        if (openNoteId != null) CloseNote(); else Render();
+    }
+
+    /** Picks note [id]'s tags: every tag already used, filled when the note has it, and a box for a new one. */
+    private async void EditTags(long id)
+    {
+        var all = Notes.All();
+        var mine = all.FirstOrDefault(n => n.Id == id)?.Tags ?? new();
+        var picked = new HashSet<string>(mine, StringComparer.OrdinalIgnoreCase);
+        var known = Notes.AllTags(all);
+        var chips = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+        void Fill()
+        {
+            chips.Children.Clear();
+            foreach (var t in known)
+                chips.Children.Add(TagChip(t, () => { if (!picked.Remove(t)) picked.Add(t); Fill(); }, picked.Contains(t)));
+        }
+        Fill();
+        var (box, input) = Ui.Field("", "New tag, like Farm, Shop or Ideas");
+        void AddTyped()
+        {
+            if (Notes.CleanTags(new[] { input.Text ?? "" }).FirstOrDefault() is not { } t) return;
+            var same = known.FirstOrDefault(k => string.Equals(k, t, StringComparison.OrdinalIgnoreCase));
+            if (same == null) { known.Add(t); known = Notes.CleanTags(known); same = t; }
+            picked.Add(same);
+            input.Text = "";
+            Fill();
+        }
+        input.KeyDown += (_, e) => { if (e.Key == Key.Enter) { e.Handled = true; AddTyped(); } };
+        var add = Ui.Button("Add", AddTyped);
+        add.Margin = new Thickness(8, 0, 0, 0);
+        var line = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        line.ColumnDefinitions.Add(new ColumnDefinition(1, GridUnitType.Star));
+        line.ColumnDefinitions.Add(new ColumnDefinition(GridLength.Auto));
+        line.Children.Add(box);
+        Grid.SetColumn(add, 1);
+        line.Children.Add(add);
+        var body = Ui.Stack(chips, line);
+        if (known.Count == 0) body.Children.Insert(0, Ui.Text("No tags yet. Type one below.", 14, C.Sub));
+        if (!await Ui.Dialog(this, "", "Save", title: "Tags", extra: body)) return;
+        AddTyped(); // typed but not added yet: meant to be
+        var tags = Notes.CleanTags(picked);
+        if (!tags.SequenceEqual(Notes.CleanTags(mine)))
+            try { Notes.SetTags(id, tags); } catch { Toast("Couldn't save the tags"); }
+        Render();
+    }
+
+    /** The highlight for searched-for words: the accent, see-through. */
+    private static IBrush HitBrush
+    {
+        get
+        {
+            var c = Accent is ISolidColorBrush b ? b.Color : Color.FromRgb(0x6E, 0xA8, 0xFE);
+            return new SolidColorBrush(Color.FromArgb(0x50, c.R, c.G, c.B));
+        }
+    }
+
+    /** Puts [s] in [t], with the words searched for marked. */
+    private static T Marked<T>(T t, string s, List<string> words) where T : TextBlock
+    {
+        var inlines = new Avalonia.Controls.Documents.InlineCollection();
+        foreach (var (text, hit) in NoteFind.Pieces(s, words))
+        {
+            var run = new Avalonia.Controls.Documents.Run(text);
+            if (hit) { run.Background = HitBrush; run.FontWeight = FontWeight.SemiBold; }
+            inlines.Add(run);
+        }
+        t.Text = null;
+        t.Inlines = inlines;
+        return t;
     }
 
     private async void AddRecording()
@@ -1129,25 +1337,34 @@ public sealed partial class MainWindow : Window
         Text = text, Foreground = C.Text, FontSize = size, FontFamily = C.Sans, TextWrapping = TextWrapping.Wrap,
     };
 
-    /** A note in the list: its first lines and when it was made. Clicking it opens the note. */
-    private Control NoteRow(Note n)
+    /**
+     * A note in the list: its title and first line (or, while searching, the bit that matched, words marked), its tags,
+     * and when it was made ([withDate]: the day too, when the list isn't split into days). Clicking it opens the note.
+     */
+    private Control NoteRow(NoteFind.Item n, NoteImport.Info? info, List<string> words, bool withDate)
     {
-        var info = NoteImport.Get(n.Id);
         var voice = info?.Audio != null;
+        var snip = words.Count > 0 ? NoteFind.Snippet(n.Text, words) : null;
         var flat = System.Text.RegularExpressions.Regex.Replace(n.Text.Trim(), @"\s+", " ");
-        // With a title: the title in bold, and the start of the text under it, in grey.
-        var preview = Ui.Text(info?.Title ?? flat, 16.5, bold: info?.Title != null);
+        // With a title: the title in bold, and the start of the text (or the bit that matched) under it, in grey.
+        var preview = Marked(Ui.Text("", 16.5, bold: n.Title != null), n.Title ?? snip ?? flat, words);
         preview.MaxLines = 2;
         preview.TextTrimming = TextTrimming.CharacterEllipsis;
         var lines = Ui.Stack(preview);
-        if (info?.Title != null)
+        if (n.Title != null)
         {
-            var first = Ui.Text(flat, 14.5, C.Sub);
-            first.MaxLines = 1;
+            var first = Marked(Ui.Text("", 14.5, C.Sub), snip ?? flat, words);
+            first.MaxLines = snip != null ? 3 : 1;
             first.TextTrimming = TextTrimming.CharacterEllipsis;
             lines.Children.Add(Spaced(first, 0, 2, 0, 0));
         }
-        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("h:mm tt", CultureInfo.InvariantCulture);
+        if (n.Tags.Count > 0)
+        {
+            var tagRow = new WrapPanel { Margin = new Thickness(0, 6, 0, -6) };
+            foreach (var t in n.Tags) tagRow.Children.Add(TagChip(t));
+            lines.Children.Add(tagRow);
+        }
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString(withDate ? "MMM d, h:mm tt" : "h:mm tt", CultureInfo.InvariantCulture);
         if (voice)
         {
             meta += " · voice note";
@@ -1164,8 +1381,9 @@ public sealed partial class MainWindow : Window
         };
         row.OnEnter(() => row.Background = C.Hover);
         row.OnLeave(() => row.Background = Brushes.Transparent);
-        row.OnClick(() => OpenNote(n.Id));
-        return Ui.Keys(row, () => OpenNote(n.Id), "Open note" + (info?.Title is { } t ? ": " + t : ""));
+        var find = notesFilter.Query;
+        row.OnClick(() => OpenNote(n.Id, find));
+        return Ui.Keys(row, () => OpenNote(n.Id, find), "Open note" + (n.Title is { } t2 ? ": " + t2 : ""));
     }
 
     // ---------- one note ----------
@@ -1201,9 +1419,13 @@ public sealed partial class MainWindow : Window
 
     private static IBrush Accent => !C.Dark && S.Accent == 0xFFFFFFFF ? C.Text : C.Argb(S.Accent);
 
-    private void OpenNote(long id)
+    /** The words of the search a note was opened from, marked on its page. */
+    private string noteFind = "";
+
+    private void OpenNote(long id, string find = "")
     {
         openNoteId = id;
+        noteFind = find;
         noteSummaryShown = noteTimelineShown = noteRenaming = false;
         noteSilence = null;
         noteResumeAt = 0;
@@ -1334,6 +1556,9 @@ public sealed partial class MainWindow : Window
             menu.Items.Add(silence);
             menu.Items.Add(ums);
         }
+        var tagsItem = new MenuItem { Header = "Tags…" };
+        tagsItem.Click += (_, _) => EditTags(id);
+        menu.Items.Add(tagsItem);
         var copy = new MenuItem { Header = "Copy text" };
         copy.Click += (_, _) => { _ = TextInjector.Copy(note.Text); Toast("Copied"); };
         menu.Items.Add(copy);
@@ -1358,6 +1583,11 @@ public sealed partial class MainWindow : Window
         var stamp = DateTimeOffset.FromUnixTimeMilliseconds(note.Time).LocalDateTime.ToString("dddd, MMM d · h:mm tt", CultureInfo.InvariantCulture);
         if (info?.Source != null) stamp += " · from " + info.Source;
         col.Children.Add(Spaced(Ui.Text(stamp, 13.5, C.Sub), 4, noteRenaming || info?.Title != null ? 6 : 16, 0, 10));
+        // Its tags: click one for every note with it, "+ Tag" to add or remove some.
+        var tagRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 8) };
+        foreach (var t in note.Tags ?? new()) tagRow.Children.Add(TagChip(t, () => ShowTag(t)));
+        tagRow.Children.Add(TagChip("+ Tag", () => EditTags(id), quiet: true));
+        col.Children.Add(tagRow);
 
         // Summary and Timeline: small buttons above the text, each opening right under them. They're reached for
         // instead of reading, so they come first and the text follows.
@@ -1390,6 +1620,9 @@ public sealed partial class MainWindow : Window
 
         // The text. A voice note's is built word by word so a click plays from that word and playback lights it up.
         Control body;
+        // Opened from a search: the words searched for are marked, and Play starts at the first of them.
+        var findWords = NoteFind.Words(noteFind);
+        int? firstHit = null;
         noteRuns.Clear();
         noteLit = -1;
         noteText = null;
@@ -1426,6 +1659,12 @@ public sealed partial class MainWindow : Window
                     pos += gap.Length;
                 }
                 var run = new Avalonia.Controls.Documents.Run(noteWords[i].Text);
+                if (findWords.Count > 0 && findWords.Any(w => noteWords[i].Text.Contains(w, StringComparison.OrdinalIgnoreCase)))
+                {
+                    run.Background = HitBrush;
+                    run.FontWeight = FontWeight.SemiBold;
+                    firstHit ??= i;
+                }
                 inlines.Add(run);
                 noteRuns.Add(run);
                 noteStarts[i] = pos;
@@ -1447,9 +1686,25 @@ public sealed partial class MainWindow : Window
         else
         {
             var t = Selectable(note.Text, 16.5);
+            if (findWords.Count > 0) Marked(t, note.Text, findWords);
             body = t;
         }
         col.Children.Add(Ui.Card(body, 24));
+
+        if (voice && firstHit is { } jump && NotePlayer.File != noteFile && noteResumeAt == 0)
+        {
+            noteResumeAt = noteWords[jump].Start;
+            var at = noteStarts[jump];
+            var text = noteText!;
+            Dispatcher.UIThread.Post(() =>
+            {
+                // Scrolled so the first match sits about a third of the way down.
+                var word = text.TextLayout.HitTestTextPosition(at);
+                if (text.TranslatePoint(word.TopLeft, scroller) is not { } p) return;
+                var view = scroller.Viewport.Height;
+                scroller.Offset = new Vector(scroller.Offset.X, Math.Clamp(scroller.Offset.Y + p.Y - view / 3, 0, Math.Max(0, scroller.Extent.Height - view)));
+            }, DispatcherPriority.Loaded);
+        }
 
         if (voice) { playerHost.Child = NotePlayerBar(); playerHost.IsVisible = true; }
     }
@@ -1663,7 +1918,7 @@ public sealed partial class MainWindow : Window
         }
         var i = here ? NoteMedia.WordAt(noteWords, at + 0.02) : -1;
         if (i == noteLit) return;
-        if (noteLit >= 0 && noteLit < noteRuns.Count) noteRuns[noteLit].Background = null;
+        if (noteLit >= 0 && noteLit < noteRuns.Count) noteRuns[noteLit].Background = noteRuns[noteLit].FontWeight == FontWeight.SemiBold ? HitBrush : null; // searched-for words stay marked
         noteLit = i;
         if (i >= 0 && i < noteRuns.Count) noteRuns[i].Background = new SolidColorBrush(Color.FromArgb(0x55, 0x6E, 0xA8, 0xFE));
         NoteFollow(i, false);
@@ -1877,7 +2132,7 @@ public sealed partial class MainWindow : Window
         (PrivacyPage, new[] { "Privacy" }),
         (SpeechPage, new[] { "Speech to text", "Offline model", "AI cleanup", "Speed" }),
         (KeysPage, new[] { "API keys" }),
-        ("Recording", new[] { "Recording", "Recording indicator" }),
+        ("Recording", new[] { "Recording", "Microphone", "Recording indicator" }),
         ("Appearance", new[] { "Appearance" }),
         ("Sync & backup", new[] { "Sync", "Backup" }),
         ("Recordings & usage", new[] { "Recordings", "Usage" }),
@@ -1982,6 +2237,22 @@ public sealed partial class MainWindow : Window
         return Ui.Keys(b, OpenPage, sub.Length > 0 ? $"{name}, {sub}" : name);
     }
 
+    /** The microphones (Settings › Recording › Microphone), looked up at most every few seconds: on Linux it runs pactl. */
+    private List<Mic>? micCache;
+    private DateTime micCacheAt;
+
+    private List<Mic> AllMics()
+    {
+        if (micCache == null || DateTime.UtcNow - micCacheAt > TimeSpan.FromSeconds(5))
+        {
+            try { micCache = Recorder.Mics(); } catch { micCache = new(); }
+            micCacheAt = DateTime.UtcNow;
+        }
+        return micCache;
+    }
+
+    private string MicName(string id) => AllMics().FirstOrDefault(m => m.Id == id)?.Name ?? id;
+
     /** The line under a page's name in the list, and whether it needs attention. */
     private (string Text, bool Warn) PageSummary(string name)
     {
@@ -1993,7 +2264,7 @@ public sealed partial class MainWindow : Window
             SpeechPage => ($"{(S.Stt == "LOCAL" ? "On this computer" : S.SttOption.Label)} · cleanup {(S.Cleanup == "OFF" ? "off" : S.CleanupOption.Label)}", false),
             KeysPage => Catalog.Services.Where(v => S.Key(v.Id).Length > 0).Select(v => v.Name).ToList() is { Count: > 0 } have
                 ? (string.Join(", ", have), false) : ("None added yet", S.Stt != "LOCAL"),
-            "Recording" => ($"Auto-stop {OnOff(S.AutoStop)} · sounds {OnOff(S.Sounds)}", false),
+            "Recording" => ($"Auto-stop {OnOff(S.AutoStop)} · {(S.PreferHeadset ? "headset mic" : S.MicDevice.Length > 0 ? MicName(S.MicDevice) : "default mic")}", false),
             "Appearance" => (S.Theme switch { "light" => "Light", "dark" => "Dark", _ => "Match the system" }, false),
             "Sync & backup" => (S.SyncFile.Length == 0 ? "Sync off" : "Sync on", false),
             "Recordings & usage" => (S.AudioKeepDays switch { 0 => "Audio not saved", int.MaxValue => "Audio kept forever", var d => $"Audio kept {d} days" }, false),
@@ -2258,6 +2529,21 @@ public sealed partial class MainWindow : Window
                 S.SoundSet = t.Id; S.Save(); Render();
             })).ToArray()));
         }
+
+        // --- Microphone
+        Section(col, "Microphone");
+        var mics = AllMics();
+        var micRows = new List<Control>
+        {
+            Ui.SettingRow("Prefer a headset when one is connected", "A Bluetooth or wired headset's mic is used whenever it's connected, for dictation and voice notes. Otherwise the mic below.",
+                Ui.Switch(S.PreferHeadset, v => { S.PreferHeadset = v; S.Save(); Render(); })),
+            Ui.Choice("System default", "Whatever the system has set as the default microphone.", S.MicDevice.Length == 0, () => { S.MicDevice = ""; S.Save(); Render(); }),
+        };
+        foreach (var m in mics)
+            micRows.Add(Ui.Choice(m.Name, m.Headset ? "Headset" : "", S.MicDevice == m.Id, () => { S.MicDevice = m.Id; S.Save(); Render(); }));
+        if (S.MicDevice.Length > 0 && mics.All(m => m.Id != S.MicDevice))
+            micRows.Add(Ui.Choice(S.MicDevice, "Not connected right now, so the default is used.", true, () => { }));
+        col.Children.Add(Ui.List(micRows.ToArray()));
 
         // --- Speed
         Section(col, "Speed");
