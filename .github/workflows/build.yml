@@ -6,11 +6,6 @@ on:
     # The Windows, Linux and Mac apps have their own workflows (windows.yml, linux.yml, mac.yml).
     paths-ignore: ['windows/**', 'linux/**', 'mac/**', '.github/workflows/windows.yml', '.github/workflows/linux.yml', '.github/workflows/mac.yml']
   workflow_dispatch:
-    inputs:
-      beta:
-        description: Also publish this build as the public Android beta
-        type: boolean
-        default: false
 
 # Needed so tagged builds can publish a GitHub Release (what the in-app updater reads).
 permissions:
@@ -98,31 +93,3 @@ jobs:
           fi
           gh release create "v$VERSION" "Tokalot-v$VERSION.apk" \
             --target "$GITHUB_SHA" --title "Tokalot $VERSION" "${NOTES[@]}"
-
-      # A public beta, on request: a commit message with [beta] in it (any branch), or a manual run with
-      # "beta" ticked. Last, as it rebuilds with a beta version name. It replaces the rolling android-beta pre-release, which never becomes "latest", so
-      # only people who turn on Settings > About > Get beta updates are offered it. Its version is
-      # <versionName>-beta.<run number>, with the same versionCode, so the release of that version
-      # installs over it.
-      - name: Publish beta
-        if: env.TOKALOT_KEYSTORE != '' && (contains(github.event.head_commit.message, '[beta]') || (github.event_name == 'workflow_dispatch' && inputs.beta))
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TOKALOT_KEYSTORE_PASSWORD: ${{ secrets.TOKALOT_KEYSTORE_PASSWORD }}
-        run: |
-          BASE=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
-          BETA="$BASE-beta.$GITHUB_RUN_NUMBER"
-          sed -i "s/versionName = \"$BASE\"/versionName = \"$BETA\"/" app/build.gradle.kts
-          gradle assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release.apk Tokalot-beta.apk
-          {
-            echo "A beta of Tokalot $BASE, built from \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA::7}. Less tested than a release."
-            echo
-            awk -v v="$BASE" '
-              /^## / { split(substr($0, 4), h, " "); on = (h[1] == v); next }
-              on && /^- / { print }
-            ' app/src/main/assets/CHANGELOG.md
-          } > beta-notes.md
-          gh release delete "android-beta" --cleanup-tag --yes > /dev/null 2>&1 || true
-          gh release create "android-beta" Tokalot-beta.apk --target "$GITHUB_SHA" --prerelease --latest=false \
-            --title "Tokalot $BETA" --notes-file beta-notes.md
