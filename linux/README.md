@@ -165,22 +165,26 @@ Tokalot sees as the window in front ("Active-app detection").
 
 ## Terminal commands (beta)
 
-Settings › Style › **Terminal commands (beta)**, off until you turn it on. In a terminal, what you
-say becomes a shell command: describe it ("show me the ten biggest files in this folder" gives
-`find . -type f -printf "%s %p\n" | sort -nr | head -10`) or speak one ("git commit dash m quote fix
-the paste bug quote" gives `git commit -m "fix the paste bug"`). A sentence that isn't a command
-comes back as it was said, apart from fillers.
+Two switches under Settings › Style: **Terminal commands (beta)**, off until you turn it on, and
+**Start commands with "shell"**, on by default. In a terminal, start with the word *shell* and what
+you say becomes a shell command: describe it ("shell, show me the ten biggest files in this folder")
+or speak one ("shell git commit dash m quote fix the paste bug quote" gives
+`git commit -m "fix the paste bug"`). Anything that doesn't start with "shell" is dictated as normal
+text, so a prompt for Claude Code or another AI tool stays as you said it. Turn the second switch off
+and everything you say in a terminal becomes a command.
 
-- It is only **pasted, never run, and Enter is never pressed**: you read it first.
-- A command that looks destructive (`rm -r`, `dd of=`, `mkfs`, `sudo`, `curl | sh`, `git push --force`,
-  `kill`…) starts with `# CHECK: `. That is a comment, so it does nothing even if you press Enter. The
-  check is a fixed list in Tokalot, not the AI's judgement, so it is a nudge and not a guarantee:
-  read every command.
+- It is only **pasted, never run, and Enter is never pressed**: you read it first. Tokalot adds no
+  safety check of its own, so read every command, most of all one with `sudo`, `rm` or `dd`.
+- It knows your system, so "shell update the system" gives `sudo pacman -Syu` on Arch and
+  `sudo apt update && sudo apt upgrade` on Ubuntu. With each request Tokalot sends your cleanup AI
+  your distribution's name, its package manager, your login shell and which handier command-line tools
+  are installed (`fd`, `rg`, `bat`, `eza`, `duf`, `jq`…), read from `/etc/os-release` and your path.
+  Nothing else about the machine leaves it.
+- It uses the cleanup AI you picked, so a small model sometimes chooses a clumsy command.
 - It only applies where Tokalot can tell the window in front is a terminal: X11, KDE, Sway, Hyprland
   and niri (see Wayland above). Everywhere else dictation is unchanged. It needs AI cleanup (a Groq
   or OpenAI key); with the offline model only, you get the plain transcript.
-- The setting stays on this computer; it doesn't sync. Turn it off to dictate normal text into a
-  terminal again (a prompt for an AI tool, say).
+- The settings stay on this computer; they don't sync.
 
 ## Switches
 

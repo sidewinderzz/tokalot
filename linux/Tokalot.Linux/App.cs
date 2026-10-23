@@ -33,6 +33,7 @@ public sealed partial class App : Application
     [STAThread]
     public static int Main(string[] args)
     {
+        Cleanup.ShellEnvironment = ShellContext.Describe;
         // "Tokalot --diagnose" prints what this computer lets Tokalot do (keyboard, paste, microphone…) and exits.
         if (args.Contains("--diagnose")) { Diagnose(args.Contains("--download-model")); return 0; }
 

@@ -115,6 +115,8 @@ public sealed class Settings
     public bool Polish { get; set; }
     /** Not synced: dictating into a terminal turns what you say into a shell command (pasted, never run). */
     public bool ShellCommands { get; set; }
+    /** With Terminal commands on: only a dictation that starts with the word "shell" becomes a command; anything else is dictated normally. */
+    public bool ShellCue { get; set; } = true;
     /** Beta: a Notes page for voice notes (synced from other devices) and recordings added from files. */
     public bool NotesBeta { get; set; }
     /** Voice notes: jump over stretches with no voice and over "um"s while playing, where this computer can. */
