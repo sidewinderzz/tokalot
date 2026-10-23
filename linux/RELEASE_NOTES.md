@@ -1,5 +1,11 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.14.0
+
+- Settings is now split into pages, listed down the left with a line saying what each is set to. Click one to open it. No more long scroll.
+- New **Privacy** page with three levels: **Everything on**, **Balanced** and **Most private**. A level sets the privacy switches all at once, and you can still change any switch. A change made anywhere shows up there, and a mix that matches no level shows as Custom.
+- A new install starts with a short welcome: pick a level, then set up what it needs (a key, or the offline model). If you updated, your settings didn't change; a card on Home points to the new page.
+
 ## New in 0.13.0
 
 - New: **Terminal commands (beta)**, in Settings › Style, off until you turn it on. In a terminal, start with "shell" and say what you want ("shell, show me the ten biggest files in this folder") or speak a command ("shell git commit dash m quote fix the paste bug quote") and a shell command is pasted. Anything that doesn't start with "shell" is dictated as normal text, so prompts for Claude Code and the like are left alone (**Start commands with "shell"** turns that off). It is never run: you read it and press Enter yourself. It knows your distribution, its package manager and which handier tools you have installed (`fd`, `rg`, `bat`…), which are sent to your cleanup AI with the request, so "update the system" gives the right command for your system. It needs AI cleanup and a desktop where Tokalot can tell the window in front is a terminal (X11, KDE, Sway, Hyprland, niri).

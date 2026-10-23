@@ -2,6 +2,12 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.10.0
+
+- Settings is now split into pages, listed down the left with a line saying what each is set to. Click one to open it. No more long scroll.
+- New **Privacy** page with three levels: **Everything on**, **Balanced** and **Most private**. A level sets the privacy switches all at once, and you can still change any switch. A change made anywhere shows up there, and a mix that matches no level shows as Custom.
+- A new install starts with a short welcome: pick a level, then set up what it needs (a key, or the offline model). If you updated, your settings didn't change; a card on Home points to the new page.
+
 ## New in 0.9.0
 
 - Notes get a short title, written by the AI when a note is made or first opened. It shows on the note and in the list. Rename it from the **⋮** menu.
