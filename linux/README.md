@@ -163,6 +163,25 @@ Wayland (Arch). The Sway, Hyprland and niri readers follow what those tools prin
 run on those desktops, so please say if one doesn't work. `Tokalot --diagnose` shows what
 Tokalot sees as the window in front ("Active-app detection").
 
+## Terminal commands (beta)
+
+Settings › Style › **Terminal commands (beta)**, off until you turn it on. In a terminal, what you
+say becomes a shell command: describe it ("show me the ten biggest files in this folder" gives
+`find . -type f -printf "%s %p\n" | sort -nr | head -10`) or speak one ("git commit dash m quote fix
+the paste bug quote" gives `git commit -m "fix the paste bug"`). A sentence that isn't a command
+comes back as it was said, apart from fillers.
+
+- It is only **pasted, never run, and Enter is never pressed**: you read it first.
+- A command that looks destructive (`rm -r`, `dd of=`, `mkfs`, `sudo`, `curl | sh`, `git push --force`,
+  `kill`…) starts with `# CHECK: `. That is a comment, so it does nothing even if you press Enter. The
+  check is a fixed list in Tokalot, not the AI's judgement, so it is a nudge and not a guarantee:
+  read every command.
+- It only applies where Tokalot can tell the window in front is a terminal: X11, KDE, Sway, Hyprland
+  and niri (see Wayland above). Everywhere else dictation is unchanged. It needs AI cleanup (a Groq
+  or OpenAI key); with the offline model only, you get the plain transcript.
+- The setting stays on this computer; it doesn't sync. Turn it off to dictate normal text into a
+  terminal again (a prompt for an AI tool, say).
+
 ## Switches
 
 | | |
@@ -172,6 +191,7 @@ Tokalot sees as the window in front ("Active-app detection").
 | `--gpu` | Draw with the graphics card even under fractional scaling |
 | `--diagnose` | Print what works on this machine and exit. Add `--download-model` to also fetch and test the offline model |
 | `--screenshots <folder>` | Developer tool: draw every page to PNG files with sample data. Needs no display |
+| `--transcribe <audio file>` | Developer tool: run the whole dictation on a recording (16 kHz WAV is best; other formats need ffmpeg) and print the text. Add `--terminal` to dictate as if into a terminal. It counts as a dictation, so use it with `TOKALOT_DATA` set to a scratch folder |
 | `TOKALOT_DATA=<folder>` | Use another data folder (a test copy that leaves your real data, keyring and autostart alone) |
 | `TOKALOT_PASTE=ctrl+v \| ctrl+shift+v \| shift+insert` | Force the paste shortcut |
 | `TOKALOT_CLIPBOARD=avalonia \| wl-copy \| xclip \| xsel` | Force how the clipboard is reached |

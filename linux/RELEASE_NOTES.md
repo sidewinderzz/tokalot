@@ -1,5 +1,10 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.13.0
+
+- New: **Terminal commands (beta)**, in Settings › Style, off until you turn it on. In a terminal, say what you want ("show me the ten biggest files in this folder") or speak a command ("git commit dash m quote fix the paste bug quote") and a shell command is pasted. It is never run: you read it and press Enter yourself. A command that looks destructive starts with `# CHECK: `, so it does nothing if you press Enter by mistake. It needs AI cleanup and a desktop where Tokalot can tell the window in front is a terminal (X11, KDE, Sway, Hyprland, niri).
+- For testing: `Tokalot --transcribe <recording>` runs a whole dictation on an audio file and prints the text (`--terminal` to dictate as if into a terminal).
+
 ## New in 0.12.0
 
 - Pasting into a terminal works on Wayland. Terminals paste with Ctrl+Shift+V, and Tokalot used to press Ctrl+V because a Wayland desktop doesn't say which window is in front. It now asks the desktop itself: **KDE Plasma** (through a one-off KWin script), **Sway**, **Hyprland** and **niri**. On GNOME and other desktops nothing changes.

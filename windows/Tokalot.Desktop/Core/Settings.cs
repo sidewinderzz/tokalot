@@ -65,6 +65,8 @@ public sealed class Settings
     public bool AutoLanguage { get; set; }
     /** Let the cleanup model reword for clarity. Off: the user's own words are kept. */
     public bool Polish { get; set; }
+    /** Desktop only, not synced: dictating into a terminal turns what you say into a shell command (pasted, never run). */
+    public bool ShellCommands { get; set; }
     public bool Sounds { get; set; } = true;
     /** Which Tones set plays (soft, chime, retro, bubble). */
     public string SoundSet { get; set; } = "soft";

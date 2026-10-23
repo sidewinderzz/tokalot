@@ -165,14 +165,16 @@ public sealed class Dictation : IDisposable
         string? final = null;
         string? cleanupErr = null;
         // Quick mode: a short dictation with nothing for the AI to fix skips it and is tidied here, at once.
-        var quick = s.QuickSkip && !s.Polish && !inPieces && s.Cleanup != "OFF"
+        // Terminal command mode (a setting, off by default): the dictation becomes a shell command that is pasted, never run.
+        var shell = s.ShellCommands && AppDetect.IsTerminal(app);
+        var quick = !shell && s.QuickSkip && !s.Polish && !inPieces && s.Cleanup != "OFF"
             && TextTools.NothingToFix(baseText, map.Count > 0, s.StyleFor(category).Id, category.Id, s.CustomInstructions);
         // The link was too poor for the speech step: waiting on the cleanup service too would only add delay.
         foreach (var c in quick || weakSwitch ? Array.Empty<CleanupOption>() : CleanupOrder(s))
         {
             try
             {
-                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label, ct, inPieces);
+                var r = await Cleanup.Run(s, c, protectedText, map.Count > 0, category, app?.Label, ct, inPieces, shell);
                 Usage.RecordLlm(c.Id, r.InTokens, r.OutTokens);
                 cleaned = true;
                 final = TextTools.Restore(r.Text, map);
@@ -187,7 +189,9 @@ public sealed class Dictation : IDisposable
             }
         }
         if (!cleaned && cleanupErr != null) warnings.Add(cleanupErr);
+        if (shell && !cleaned && cleanupErr == null) warnings.Add("Command mode needs AI cleanup: turn it on and add its key in Settings");
         final ??= TextTools.Restore(TextTools.BasicClean(protectedText), map);
+        if (shell && cleaned) final = Cleanup.FlagDanger(final);
 
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         var allMs = clock.ElapsedMilliseconds;
