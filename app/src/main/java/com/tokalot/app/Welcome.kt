@@ -11,9 +11,9 @@ import android.widget.LinearLayout
 /**
  * The first-run welcome, in two steps: pick a privacy level (each lists what it turns on, and every switch can be
  * changed right there), then the setup that level needs: the mic, the accessibility switch, and a key or the
- * on-device model. Finishing or skipping it marks it done; anything left over is on Home's Finish setup card.
- * Shown once, on a new install. Someone who updated keeps their settings and gets one Home card about the
- * levels instead ([privacyCard]).
+ * on-device model. Finishing or skipping it marks it done; anything left over shows as Finish setup on Home.
+ * Shown once, on a new install. Someone who updated keeps their settings and gets a row about the levels in
+ * Home's Needs you card instead.
  */
 class WelcomeScreen(private val a: MainActivity) {
     companion object {
@@ -174,21 +174,4 @@ class WelcomeScreen(private val a: MainActivity) {
             pill(if (setupComplete()) "Done" else "Finish later", filled = true) { done(this) },
         ), lp().margins(this, t = 20, b = 16))
     }
-}
-
-/**
- * For people who updated: one card on Home saying privacy levels are new and their settings didn't change.
- * Null once it's been seen or dismissed.
- */
-fun MainActivity.privacyCard(): View? {
-    if (prefs.privacyCardSeen) return null
-    val c = card(20)
-    c.addView(text("New: privacy levels", 17f))
-    c.addView(text("Settings now has a Privacy page with three levels (Everything on, Balanced and Most private) and every privacy switch in one place. Your settings didn't change.", 14f, C.SUB), lp().margins(this, t = 4))
-    c.addView(row(
-        pill("Have a look", filled = true) { prefs.privacyCardSeen = true; openSettings(SettingsScreen.PRIVACY) },
-        spacer(wDp = 8),
-        pill("Dismiss") { prefs.privacyCardSeen = true; render() },
-    ), lp().margins(this, t = 10))
-    return c
 }

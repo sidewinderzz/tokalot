@@ -8,6 +8,14 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 
 ## 1.47 · 2026-10-23
 - A tidier Settings › About: the version and Check for updates sit together at the top, and What's new, Changelog, Open-source licenses and Source code are rows you tap, like the rest of Settings.
+- Less clutter everywhere: switches keep a one-line description, and the longer explanation is behind a small ⓘ. Fewer grey notes under the cards.
+- Home: anything that needs you (finishing setup, words to add, what's new in Settings) is one short list instead of a pile of cards, and the days in your history are small labels instead of big headings.
+- Settings › Setup: Stay on after updates reads like the other rows; How shows the command to copy.
+- Settings › Speech & AI: model names and the timings of your last dictations moved under Advanced.
+- Settings › Recording: one Sound style row with a picker, and Reset position for the floating button inside the card.
+- Settings › Shortcuts: tidied into Tiles, Voice notes and Volume keys. Clipboard-only apps and note phrases open from their own rows.
+- Usage shows this month in full and older months on one line each; tap one for its breakdown. Sync and backup buttons sit inside their cards.
+- Dictionary: the Add button sits next to the box. Notes: a one-line intro once you have notes.
 
 ## 1.45 · 2026-10-23
 - Settings is now a short list of pages, like Android's own Settings. Each row says what it's set to; tap one to open it. No more folding sections that stay open.
