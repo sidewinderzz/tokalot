@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.15.0
+
+- A tidier Settings › About: the version and Check for updates sit together at the top, and Open-source licenses, Source code and Quit are rows you click, like the rest of Settings.
+
 ## New in 0.14.0
 
 - Settings is now split into pages, listed down the left with a line saying what each is set to. Click one to open it. No more long scroll.

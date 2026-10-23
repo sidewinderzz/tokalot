@@ -2,6 +2,10 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.12.0
+
+- A tidier Settings › About: the version and Check for updates sit together at the top, and Open-source licenses, Source code and Quit are rows you click, like the rest of Settings.
+
 ## New in 0.10.0
 
 - Settings is now split into pages, listed down the left with a line saying what each is set to. Click one to open it. No more long scroll.

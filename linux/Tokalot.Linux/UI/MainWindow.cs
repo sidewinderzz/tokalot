@@ -2418,21 +2418,22 @@ public sealed partial class MainWindow : Window
             col.Children.Add(Spaced(Ui.Text("Each device adds its own counts to the sync file when it syncs.", 13, C.Sub), 4, 8, 0, 0));
         }
 
-        // --- About
+        // --- About: the version and updates on one card, the links as rows on another, the privacy line under them.
         Section(col, "About");
         var about = new StackPanel();
-        about.Children.Add(Ui.Text($"Tokalot for {Host.Name} " + Updater.CurrentVersion, 16, bold: true));
-        about.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this computer. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The " + Host.Shortcut + " listener only watches for that shortcut; it never records your typing.", 14, C.Sub), 0, 4, 0, 0));
-        about.Children.Add(Spaced(Link("Source code: github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)), 0, 8, 0, 0));
+        about.Children.Add(Ui.Text($"Tokalot for {Host.Name}", 17, bold: true));
+        about.Children.Add(Ui.Text("Version " + Updater.CurrentVersion, 13.5, C.Sub));
         var status = Ui.Text("", 14, C.Sub);
+        about.Children.Add(Spaced(status, 0, 12, 0, 0));
         about.Children.Add(Spaced(Ui.Button("Check for updates", async () =>
         {
-            if (!Updater.CanUpdate) { status.Text = $"The {Host.Name} app doesn't update itself yet. Newer builds are on the GitHub page above."; return; }
+            if (!Updater.CanUpdate) { status.Text = $"The {Host.Name} app doesn't update itself yet. Newer builds are on the GitHub page below."; return; }
             status.Text = "Checking…";
             var v = await App.Current.CheckForUpdates();
             status.Text = v != null ? $"Version {v} is available. See the banner on Home." : "You're up to date.";
-        }), 0, 12, 0, 0));
-        about.Children.Add(Spaced(status, 0, 6, 0, 0));
+        }), 0, 6, 0, 0));
+        col.Children.Add(Ui.Card(about, 20));
+
         var licenses = new Border
         {
             Background = C.Field, CornerRadius = new CornerRadius(14), Padding = new Thickness(12), MaxHeight = 320, IsVisible = false, Margin = new Thickness(0, 8, 0, 0),
@@ -2442,10 +2443,12 @@ public sealed partial class MainWindow : Window
                 Content = new SelectableTextBlock { Text = Licenses.Text, TextWrapping = TextWrapping.Wrap, FontSize = 12.5, Foreground = C.Sub, FontFamily = C.Sans, Margin = new Thickness(0, 0, 12, 0) },
             },
         };
-        about.Children.Add(Spaced(Link("Open-source licenses", () => licenses.IsVisible = !licenses.IsVisible), 0, 12, 0, 0));
-        about.Children.Add(licenses);
-        about.Children.Add(Spaced(Link("Quit Tokalot", () => App.Current.Quit()), 0, 12, 0, 0));
-        col.Children.Add(Ui.Card(about, 20));
+        col.Children.Add(Spaced(Ui.List(
+            Ui.LinkRow("Open-source licenses", "", () => licenses.IsVisible = !licenses.IsVisible),
+            Ui.LinkRow("Source code", "github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)),
+            Ui.LinkRow("Quit Tokalot", "", () => App.Current.Quit())), 0, 12, 0, 0));
+        col.Children.Add(licenses);
+        col.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this computer. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The " + Host.Shortcut + " listener only watches for that shortcut; it never records your typing.", 13, C.Sub), 4, 12, 0, 0));
 
         BuildPages(col);
     }
