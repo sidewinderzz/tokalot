@@ -27,6 +27,9 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Get beta updates, under Settings › About: try new features before they're released. Turn it off to go back at the next release.
 - Words the keyboard doesn't know, such as names and farm terms, go into your dictionary once you've kept them twice, so they sync and dictation spells them right too. What else it learns from your typing stays on this phone.
 - Light and dark to match the app, in your Tokalot color, with key sound and vibration switches. Its settings sync to your other devices.
+- New: Terminal commands (beta), in Settings › Style, off until you turn it on. In Termux, start with "shell" and say what you want ("shell, show me the ten biggest files in this folder") or speak a command ("shell git commit dash m quote fix the paste bug quote"), and a shell command is typed in. Anything that doesn't start with "shell" is typed as normal text, so prompts for Claude Code and the like are left alone (Start commands with "shell" turns that off). It is never run: you read it and press Enter yourself. It knows Termux has no root and installs with pkg, and is told your Android version and whether the Termux:API app is installed. It needs AI cleanup.
+- The mic button now shows in Termux too, and dictation is typed straight into the terminal (Android 13 and newer; older phones get it on the clipboard). Line breaks become spaces there, so nothing ever presses Enter for you.
+- Both Terminal commands switches sync with your computers (Windows, Linux and Mac) when sync is on. Terminal commands is also on the Privacy page, where Everything on turns it on.
 
 ## 1.45 · 2026-10-23
 - Settings is now a short list of pages, like Android's own Settings. Each row says what it's set to; tap one to open it. No more folding sections that stay open.

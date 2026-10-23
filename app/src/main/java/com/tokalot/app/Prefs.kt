@@ -202,6 +202,7 @@ class Prefs(ctx: Context) {
             "keyboardPopup" to "kb_popup", "keyboardClipboard" to "kb_clipboard", "keyboardClipSuggest" to "kb_clip_suggest",
             "keyboardScreenshots" to "kb_screenshots", "keyboardCodes" to "kb_codes",
             "headsetMic" to "headset_mic", "headsetMicAll" to "headset_mic_all",
+            "shellCommands" to "shell_commands", "shellCue" to "shell_cue",
         )
 
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
@@ -447,6 +448,8 @@ class Prefs(ctx: Context) {
             "keyboardHeight" to kbHeight,
             "headsetMic" to headsetMic,
             "headsetMicAll" to headsetMicAll,
+            "shellCommands" to shellCommands,
+            "shellCue" to shellCue,
             "noteSummaryLevel" to noteSummaryLevel,
             "noteSpeed" to noteSpeed.toDouble(),
             "notePhrases" to notePhrases,
@@ -728,6 +731,16 @@ class Prefs(ctx: Context) {
     var polish: Boolean
         get() = sp.safeBoolean("polish", false)
         set(v) = sp.edit().putBoolean("polish", v).apply()
+
+    /** Synced with the computers: dictating into Termux turns what you say into a shell command (typed, never run). */
+    var shellCommands: Boolean
+        get() = sp.safeBoolean("shell_commands", false)
+        set(v) = sp.edit().putBoolean("shell_commands", v).apply()
+
+    /** With Terminal commands on: only a dictation that starts with the word "shell" becomes a command; anything else is dictated normally. */
+    var shellCue: Boolean
+        get() = sp.safeBoolean("shell_cue", true)
+        set(v) = sp.edit().putBoolean("shell_cue", v).apply()
 
     /**
      * Fit a dictation into the sentence around the cursor: no capital in the middle of a sentence, no

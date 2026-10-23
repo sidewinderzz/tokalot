@@ -53,6 +53,8 @@ object Privacy {
             { it.kbScreenshots }) { p, on -> p.kbScreenshots = on },
         Switch("Keyboard: codes from texts", "A sign-in code that just came in a text shows on the keyboard's bar. Needs notification access; nothing is kept or sent.", setOf(Level.FULL),
             { it.kbCodes }) { p, on -> p.kbCodes = on },
+        Switch("Terminal commands (beta)", "In Termux, what you say becomes a shell command. Sends your Android version, processor type and whether Termux:API is installed to your AI cleanup with the request.", setOf(Level.FULL),
+            { it.shellCommands }) { p, on -> p.shellCommands = on },
     )
 
     /** How long recordings are kept at each level, in days (see [Prefs.audioKeepDays]). */

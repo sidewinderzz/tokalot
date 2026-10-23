@@ -543,6 +543,8 @@ class OfflineFlowService : AccessibilityService() {
             // while the text box sits in another window, so keep looking rather than stop here.
             if (node.isPassword) return null
             if (node.isEditable) return node
+            // Termux's terminal isn't a text box to Android, but it takes typed text like one (see [deliver]).
+            if (AppContext.isTerminal(node.packageName?.toString())) return node
         }
         // Nothing reported input focus. The box the last tap or focus came from still counts if it's
         // still on screen, focused and editable.
@@ -1313,6 +1315,10 @@ class OfflineFlowService : AccessibilityService() {
         // Typed into the selected text box, keyboard or not, except in the apps set to get the clipboard
         // (launchers to start with: Niagara's home screen keeps its app search selected out of sight).
         val node = focusedEditable()?.takeIf { mayType(it) }
+        // A terminal gets the text as typed keys, where a line break is Enter and would run what came before it.
+        if (node != null && AppContext.isTerminal(node.packageName?.toString()) && '\n' in text) {
+            return deliver(text.replace(Regex("""\s*\n\s*"""), " ").trim(), null, entryId, fitted)
+        }
         fitCaps = !fitted
         lastFitted = null
         if (node == null || !insert(node, text)) {

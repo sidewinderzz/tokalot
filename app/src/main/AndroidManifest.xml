@@ -39,6 +39,8 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
         </intent>
+        <!-- Terminal commands: whether the termux-api commands can be offered in Termux. -->
+        <package android:name="com.termux.api" />
     </queries>
 
     <application
