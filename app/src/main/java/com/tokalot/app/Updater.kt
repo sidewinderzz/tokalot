@@ -17,6 +17,8 @@ import java.net.URL
  */
 object Updater {
     const val REPO = "sidewinderzz/tokalot"
+    /** The rolling pre-release each beta build replaces; its title is "Tokalot <version>", e.g. 1.44-beta.190. */
+    const val BETA_TAG = "android-beta"
     private const val CHECK_EVERY_MS = 3 * 3600 * 1000L
 
     class Release(val version: String, val apkUrl: String, val size: Long, val notes: String)
@@ -43,6 +45,43 @@ object Updater {
 
     fun dismiss(ctx: Context, version: String) = sp(ctx).edit().putString("dismissed", version).apply()
 
+    /** Opted in to beta builds as well as releases. On this phone only, as each phone chooses for itself. */
+    fun beta(ctx: Context) = sp(ctx).getBoolean("beta", false)
+
+    fun setBeta(ctx: Context, on: Boolean) {
+        val e = sp(ctx).edit().putBoolean("beta", on).putLong("checked", 0)
+        if (!on) e.remove("version") // a beta already offered isn't offered any more
+        e.apply()
+    }
+
+    /** A release as GitHub describes it, and the git ref its changelog is read at. */
+    private class Found(val version: String, val url: String, val size: Long, val notes: String, val ref: String)
+
+    /** Null with [lastCheckFailed] untouched when there's no such release (404); throws when GitHub can't be reached. */
+    private fun fetch(path: String, failIfMissing: Boolean): Found? {
+        val conn = URL("https://api.github.com/repos/$REPO/releases/$path").openConnection() as HttpURLConnection
+        conn.connectTimeout = 5000
+        conn.readTimeout = 8000
+        conn.setRequestProperty("Accept", "application/vnd.github+json")
+        val code = conn.responseCode
+        if (code != 200) {
+            if (code != 404 || failIfMissing) lastCheckFailed = true // 404 = no releases yet, or the repo is private
+            return null
+        }
+        val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+        val tag = o.getString("tag_name")
+        val version = if (tag == BETA_TAG) o.optString("name").removePrefix("Tokalot ").trim() else tag.removePrefix("v")
+        if (version.isEmpty()) return null
+        val assets = o.getJSONArray("assets")
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            if (a.getString("name").endsWith(".apk")) {
+                return Found(version, a.getString("browser_download_url"), a.optLong("size"), o.optString("body").take(4000), tag)
+            }
+        }
+        return null
+    }
+
     /** Blocking. Asks GitHub for the latest release unless we checked recently. Returns true if something changed. */
     fun check(ctx: Context, force: Boolean = false): Boolean {
         val s = sp(ctx)
@@ -50,35 +89,23 @@ object Updater {
         if (!force && now - s.getLong("checked", 0) < CHECK_EVERY_MS) return false
         lastCheckFailed = false
         return try {
-            val conn = URL("https://api.github.com/repos/$REPO/releases/latest").openConnection() as HttpURLConnection
-            conn.connectTimeout = 5000
-            conn.readTimeout = 8000
-            conn.setRequestProperty("Accept", "application/vnd.github+json")
-            val code = conn.responseCode
-            if (code != 200) {
+            // With betas on, whichever is newer: the latest release or the beta (a release of the same
+            // version beats its betas, so beta testers land back on it).
+            val release = fetch("latest", failIfMissing = false)
+            val beta = if (beta(ctx)) fetch("tags/$BETA_TAG", failIfMissing = false) else null
+            val f = listOfNotNull(release, beta).reduceOrNull { a, b -> if (isNewer(b.version, a.version)) b else a }
+            if (f == null) {
                 s.edit().putLong("checked", now).apply()
-                lastCheckFailed = code != 404 // 404 = no releases yet, or the repo is private
                 return false
             }
-            val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-            val version = o.getString("tag_name").removePrefix("v")
-            val assets = o.getJSONArray("assets")
-            var url = ""
-            var size = 0L
-            for (i in 0 until assets.length()) {
-                val a = assets.getJSONObject(i)
-                if (a.getString("name").endsWith(".apk")) {
-                    url = a.getString("browser_download_url"); size = a.optLong("size"); break
-                }
-            }
-            if (url.isEmpty()) return false
+            val version = f.version
             val changed = s.getString("version", null) != version
-            s.edit().putLong("checked", now).putString("version", version).putString("url", url)
-                .putLong("size", size).putString("notes", o.optString("body").take(4000)).apply()
+            s.edit().putLong("checked", now).putString("version", version).putString("url", f.url)
+                .putLong("size", f.size).putString("notes", f.notes).apply()
             // The new version's changelog, for the banner's "What's new". Fetched once per version;
             // without it the banner falls back to the release text above.
             if (s.getString("changelog_for", null) != version && isNewer(version, currentVersion(ctx))) {
-                fetchChangelog(version)?.let { s.edit().putString("changelog", it).putString("changelog_for", version).apply() }
+                fetchChangelog(f.ref)?.let { s.edit().putString("changelog", it).putString("changelog_for", version).apply() }
             }
             changed
         } catch (_: Exception) {
@@ -87,9 +114,9 @@ object Updater {
         }
     }
 
-    /** The app's CHANGELOG.md as it is in the release tagged v[version], or null if it can't be had. */
-    private fun fetchChangelog(version: String): String? = try {
-        val conn = URL("https://raw.githubusercontent.com/$REPO/v$version/app/src/main/assets/${Changelog.FILE}")
+    /** The app's CHANGELOG.md as it is at the release's tag [ref], or null if it can't be had. */
+    private fun fetchChangelog(ref: String): String? = try {
+        val conn = URL("https://raw.githubusercontent.com/$REPO/$ref/app/src/main/assets/${Changelog.FILE}")
             .openConnection() as HttpURLConnection
         conn.connectTimeout = 5000
         conn.readTimeout = 8000
@@ -105,27 +132,44 @@ object Updater {
     fun whatsNew(ctx: Context, r: Release): List<Changelog.Entry> {
         val s = sp(ctx)
         if (s.getString("changelog_for", null) != r.version) return emptyList()
-        return Changelog.since(Changelog.parse(s.getString("changelog", "")!!), currentVersion(ctx), r.version)
+        // A beta of 1.45 brings what's under "## 1.45" so far.
+        return Changelog.since(Changelog.parse(s.getString("changelog", "")!!), currentVersion(ctx), r.version.substringBefore('-'))
     }
 
     /** The release's own text on GitHub, tidied, for when [whatsNew] has nothing. May be empty. */
     fun releaseText(r: Release) = Changelog.releaseText(r.notes)
 
-    fun releasePage(version: String) = "https://github.com/$REPO/releases/tag/v$version"
+    fun releasePage(version: String) =
+        "https://github.com/$REPO/releases/tag/" + if (isBeta(version)) BETA_TAG else "v$version"
+
+    fun isBeta(version: String) = '-' in version
 
     /** Every version's changes, on GitHub. */
     const val CHANGELOG_PAGE = "https://github.com/$REPO/blob/main/app/src/main/assets/${Changelog.FILE}"
 
-    /** "1.10" > "1.9"; compares dot-separated numbers. */
+    /**
+     * "1.10" > "1.9"; compares dot-separated numbers. A beta ("1.45-beta.190") comes after the release
+     * before it and before its own release: 1.44 < 1.45-beta.190 < 1.45-beta.191 < 1.45.
+     */
     fun isNewer(a: String, b: String): Boolean {
-        val x = a.split('.', '-').map { it.toIntOrNull() ?: 0 }
-        val y = b.split('.', '-').map { it.toIntOrNull() ?: 0 }
+        val x = a.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+        val y = b.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
         for (i in 0 until maxOf(x.size, y.size)) {
             val d = (x.getOrElse(i) { 0 }) - (y.getOrElse(i) { 0 })
             if (d != 0) return d > 0
         }
-        return false
+        val betaA = betaNumber(a)
+        val betaB = betaNumber(b)
+        return when {
+            betaA == null -> betaB != null
+            betaB == null -> false
+            else -> betaA > betaB
+        }
     }
+
+    /** 190 for "1.45-beta.190", null for a release. */
+    private fun betaNumber(v: String): Int? =
+        if ('-' !in v) null else v.substringAfter('-').filter { it.isDigit() }.toIntOrNull() ?: 0
 
     /** Blocking download to the cache folder. Updates [progress]. */
     fun download(ctx: Context, r: Release): File {

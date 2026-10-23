@@ -1220,6 +1220,11 @@ class SettingsScreen(private val a: MainActivity) {
             lp(),
         )
         about.addView(status, lp().margins(this, t = 2))
+        about.addView(switchRow("Get beta updates", "Try new features before they're released. Betas are less tested; turn this off to go back at the next release.", Updater.beta(this)) { on ->
+            Updater.setBeta(this, on)
+            val app = applicationContext
+            Thread { Updater.check(app, force = true); runOnUiThread { if (!isDestroyed) render() } }.start()
+        }, lp().margins(this, t = 8))
         about.addView(link("What's new in ${Tour.VERSION}") { Tour.show(this) }, lp().margins(this, t = 4))
         about.addView(link("Changelog") {
             val entries = Changelog.bundled(this)

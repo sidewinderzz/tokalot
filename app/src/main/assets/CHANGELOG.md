@@ -18,6 +18,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - A screenshot you just took, or a picture you copied, shows on the bar as a tiny preview; tap it to paste the picture into apps that take pictures. A sign-in code texted to you shows on the bar too, ready to tap. Both are optional: allow photos and "Codes from texts" once in Settings › Keyboard.
 - Suggestions show in every text box but password ones, and the number row is shorter than the letter rows, as on Gboard.
 - The ✨ button fixes what you typed with your AI cleanup: spelling, typos, capitals and punctuation. It works on the selected text, or the whole text box, and Undo puts it back.
+- Get beta updates, under Settings › About: try new features before they're released. Turn it off to go back at the next release.
 - Words the keyboard doesn't know, such as names and farm terms, go into your dictionary once you've kept them twice, so they sync and dictation spells them right too. What else it learns from your typing stays on this phone.
 - Light and dark to match the app, in your Tokalot color, with key sound and vibration switches. Its settings sync to your other devices.
 

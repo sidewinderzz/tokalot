@@ -116,7 +116,7 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
 
 ### Android
 
-1. **Install.** Download the APK from [Releases](https://github.com/sidewinderzz/tokalot/releases/latest) and open it on your phone.
+1. **Install.** Download the APK from [Releases](https://github.com/sidewinderzz/tokalot/releases/latest) and open it on your phone. Want new features early? Install the [beta](https://github.com/sidewinderzz/tokalot/releases/download/android-beta/Tokalot-beta.apk) instead, or turn on **Get beta updates** under Settings › About.
 2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it in Tokalot's ☰ Settings.
 3. **Allow the mic and turn on the accessibility switch.** The app explains exactly what that permission is used for before it takes you there.
 4. **Talk.** Tap any text box, then tap the floating button.
@@ -201,6 +201,8 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 ```sh
 gradle assembleRelease
 ```
+
+For a public beta, put `[beta]` in a commit message on any branch (or run the Build APK workflow by hand with *beta* ticked): it replaces the `android-beta` pre-release, versioned `<versionName>-beta.<run>`, which only phones with Get beta updates on are offered.
 
 To release, bump `versionCode` and `versionName` in `app/build.gradle.kts`, add a `## <version>` section at the top of [`app/src/main/assets/CHANGELOG.md`](app/src/main/assets/CHANGELOG.md) (a unit test checks it's there), and push to `main`. The workflow publishes a signed Release for that version with that section as its notes, and installed copies offer it as an update, with the changes under the banner's "What's new". Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
 
