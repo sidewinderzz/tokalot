@@ -562,6 +562,8 @@ class OfflineFlowService : AccessibilityService() {
         // Idle: only show when the keyboard is actually up on an editable field.
         // Recording/transcribing: stay visible even if the field or keyboard closed.
         if (state == State.IDLE) {
+            // Tokalot's own keyboard has the mic on its bar: the button would only be in the way.
+            if (TokalotKeyboard.shown) { detach(); return }
             val keyboard = keyboardTop() != null
             if (!keyboard) dismissed = false // keyboard closed: forget
             val field = !dismissed && focusedEditable() != null
@@ -966,6 +968,11 @@ class OfflineFlowService : AccessibilityService() {
             State.STARTING -> pendingStop = true
             else -> {}
         }
+    }
+
+    /** Tokalot's keyboard opened or closed. */
+    fun keyboardChanged() {
+        handler.post { updateButton() }
     }
 
     fun stopFromNotification() {

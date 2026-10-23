@@ -42,6 +42,17 @@ object Privacy {
             { it.fitSentence }) { p, on -> p.fitSentence = on },
         Switch("Learn from my corrections", "Looks at the text box again for two minutes after a dictation and adds names you respell, and words you spell out, to your dictionary.", setOf(Level.FULL),
             { it.learnWords }) { p, on -> p.learnWords = on },
+        // Tokalot Keyboard: what it keeps or looks at beyond the key you pressed.
+        Switch("Keyboard: learn from my typing", "Remembers the words you type and what follows what, on this phone only, for better suggestions.", CLOUD,
+            { it.kbLearn }) { p, on -> p.kbLearn = on },
+        Switch("Keyboard: clipboard", "Keeps what you copy for an hour, on this phone only.", CLOUD,
+            { it.kbClipboard }) { p, on -> p.kbClipboard = on },
+        Switch("Keyboard: suggest what I copied", "Something you just copied shows on the keyboard's bar, ready to paste.", setOf(Level.FULL),
+            { it.kbClipSuggest }) { p, on -> p.kbClipSuggest = on },
+        Switch("Keyboard: offer new screenshots", "A screenshot you just took shows on the keyboard's bar, ready to paste. Needs photo access.", CLOUD,
+            { it.kbScreenshots }) { p, on -> p.kbScreenshots = on },
+        Switch("Keyboard: codes from texts", "A sign-in code that just came in a text shows on the keyboard's bar. Needs notification access; nothing is kept or sent.", setOf(Level.FULL),
+            { it.kbCodes }) { p, on -> p.kbCodes = on },
     )
 
     /** How long recordings are kept at each level, in days (see [Prefs.audioKeepDays]). */

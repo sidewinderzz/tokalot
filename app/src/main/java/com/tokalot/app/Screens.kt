@@ -535,6 +535,7 @@ class SettingsScreen(private val a: MainActivity) {
     companion object {
         const val SETUP = "Setup"
         const val PRIVACY = "Privacy"
+        const val KEYBOARD = "Keyboard"
         const val SPEECH = "Speech & AI"
         const val KEYS = "API keys"
         const val RECORDING = "Recording"
@@ -549,6 +550,7 @@ class SettingsScreen(private val a: MainActivity) {
         val PAGES = listOf(
             SETUP to listOf("Setup"),
             PRIVACY to listOf("Privacy"),
+            KEYBOARD to listOf("Keyboard"),
             SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "Speed"),
             KEYS to listOf("API keys"),
             RECORDING to listOf("Recording"),
@@ -656,6 +658,121 @@ class SettingsScreen(private val a: MainActivity) {
         }
         col.addView(setup)
         col.addView(text("If the accessibility switch is greyed out: phone Settings › Apps › Tokalot › ⋮ › Allow restricted settings. Also set Tokalot's battery usage to Unrestricted.", 13f, C.SUB), lp().margins(this, t = 8))
+
+        // --- Keyboard: Tokalot as the phone's keyboard (see TokalotKeyboard)
+        section(col, "Keyboard")
+        val kbSetup = card()
+        fun kbRow(title: String, done: Boolean, doneText: String, action: String, onClick: () -> Unit) {
+            if (kbSetup.childCount > 0) kbSetup.addView(divider())
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(title, 17f))
+                addView(text(if (done) doneText else "Not yet", 14f, if (done) C.GOOD else C.SUB))
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            }
+            kbSetup.addView(row(texts, if (done) spacer() else pill(action) { onClick() }).apply {
+                setPadding(dp(20), dp(14), dp(16), dp(14))
+            })
+        }
+        val kbOn = TokalotKeyboard.isEnabled(this)
+        kbRow("Turn on Tokalot Keyboard", kbOn, "On", "Turn on") {
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+        }
+        kbRow("Use it as your keyboard", TokalotKeyboard.isCurrent(this), "In use", "Switch") {
+            if (!TokalotKeyboard.isEnabled(this)) startActivity(android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+            else getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showInputMethodPicker()
+        }
+        // Optional extras for the bar, each needing one permission: a screenshot just taken, ready to paste,
+        // and a sign-in code that just came in a text.
+        val photos = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
+        kbRow("Paste new screenshots", checkSelfPermission(photos) == android.content.pm.PackageManager.PERMISSION_GRANTED, "Allowed", "Allow") {
+            askPermission(photos, 3)
+        }
+        kbRow("Codes from texts", CodeListener.allowed(this), "Allowed", "Allow") {
+            startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+        col.addView(kbSetup)
+        col.addView(text("A keyboard in the style of Gboard, with autocorrect and swipe typing. The mic on its bar dictates like the floating button, and ✨ fixes what you typed with your AI cleanup (the selected text, or the whole box). The floating button hides while it's up. Hold the space bar to switch keyboards, or the comma to come back here.", 13f, C.SUB), lp().margins(this, t = 8))
+        val kb = card()
+        fun kbSwitch(title: String, note: String, on: Boolean, set: (Boolean) -> Unit) {
+            if (kb.childCount > 0) kb.addView(divider())
+            kb.addView(switchRow(title, note, on, set))
+        }
+        kbSwitch("Number row", "A row of digits above the letters, always showing.", prefs.kbNumberRow) { prefs.kbNumberRow = it }
+        kbSwitch("Autocorrect", "Fixes a mistyped word when you type a space or punctuation. Backspace straight after puts back what you typed.", prefs.kbAutocorrect) { prefs.kbAutocorrect = it }
+        kbSwitch("Swipe typing", "Slide your finger from letter to letter instead of tapping.", prefs.kbSwipe) { prefs.kbSwipe = it }
+        kbSwitch("Capitalize sentences", "A capital letter at the start of each sentence, where the app asks for one.", prefs.kbAutoCaps) { prefs.kbAutoCaps = it }
+        kbSwitch("Double space for a period", "Two taps on the space bar type a period and a space.", prefs.kbDoubleSpace) { prefs.kbDoubleSpace = it }
+        kbSwitch("Learn from my typing", "Remembers the words you use and what follows what, on this phone only, for better suggestions. A word the keyboard doesn't know goes into your dictionary once you've kept it twice, so it syncs.", prefs.kbLearn) { prefs.kbLearn = it }
+        kbSwitch("Symbols on letters", "Each letter shows the symbol a long press gives.", prefs.kbSymbolHints) { prefs.kbSymbolHints = it }
+        kbSwitch("Show key on press", "The key pops up bigger above your finger.", prefs.kbPopup) { prefs.kbPopup = it }
+        kbSwitch("Vibrate on key press", "", prefs.kbVibrate) { prefs.kbVibrate = it }
+        kbSwitch("Sound on key press", "Follows your phone's touch sound volume.", prefs.kbSound) { prefs.kbSound = it }
+        kbSwitch("Clipboard", "Keeps what you copy for an hour (pin anything to keep it), on this phone only. Open it with the clipboard button on the bar. Nothing from password boxes, and nothing an app marks as private.", prefs.kbClipboard) {
+            prefs.kbClipboard = it
+            if (!it) TokalotKeyboard.clearClips(this)
+        }
+        kbSwitch("Offer new screenshots", "A screenshot you just took shows on the bar as a small picture; tap it to paste it into apps that take pictures, like texting apps. Needs Paste new screenshots above.", prefs.kbScreenshots) { prefs.kbScreenshots = it }
+        kbSwitch("Offer codes from texts", "A sign-in code that just came in a text shows on the bar for a few minutes, ready to paste. Needs Codes from texts above. Tokalot only looks for the code, keeps nothing and sends nothing.", prefs.kbCodes) { prefs.kbCodes = it }
+        kbSwitch("Suggest what I copied", "Something you just copied shows on the bar, ready to paste. A link, email address or phone number in it gets its own button.", prefs.kbClipSuggest) { prefs.kbClipSuggest = it }
+        col.addView(kb)
+
+        col.addView(text("On the keyboard itself, the four-squares button at the left of its top bar opens its menu: move, remove or add the top bar's buttons, change its height, and switch its look.", 13f, C.SUB), lp().margins(this, t = 8))
+
+        // How the keyboard looks: light or dark, the key style, and its colour.
+        col.addView(text("Keyboard look", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
+        val look = card()
+        listOf("auto" to "Match phone", "light" to "Light", "dark" to "Dark").forEachIndexed { i, (id, label) ->
+            if (i > 0) look.addView(divider())
+            look.addView(choiceRow(label, if (id == "auto") "Light by day, dark when your phone is in dark mode." else "", prefs.kbTheme == id) {
+                if (prefs.kbTheme != id) { prefs.kbTheme = id; render() }
+            })
+        }
+        col.addView(look)
+        val styleCard = card()
+        listOf(
+            KeyboardTheme.CLASSIC to ("Classic" to "Grey keys, as on Gboard."),
+            KeyboardTheme.TINTED to ("Tinted" to "Keys and background tinted with the keyboard colour."),
+            KeyboardTheme.BORDERLESS to ("Borderless" to "Just the letters, no key shapes."),
+            KeyboardTheme.CONTRAST to ("High contrast" to "Pure black or white, easiest to read in sunlight."),
+        ).forEachIndexed { i, (id, t) ->
+            if (i > 0) styleCard.addView(divider())
+            styleCard.addView(choiceRow(t.first, t.second, prefs.kbStyle == id) {
+                if (prefs.kbStyle != id) { prefs.kbStyle = id; render() }
+            })
+        }
+        col.addView(styleCard, lp().margins(this, t = 8))
+        col.addView(text("Keyboard colour (enter key, mic, swipe trail)", 14f, C.SUB), lp().margins(this, t = 16, b = 8, l = 4))
+        val kbSwatches = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        (listOf("Same as the app" to 0) + Accents.all).forEach { (name, color) ->
+            val on = prefs.kbAccent == color
+            val disc = View(this).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    // "Same as the app": the app's colour as a ring.
+                    setColor(if (color == 0) android.graphics.Color.TRANSPARENT else color)
+                    setStroke(dp(if (on) 4 else if (color == 0) 3 else 1), if (on) C.TEXT else if (color == 0) prefs.accent else C.PILL)
+                }
+            }
+            kbSwatches.addView(FrameLayout(this).apply {
+                addView(disc, FrameLayout.LayoutParams(dp(34), dp(34), Gravity.CENTER))
+                contentDescription = if (on) "$name, selected" else name
+                setOnClickListener { prefs.kbAccent = color; render() }
+            }, LinearLayout.LayoutParams(dp(TOUCH_DP), dp(TOUCH_DP)))
+        }
+        col.addView(android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(kbSwatches)
+        }, lp())
+        col.addView(row(
+            text("Forget the words and phrases the keyboard learned from your typing (your dictionary stays).", 14f, C.SUB).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+            pill("Clear") {
+                TokalotKeyboard.clearHistory(this)
+                android.widget.Toast.makeText(this, "Typing history cleared", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        ), lp().margins(this, t = 8, l = 4))
 
         // --- Privacy: the level, and every switch a level sets (see Privacy)
         section(col, "Privacy")
@@ -1122,6 +1239,11 @@ class SettingsScreen(private val a: MainActivity) {
             lp(),
         )
         about.addView(status, lp().margins(this, t = 2))
+        about.addView(switchRow("Get beta updates", "Try new features before they're released. Betas are less tested; turn this off to go back at the next release.", Updater.beta(this)) { on ->
+            Updater.setBeta(this, on)
+            val app = applicationContext
+            Thread { Updater.check(app, force = true); runOnUiThread { if (!isDestroyed) render() } }.start()
+        }, lp().margins(this, t = 8))
         about.addView(link("What's new in ${Tour.VERSION}") { Tour.show(this) }, lp().margins(this, t = 4))
         about.addView(link("Changelog") {
             val entries = Changelog.bundled(this)
@@ -1211,6 +1333,7 @@ class SettingsScreen(private val a: MainActivity) {
                 if (left == 0) "All set" to false else "$left ${if (left == 1) "thing" else "things"} to do" to true
             }
             PRIVACY -> (Privacy.current(prefs)?.label ?: "Custom") to false
+            KEYBOARD -> (if (!TokalotKeyboard.isEnabled(this)) "Off" else "On · swipe ${yes(prefs.kbSwipe)} · autocorrect ${yes(prefs.kbAutocorrect)}") to false
             SPEECH -> "${if (prefs.stt == SttChoice.LOCAL) "On the phone" else prefs.stt.label} · cleanup ${if (prefs.cleanup == CleanupChoice.OFF) "off" else prefs.cleanup.label}" to false
             KEYS -> {
                 val have = Services.all.filter { prefs.key(it.first).isNotEmpty() }.map { it.second }
