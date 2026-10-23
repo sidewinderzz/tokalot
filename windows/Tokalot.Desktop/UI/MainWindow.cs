@@ -1071,7 +1071,7 @@ public sealed class MainWindow : Window
     }
 
     /** "All" and a chip per tag, a chip for the dates when a range is on, and the sort menu (with the dates) at the end. */
-    private UIElement NotesFilterRow(List<string> tags)
+    private FrameworkElement NotesFilterRow(List<string> tags)
     {
         var row = new WrapPanel();
         bool Is(string t) => string.Equals(t, notesFilter.Tag, StringComparison.OrdinalIgnoreCase);
