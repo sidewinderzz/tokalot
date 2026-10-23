@@ -349,7 +349,7 @@ class Dictation(context: Context) {
         for (c in if (noCleanup || quick) emptyList() else cleanupOrder(prefs)) {
             call.check()
             try {
-                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces, spot, shellEnv)
+                val r = Cleanup.run(prefs, c, protectedText, map.isNotEmpty(), category, appLabel, call, polish, inPieces, spot, shell = shellEnv)
                 Usage.recordLlm(app, c, r.inTokens, r.outTokens)
                 cleaned = true
                 finalText = TextTools.restore(r.text, map)
