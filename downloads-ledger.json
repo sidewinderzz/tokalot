@@ -1776,7 +1776,7 @@
    "release": "linux-v0.14.0"
   },
   "668173303": {
-   "count": 6,
+   "count": 7,
    "name": "Tokalot-v1.45.apk",
    "release": "v1.45"
   },
@@ -2021,7 +2021,7 @@
    "release": "desktop"
   },
   "670400450": {
-   "count": 60,
+   "count": 64,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2046,6 +2046,6 @@
    "release": "android-beta"
   }
  },
- "total": 376,
- "updated": "2026-10-25T22:34:00Z"
+ "total": 381,
+ "updated": "2026-10-26T01:11:36Z"
 }
