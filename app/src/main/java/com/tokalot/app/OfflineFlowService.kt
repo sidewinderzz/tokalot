@@ -3,6 +3,7 @@ package com.tokalot.app
 import android.Manifest
 import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.InputMethod
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -28,6 +29,7 @@ import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -50,6 +52,9 @@ class OfflineFlowService : AccessibilityService() {
 
     companion object {
         @Volatile var instance: OfflineFlowService? = null
+        /** When Android last started the service (elapsed realtime), and when a keyboard was last seen; for Settings. */
+        @Volatile var connectedAt = 0L
+        @Volatile var lastKeyboardAt = 0L
         private const val IDLE_ALPHA = 0.76f // resting opacity: just enough to recede; colour (not transparency) does most of the quieting
         private val IDLE_BAR = Color.parseColor("#AEAEB2") // soft grey bars while resting
         private val BUBBLE_TEXT = Color.parseColor("#E2E2E6") // undo / copied hint text, a touch softer than white
@@ -60,7 +65,7 @@ class OfflineFlowService : AccessibilityService() {
         private const val CANCEL_SHOW_MS = 7000L // the cancel X only appears once transcribing has taken this long
         private const val LEARN_WATCH_MS = 120_000L // how long a dictation's text box is looked at again for corrections
         private const val LEARN_EVERY_MS = 1500L
-        private const val LOOK_AGAIN = 12 // re-checks (about 4.5 s) after an event while only half of keyboard and text box is found
+        private const val LOOK_AGAIN = ButtonRules.LOOKS // re-checks (about 4.5 s) after an event while only half of keyboard and text box is found
         private const val AROUND = 64 // characters read either side of the cursor before typing
         /** Placeholders apps show in empty boxes, for apps that don't flag them as hints. */
         private val COMMON_PLACEHOLDERS = setOf(
@@ -137,8 +142,13 @@ class OfflineFlowService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        connectedAt = SystemClock.elapsedRealtime()
+        log("service started by Android; process up ${SystemClock.uptimeMillis() - android.os.Process.getStartUptimeMillis()} ms; " +
+            "Tokalot ${Updater.currentVersion(this)}; Android ${Build.VERSION.RELEASE}; ${Build.MANUFACTURER} ${Build.MODEL}; " +
+            "battery ${if (ServiceGuard.batteryUnrestricted(this)) "unrestricted" else "optimised"}")
         ServiceGuard.setWanted(this, true) // so an update that switches it off can be noticed
         ServiceGuard.cancelNote(this)
+        ServiceGuard.schedule(this) // the periodic "is it still running?" check
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         dictation = Dictation(applicationContext)
         History.preload(this)
@@ -155,6 +165,7 @@ class OfflineFlowService : AccessibilityService() {
         val type = event.eventType
         // The cursor moves on every letter typed: once the button is up there's nothing to look at.
         if (type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED && attached) return
+        countEvent(type)
         // Remember the text box the event came from. Some apps (web pages, newer-style screens) never say
         // which box has the keyboard when asked afterwards, which kept the button hidden until the keyboard
         // was closed and opened again; this box is the one to check then.
@@ -199,11 +210,13 @@ class OfflineFlowService : AccessibilityService() {
 
     // Android unbinds the service when it's switched off (an update or crash kills the process instead).
     override fun onUnbind(intent: Intent?): Boolean {
+        log("service switched off (unbound)")
         ServiceGuard.setWanted(this, false)
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        if (instance != null) log("service destroyed")
         instance = null
         runCatching { accessibilityButtonController.unregisterAccessibilityButtonCallback(shortcut) }
         handler.removeCallbacksAndMessages(null)
@@ -217,6 +230,67 @@ class OfflineFlowService : AccessibilityService() {
         if (::dictation.isInitialized) dictation.shutdown()
         super.onDestroy()
     }
+
+    // ---------- what the keyboard knows (Android 13+) ----------
+
+    /**
+     * The text box being edited, as the keyboard sees it, or null when there's none. On Android 13 and newer
+     * Android tells the service when a text box starts and stops taking input (flagInputMethodEditor), the same
+     * way it tells the keyboard. That's a second, more dependable answer to "is there a text box?" than asking
+     * which view has input focus, which some apps answer late or not at all, and it names password boxes.
+     */
+    @Volatile private var editing: EditorInfo? = null
+
+    override fun onCreateInputMethod(): InputMethod = object : InputMethod(this) {
+        override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+            super.onStartInput(attribute, restarting)
+            editing = attribute
+            handler.post {
+                if (!restarting) log("text box taking input in ${attribute.packageName} (type 0x${Integer.toHexString(attribute.inputType)})")
+                lookAgain = LOOK_AGAIN
+                handler.removeCallbacks(recheck)
+                handler.postDelayed(recheck, 150)
+            }
+        }
+
+        override fun onFinishInput() {
+            super.onFinishInput()
+            editing = null
+            handler.post {
+                handler.removeCallbacks(recheck)
+                handler.postDelayed(recheck, 150)
+            }
+        }
+    }
+
+    /** What the keyboard's view of the box says: a plain box (true), a password (false), or nothing known (null). */
+    private fun editingPlainBox(): Boolean? {
+        val e = editing ?: return null
+        if (e.packageName == packageName) return null // Tokalot's own boxes are judged by ownAppInFront()
+        return !ButtonRules.isPasswordType(e.inputType)
+    }
+
+    // ---------- the log (Settings › Setup › Mic button log) ----------
+
+    private fun log(line: String) = MicLog.add(this, line)
+
+    private val eventCounts = HashMap<Int, Int>()
+    private fun countEvent(type: Int) { eventCounts[type] = (eventCounts[type] ?: 0) + 1 }
+
+    /** The events since the last logged decision, briefly, then forgotten. */
+    private fun eventNote(): String {
+        if (eventCounts.isEmpty()) return ""
+        val names = mapOf(
+            AccessibilityEvent.TYPE_VIEW_FOCUSED to "focus", AccessibilityEvent.TYPE_VIEW_CLICKED to "tap",
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED to "cursor", AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED to "window",
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED to "windows",
+        )
+        val note = eventCounts.entries.joinToString(" ") { (t, n) -> (names[t] ?: "0x${Integer.toHexString(t)}") + (if (n > 1) "×$n" else "") }
+        eventCounts.clear()
+        return " [$note]"
+    }
+
+    private var lastWhy: String? = null
 
     // ---------- overlay button ----------
 
@@ -531,7 +605,17 @@ class OfflineFlowService : AccessibilityService() {
         PixelFormat.TRANSLUCENT
     ).apply { gravity = Gravity.TOP or Gravity.START }
 
-    private fun focusedEditable(): AccessibilityNodeInfo? {
+    /** The text box that has input focus, if there is one and it isn't a password box. */
+    private fun focusedEditable(): AccessibilityNodeInfo? = (lookForBox() as? Found.Box)?.node
+
+    private sealed class Found {
+        class Box(val node: AccessibilityNodeInfo) : Found()
+        object Password : Found()
+        object None : Found()
+        val kind get() = when (this) { is Box -> ButtonRules.Box.FIELD; Password -> ButtonRules.Box.PASSWORD; None -> ButtonRules.Box.NONE }
+    }
+
+    private fun lookForBox(): Found {
         // The "active" window is sometimes the keyboard itself, or briefly missing while it slides up,
         // so look through every app window for the field that has input focus.
         val roots = sequenceOf(rootInActiveWindow) + windows.asSequence()
@@ -541,19 +625,25 @@ class OfflineFlowService : AccessibilityService() {
             val node = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: continue
             // A popup or second window can hold input focus on something that isn't a text box
             // while the text box sits in another window, so keep looking rather than stop here.
-            if (node.isPassword) return null
-            if (node.isEditable) return node
+            if (node.isPassword) return Found.Password
+            if (node.isEditable) return Found.Box(node)
             // Termux's terminal isn't a text box to Android, but it takes typed text like one (see [deliver]).
-            if (AppContext.isTerminal(node.packageName?.toString())) return node
+            if (AppContext.isTerminal(node.packageName?.toString())) return Found.Box(node)
         }
         // Nothing reported input focus. The box the last tap or focus came from still counts if it's
         // still on screen, focused and editable.
-        val last = lastField ?: return null
-        if (!last.refresh() || !last.isFocused || !last.isEditable || last.isPassword) {
+        val last = lastField ?: return Found.None
+        if (!last.refresh() || !last.isFocused || !last.isEditable) {
             lastField = null
-            return null
+            return Found.None
         }
-        return last
+        return if (last.isPassword) Found.Password else Found.Box(last)
+    }
+
+    /** Tokalot's own screen is in front: its boxes have no use for the button. */
+    private fun ownAppInFront(): Boolean {
+        if (editing?.packageName == packageName) return true
+        return runCatching { rootInActiveWindow?.packageName == packageName }.getOrDefault(false)
     }
 
     private var lastField: AccessibilityNodeInfo? = null // the text box the last focus, tap or cursor move came from
@@ -561,24 +651,47 @@ class OfflineFlowService : AccessibilityService() {
     private var lookAgain = 0 // re-checks left while only one of keyboard and text box has been found
 
     private fun updateButton() {
-        // Idle: only show when the keyboard is actually up on an editable field.
+        try {
+            updateButtonNow()
+        } catch (e: Exception) {
+            // Asking Android about another app's window can fail at any moment (the window just went away, the app is
+            // stuck). That must never take the service down with it, which would leave no button at all: note it, look again.
+            log("error while deciding: ${e.javaClass.simpleName} ${e.message?.take(100).orEmpty()}")
+            lastWhy = null
+            if (lookAgain > 0) {
+                lookAgain--
+                handler.removeCallbacks(recheck)
+                handler.postDelayed(recheck, 500)
+            }
+        }
+    }
+
+    private fun updateButtonNow() {
+        // Idle: only show when the keyboard is actually up on something that takes text (see ButtonRules).
         // Recording/transcribing: stay visible even if the field or keyboard closed.
         if (state == State.IDLE) {
             // Tokalot's own keyboard has the mic on its bar: the button would only be in the way.
             if (TokalotKeyboard.shown) { detach(); return }
             val keyboard = keyboardTop() != null
+            if (keyboard) lastKeyboardAt = SystemClock.elapsedRealtime()
             if (!keyboard) dismissed = false // keyboard closed: forget
-            val field = !dismissed && focusedEditable() != null
-            if (dismissed || !keyboard || !field) {
+            val found = lookForBox()
+            val d = ButtonRules.decide(keyboard, found.kind, editingPlainBox(), ownAppInFront(), dismissed, lookAgain)
+            // Each change of mind goes in the log once, with the events that led to it. The looks in a round all share one line.
+            if (d.why != lastWhy) {
+                lastWhy = d.why
+                log(d.why + eventNote())
+            }
+            if (d.again) {
                 // Half there: the keyboard is up but no text box was found, or a text box is selected but the
                 // keyboard isn't listed yet. Either one can be reported a moment after the event that announced
                 // it, with no further event, which left the button hidden until the keyboard was closed and
                 // opened again. Look again a few times before giving up.
-                if (!dismissed && (keyboard || field) && lookAgain > 0) {
-                    lookAgain--
-                    handler.removeCallbacks(recheck)
-                    handler.postDelayed(recheck, if (lookAgain > LOOK_AGAIN / 2) 250L else 500L)
-                }
+                lookAgain--
+                handler.removeCallbacks(recheck)
+                handler.postDelayed(recheck, d.delayMs)
+            }
+            if (!d.show) {
                 detach()
                 return
             }
@@ -602,7 +715,19 @@ class OfflineFlowService : AccessibilityService() {
                 }
                 wm.addView(button, params)
                 attached = true
-            } catch (_: Exception) { return }
+            } catch (e: Exception) {
+                // The window couldn't be added (Android hasn't finished connecting the service, or has quietly dropped it).
+                // Try again shortly rather than wait for the next event, and say so in the log.
+                log("couldn't put the button on screen: ${e.javaClass.simpleName} ${e.message?.take(100).orEmpty()}")
+                lastWhy = null
+                if (lookAgain > 0) {
+                    lookAgain--
+                    handler.removeCallbacks(recheck)
+                    handler.postDelayed(recheck, 500)
+                }
+                return
+            }
+            log("button shown")
             button?.animate()?.alpha(if (state == State.IDLE) IDLE_ALPHA else 1f)?.setDuration(140)?.start()
             return
         }
@@ -693,6 +818,7 @@ class OfflineFlowService : AccessibilityService() {
         if (attached) {
             try { wm.removeView(button) } catch (_: Exception) {}
             attached = false
+            log("button hidden")
         }
         if (zoneAttached) {
             try { wm.removeView(dropZone) } catch (_: Exception) {}

@@ -22,6 +22,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <!-- In-app updates: lets Tokalot hand a newer signed APK to Android's installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Settings › Setup › Battery: asks Android to keep its battery saver off Tokalot, so the mic button's service
+         isn't killed in the background. Only when you tap Allow there. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Lets the periodic "is the mic button still running?" check (ServiceGuard.GuardJob) survive a restart of the phone. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Optional, never granted by installing: only if you run the adb command in Settings › Setup. Then, when an
          update leaves the mic button's accessibility service off, Tokalot switches it off and on again itself. -->
     <uses-permission
@@ -94,6 +99,13 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- Every quarter of an hour or so: if the accessibility switch is on but the service isn't running, bring it back
+             (see ServiceGuard). Some phones' battery savers kill it and never start it again. -->
+        <service
+            android:name=".ServiceGuard$GuardJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <service
             android:name=".OfflineFlowService"

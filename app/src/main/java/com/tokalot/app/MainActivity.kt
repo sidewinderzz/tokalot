@@ -100,6 +100,7 @@ class MainActivity : Activity() {
             backupKeys = s.getBoolean("backupKeys")
         }
         if (savedInstanceState == null) openTab(intent)
+        ServiceGuard.schedule(this) // the periodic "is the mic button still running?" check
         buildRoot()
         // A fresh launch can itself be the installer reporting back (the old task was gone).
         // Not when reopened from Recents, which replays the old intent.
@@ -207,6 +208,7 @@ class MainActivity : Activity() {
         window.decorView.postDelayed({
             if (isDestroyed) return@postDelayed
             val broken = ServiceGuard.broken(this) && SystemClock.uptimeMillis() - android.os.Process.getStartUptimeMillis() > STUCK_GRACE_MS
+            if (broken) MicLog.add(this, "app opened: the service isn't running (switch ${if (serviceEnabled()) "on" else "off"})")
             if (broken && ServiceGuard.repair(this)) toast("Turned Tokalot's mic button back on")
             else if (serviceStuck() && !inSettings && tab == Tab.HOME) render()
         }, STUCK_GRACE_MS + 500)
