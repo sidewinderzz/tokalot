@@ -6,6 +6,13 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.49 · 2026-10-26
+- The floating mic button shows more dependably when the keyboard opens. It no longer waits on the app to say which text box has the keyboard: if the keyboard is up and nothing has named a box after a moment, the button shows anyway (never on a password box, never in Tokalot itself). On Android 13 and newer it also uses Android's own "a text box started taking input" signal, the one the keyboard gets.
+- A stray error while the button works out whether to show can no longer stop the mic button's service; it's noted and the button looks again.
+- Every quarter of an hour or so, Tokalot checks that Android is still running the mic button's service, not only after an update. If the phone has stopped it, Tokalot switches it back on itself (with Stay on after updates set up) or shows a notification, at most twice a day.
+- New in Settings › Setup: Battery saver off for Tokalot, with an Allow button that asks Android to leave Tokalot's background service alone. Phones from some makers (Samsung, OnePlus and others) stop background services that stock Android leaves running.
+- New in Settings › Setup: Mic button log. It shows whether the service is running and since when, and a short log of why the button showed or stayed hidden, with View and Share buttons. App names and yes/no answers only, never anything typed, and it stays on the phone unless you share it.
+
 ## 1.48 · 2026-10-23
 - Tag your voice notes. Tap + Tag on a note (or Tags in its ⋮ menu) to pick tags or make a new one. Tap a tag to see every note with it. Tags sync to your other devices.
 - The Notes list has a search box that looks through the words in every note, its title and its tags. Matching words are highlighted, and opening a result takes you to the first match; on a voice note, Play starts there.

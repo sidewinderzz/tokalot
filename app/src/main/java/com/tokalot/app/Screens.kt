@@ -763,6 +763,11 @@ class SettingsScreen(private val a: MainActivity) {
             }
         }
         setupRow("Accessibility switch", serviceEnabled(), "On", "Set up") { openAccessibilitySetup() }
+        // A phone's battery saver can kill the mic button's service in the background; some makers' never start it again.
+        setupRow("Battery saver off for Tokalot", ServiceGuard.batteryUnrestricted(this), "Unrestricted", "Allow") {
+            runCatching { startActivity(ServiceGuard.batteryIntent(this)) }
+                .onFailure { toast("Open this phone's Settings › Apps › Tokalot › Battery and pick Unrestricted") }
+        }
         // Some phones (Samsung) switch the service off after every update; a one-time permission lets Tokalot fix that itself.
         setup.addView(divider())
         val keep = LinearLayout(this).apply {
@@ -793,8 +798,23 @@ class SettingsScreen(private val a: MainActivity) {
         modelStatusView = setupRow("Offline backup model", haveModel != null || pct != null, modelStatus, "Download") {
             startDownload(prefs.localModel)
         }
+        // What the mic button's service has been doing, for when the button doesn't show and nobody can see the phone.
+        setup.addView(divider())
+        setup.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(16), dp(14))
+            addView(text("Mic button log", 17f))
+            addView(text(MicLog.status(this@with), 14f, if (ServiceGuard.running() || !serviceEnabled()) C.SUB else C.WARN))
+            addView(text("What the mic button saw and decided: when Android started or stopped it, and why the button showed or stayed hidden. App names and yes/no answers only, never anything you typed. It stays on this phone unless you share it.", 13f, C.SUB), lp().margins(this@with, t = 4))
+            addView(row(pill("View") { showMicLog() }, spacer(wDp = 8), pill("Share") { MicLog.share(this@with) }), lp().margins(this@with, t = 8))
+        })
         col.addView(setup)
-        col.addView(text("If the accessibility switch is greyed out: phone Settings › Apps › Tokalot › ⋮ › Allow restricted settings. Also set Tokalot's battery usage to Unrestricted.", 13f, C.SUB), lp().margins(this, t = 8))
+        col.addView(text(
+            "If the accessibility switch is greyed out: phone Settings › Apps › Tokalot › ⋮ › Allow restricted settings." +
+                if (ServiceGuard.strictMaker) " On this phone also check Settings › Battery for a sleeping or deep-sleeping apps list, and keep Tokalot off it."
+                else "",
+            13f, C.SUB
+        ), lp().margins(this, t = 8))
 
         // --- Privacy: the level, and every switch a level sets (see Privacy)
         section(col, "Privacy")
@@ -1309,6 +1329,16 @@ class SettingsScreen(private val a: MainActivity) {
     }
 
     /** A section's small heading. Its title is kept on the view, so [fold] can put the section in its category. */
+    /** The mic button log in a sheet: Share hands it to another app, Clear starts it afresh. */
+    private fun showMicLog() = with(a) {
+        val body = text(MicLog.read(this), 12f).apply {
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextIsSelectable(true)
+        }
+        sheet("Mic button log", body, positive = "Share", negative = "Close", neutral = "Clear",
+            onNeutral = { MicLog.clear(this); toast("Log cleared") }) { MicLog.share(this) }
+    }
+
     private fun section(col: LinearLayout, title: String) = with(a) {
         col.addView(text(title.uppercase(java.util.Locale.US), 12f, C.SUB, bold = true).apply {
             letterSpacing = 0.08f
@@ -1380,7 +1410,11 @@ class SettingsScreen(private val a: MainActivity) {
         fun yes(on: Boolean) = if (on) "on" else "off"
         when (name) {
             SETUP -> {
-                val left = listOf(micGranted(), serviceEnabled(), prefs.cloudSttReady || ModelManager.isReady(this)).count { !it }
+                // The battery row only counts on phones known to kill background services; elsewhere it's just there.
+                val left = listOf(
+                    micGranted(), serviceEnabled(), prefs.cloudSttReady || ModelManager.isReady(this),
+                    !ServiceGuard.strictMaker || ServiceGuard.batteryUnrestricted(this),
+                ).count { !it }
                 if (left == 0) "All set" to false else "$left ${if (left == 1) "thing" else "things"} to do" to true
             }
             PRIVACY -> (Privacy.current(prefs)?.label ?: "Custom") to false
