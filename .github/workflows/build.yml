@@ -84,11 +84,15 @@ jobs:
             exit 0
           fi
           cp app/build/outputs/apk/release/app-release.apk "Tokalot-v$VERSION.apk"
-          # The release text is this version's section of the changelog the app shows
-          # (the "## <version>" heading's "- " lines); GitHub's generated notes if there is none.
-          awk -v v="$VERSION" '
-            /^## / { split(substr($0, 4), h, " "); on = (h[1] == v); next }
-            on && /^- / { print }
+          # The release text is the changelog the app shows, from this version's "## <version>"
+          # section down to the latest release, so versions that never shipped on their own (a
+          # failed build, or PRs merged together) are listed too. Headings only when there are
+          # several. GitHub's generated notes if there is no section for this version.
+          LATEST=$(gh release view --json tagName -q .tagName 2>/dev/null | sed 's/^v//')
+          awk -v v="$VERSION" -v last="$LATEST" '
+            /^## / { split(substr($0, 4), h, " "); if (h[1] == v) on = 1; if (h[1] == last) exit; if (on) { n++; heads[n] = h[1] }; next }
+            on && /^- / { lines[n] = lines[n] $0 "\n" }
+            END { for (i = 1; i <= n; i++) { if (n > 1) printf "%s### %s\n\n", (i > 1 ? "\n" : ""), heads[i]; printf "%s", lines[i] } }
           ' app/src/main/assets/CHANGELOG.md > notes.md
           if [ -s notes.md ]; then
             NOTES=(--notes-file notes.md)
