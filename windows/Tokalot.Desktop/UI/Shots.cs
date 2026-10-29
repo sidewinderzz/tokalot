@@ -165,6 +165,16 @@ internal static class Shots
         Check("a failed piece falls back to the whole recording", System.Threading.Tasks.Task.Run(() => failing.Finish(audio, default)).GetAwaiter().GetResult() == null);
         Check("nothing sent early in a short recording", System.Threading.Tasks.Task.Run(() => new LiveStt(Settings.Current, Fake).Finish(audio[..(R * 5)], default)).GetAwaiter().GetResult() == null);
 
+        // A faint ending: 4 s said softly on a quiet mic, under Voiced's bar but heard by the recorder. It used to be dropped.
+        var faint = new float[R * 16];
+        for (int i = 0; i < faint.Length; i++)
+            faint[i] = i < R * 11 ? (float)(Math.Sin(i * 0.2) * 0.2) : i >= R * 12 ? (float)(Math.Sin(i * 0.2) * 0.008) : 0f;
+        var soft = new LiveStt(Settings.Current, (p, ct) => System.Threading.Tasks.Task.FromResult(LiveStt.Voiced(p) > 0 ? "Hello." : "And the last words."));
+        soft.Feed(R * 12, R * 11, (a, b) => faint[a..Math.Min(b, faint.Length)]);
+        soft.LastVoice = R * 16;
+        var softText = System.Threading.Tasks.Task.Run(() => soft.Finish(faint, default)).GetAwaiter().GetResult();
+        Check("a faint ending the recorder heard is kept: " + softText, softText == "Hello. And the last words.");
+
         // A noisy place: the microphone never reads as quiet, so cuts are made at dips, or forced.
         float[] Noisy(int seconds, double dipAt = -1)
         {

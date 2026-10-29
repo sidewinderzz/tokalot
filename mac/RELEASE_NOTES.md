@@ -2,6 +2,10 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.12.1
+
+- Long dictations no longer lose their last few seconds when you finish softly. The end used to be dropped if it was quieter than the rest, even though the mic had picked it up.
+
 ## New in 0.12.0
 
 - Tag your voice notes: **Tags…** in a note's ⋮ menu, or **+ Tag** under its date. Click a tag to see every note with it. Tags sync with your phone and other computers.

@@ -6,6 +6,9 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.50 · 2026-10-29
+- Long dictations no longer lose their last few seconds when you finish softly. The end used to be dropped if it was quieter than the rest, even though the mic had picked it up.
+
 ## 1.49 · 2026-10-26
 - The floating mic button shows more dependably when the keyboard opens. It no longer waits on the app to say which text box has the keyboard: if the keyboard is up and nothing has named a box after a moment, the button shows anyway (never on a password box, never in Tokalot itself). On Android 13 and newer it also uses Android's own "a text box started taking input" signal, the one the keyboard gets.
 - A stray error while the button works out whether to show can no longer stop the mic button's service; it's noted and the button looks again.

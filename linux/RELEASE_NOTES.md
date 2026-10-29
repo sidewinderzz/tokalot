@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.16.1
+
+- Long dictations no longer lose their last few seconds when you finish softly. The end used to be dropped if it was quieter than the rest, even though the mic had picked it up.
+
 ## New in 0.16.0
 
 - A tidier Settings › About: the version and Check for updates sit together at the top, and Open-source licenses, Source code and Quit are rows you click, like the rest of Settings.

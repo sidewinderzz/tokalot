@@ -115,6 +115,22 @@ class LiveTest {
         assertNull(live.finish(audio.copyOf(r * 5)))
     }
 
+    @Test fun aFaintEndingTheRecorderHeardIsStillSent() {
+        // 11 s of speech, a pause, then 4 s said softly on a quiet mic: under voiced()'s bar, over the recorder's.
+        val all = FloatArray(r * 16) {
+            when {
+                it < r * 11 -> 0.2f * sin(it * 0.2).toFloat()
+                it >= r * 12 -> 0.008f * sin(it * 0.2).toFloat()
+                else -> 0f
+            }
+        }
+        val live = LiveStt { piece, _ -> if (LiveStt.voiced(piece) > 0) "Hello." else "And the last words." }
+        live.feed(r * 12, r * 11, { a, b -> all.copyOfRange(a, minOf(b, all.size)) })
+        assertEquals(1, live.pieceCount)
+        live.lastVoice = r * 16
+        assertEquals("Hello. And the last words.", live.finish(all))
+    }
+
     @Test fun aPhantomPhraseFromANearSilentPieceIsDropped() {
         // 0.2 s of sound in 12 s: the model's "Thank you." for that is not something the user said.
         val quiet = FloatArray(r * 12) { if (it < r / 5) 0.2f * sin(it * 0.2).toFloat() else 0f }
