@@ -96,16 +96,32 @@ If a provider is down or out of free quota, Tokalot tries another one you have a
       Once your words are pasted, the clipboard goes back to what it held before, pictures and files included. Dictation only stays on it when it couldn't be pasted.
     </td>
   </tr>
+  <tr>
+    <td valign="top">
+      <b>A keyboard too (Android)</b><br>
+      Optional Tokalot Keyboard in the style of Gboard: autocorrect, next-word suggestions, swipe typing, emoji with search, a clipboard, light and dark themes, and the mic and an AI fix button on its bar.
+    </td>
+    <td valign="top">
+      <b>Learns your words</b><br>
+      Names and farm or trade words the keyboard doesn't know go into your dictionary once you've kept them twice, so dictation spells them right too, on every device.
+    </td>
+    <td valign="top">
+      <b>Fix what you typed</b><br>
+      The keyboard's ✨ button runs your AI cleanup on what you typed (or just the part you selected): spelling, typos, capitals and punctuation, with Undo.
+    </td>
+  </tr>
 </table>
 
 ## Get started
 
 ### Android
 
-1. **Install.** Download the APK from [Releases](https://github.com/sidewinderzz/tokalot/releases/latest) and open it on your phone.
+1. **Install.** Download the APK from [Releases](https://github.com/sidewinderzz/tokalot/releases/latest) and open it on your phone. Want new features early? Install the [beta](https://github.com/sidewinderzz/tokalot/releases/download/android-beta/Tokalot-beta.apk) instead, or turn on **Get beta updates** under Settings › About.
 2. **Add a key.** Get a free key at [console.groq.com/keys](https://console.groq.com/keys) and paste it in Tokalot's ☰ Settings.
 3. **Allow the mic and turn on the accessibility switch.** The app explains exactly what that permission is used for before it takes you there.
 4. **Talk.** Tap any text box, then tap the floating button.
+
+Want a keyboard that does the same? Turn on **Tokalot Keyboard** under Settings › Keyboard. It types like Gboard (autocorrect, swipe typing, emoji), with the mic and an AI fix button on its suggestion bar, and the floating button steps aside while it's up.
 
 No text box? Add the **Dictate** tile to Quick Settings: your words go into the text box if there is one, or onto the clipboard if not. Turn on **Voice notes (beta)** under Settings › Recording & look to keep each dictation as a note instead.
 
@@ -167,10 +183,11 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 
 ## Privacy
 
-- **Android:** the accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to put your words into that text box. Tokalot doesn't read your messages or notifications, and it skips password fields.
+- **Android:** the accessibility permission is used only to notice when the keyboard is open on a text box, to know which app you're in, and to put your words into that text box. Tokalot doesn't read your messages, and it skips password fields. If you turn on the keyboard's optional "Codes from texts", Android lets it see new notifications only to spot a sign-in code; the code stays in memory for a few minutes on the phone and is never saved or sent. "Paste new screenshots" uses photo access only to show your newest screenshot on the keyboard's bar.
 - **Windows:** the Ctrl+Win listener only watches for that shortcut; it never records your typing. API keys are encrypted with your Windows account. Dictated text is kept out of Windows clipboard history, and whatever you had copied before is put back after the paste.
+- **Android keyboard:** Tokalot Keyboard keeps what it learns from your typing (which words you use, and what follows what) on the phone only, never in sync or backups, and learns nothing in password fields or incognito tabs. Its clipboard list stays on the phone too, keeps unpinned items for an hour, and skips anything copied from a password box or marked private. Typed text only leaves the phone when you tap ✨ to fix it, and then only to your cleanup service. A word it learns goes into your dictionary, which syncs like any other dictionary word.
 - History, recordings, settings and keys live only on your device. Backups leave out your API keys unless you choose to include them.
-- Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into, your dictionary words and, on Android, whether the cursor is in the middle of a sentence (never the text around it), so the model can match the style, spelling and capitals. With Terminal commands (beta) on, a request made in a terminal also carries your Linux distribution's name, its package manager, your login shell and which handy command-line tools are installed (never your files or what the terminal shows). With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
+- Audio and text go only to the speech and cleanup services you picked, using your keys. A cleanup request also carries the name of the app you're dictating into, your dictionary words and, on Android, whether the cursor is in the middle of a sentence (never the text around it), so the model can match the style, spelling and capitals. With Terminal commands (beta) on, a request made in a terminal also carries what the command has to fit: on Linux your distribution's name, its package manager, your login shell and which handy command-line tools are installed; on a Mac your macOS version, the chip, your login shell, whether Homebrew or MacPorts is there and those same tools; in Termux on Android your Android version, the processor type and whether Termux:API is installed (never your files or what the terminal shows). With on-device speech recognition and cleanup turned off, nothing you say leaves your device.
 - Sync is optional and off by default. It works through one small file that you keep in a folder you already sync (Google Drive, OneDrive, Dropbox, Syncthing); there is no Tokalot account or server. Recordings are never put in it; API keys and dictation history (the newest 1,000 dictations, as text) only if you turn those on. Settings sync too, except the few that belong to one device (the on-device model, how long recordings are kept, where the indicator sits). Each device adds its own word, dictation and clean-up counts per month (under a random id and the device's name), so every app can show the total across all your devices.
 - Letting AI assistants read your notes is optional and off by default. Only apps on that computer can use it, it can only read notes (never change them), and what the assistant does with them is up to that assistant and its provider.
 - The apps check GitHub for new releases. There are no Tokalot servers, accounts or tracking.
@@ -184,6 +201,8 @@ Tokalot is free. You pay your AI providers directly, at their rates:
 ```sh
 gradle assembleRelease
 ```
+
+For a public beta, put `[beta]` in a commit message on any branch (or run the Build APK workflow by hand with *beta* ticked): it replaces the `android-beta` pre-release, versioned `<versionName>-beta.<run>`, which only phones with Get beta updates on are offered.
 
 To release, bump `versionCode` and `versionName` in `app/build.gradle.kts`, add a `## <version>` section at the top of [`app/src/main/assets/CHANGELOG.md`](app/src/main/assets/CHANGELOG.md) (a unit test checks it's there), and push to `main`. The workflow publishes a signed Release for that version with that section as its notes, and installed copies offer it as an update, with the changes under the banner's "What's new". Releases are signed with a key stored as repository secrets (`TOKALOT_KEYSTORE_BASE64`, `TOKALOT_KEYSTORE_PASSWORD`). It's never committed. Forks without those secrets still build, signed with a throwaway debug key.
 
@@ -221,7 +240,7 @@ GitHub Actions builds every push and runs the Android unit tests.
 
 ## Credits
 
-On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT), through [Whisper.net](https://github.com/sandrohanea/whisper.net) on Windows, Linux and Mac. The Linux and Mac interface uses [Avalonia](https://github.com/AvaloniaUI/Avalonia). Audio on Windows uses [NAudio](https://github.com/naudio/NAudio), and installs and updates use [Velopack](https://github.com/velopack/velopack). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License).
+On-device speech recognition uses [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT), through [Whisper.net](https://github.com/sandrohanea/whisper.net) on Windows, Linux and Mac. The Linux and Mac interface uses [Avalonia](https://github.com/AvaloniaUI/Avalonia). Audio on Windows uses [NAudio](https://github.com/naudio/NAudio), and installs and updates use [Velopack](https://github.com/velopack/velopack). Headings use [EB Garamond](https://github.com/octaviopardo/EBGaramond12) (SIL Open Font License). The Android keyboard's word list comes from the [Android Open Source Project](https://source.android.com/) (Apache 2.0), its swipe typing is adapted from [FlorisBoard](https://github.com/florisboard/florisboard) (Apache 2.0), and its emoji names and keywords come from [unicode-emoji-json](https://github.com/muan/unicode-emoji-json) and [emojilib](https://github.com/muan/emojilib) (MIT).
 
 ## License
 

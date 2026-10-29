@@ -47,6 +47,16 @@ class ChangelogTest {
         assertEquals(listOf("1.27"), Changelog.since(e, installed = "1.26").map { it.version })
     }
 
+    @Test fun betasSitBetweenReleases() {
+        assertTrue(Updater.isNewer("1.10", "1.9"))
+        assertTrue(Updater.isNewer("1.45-beta.190", "1.44"))
+        assertTrue(Updater.isNewer("1.45-beta.191", "1.45-beta.190"))
+        assertTrue(Updater.isNewer("1.45", "1.45-beta.191"))
+        assertTrue(!Updater.isNewer("1.45-beta.191", "1.45"))
+        assertTrue(!Updater.isNewer("1.45", "1.45"))
+        assertEquals(listOf("1.27"), Changelog.since(Changelog.parse(sample), installed = "1.27-beta.4").map { it.version })
+    }
+
     @Test fun releaseTextDropsTheCompareLinkAndMarkdown() {
         assertEquals("", Changelog.releaseText("**Full Changelog**: https://github.com/x/y/compare/v1.24...v1.26"))
         assertEquals(

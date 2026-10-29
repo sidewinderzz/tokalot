@@ -396,6 +396,27 @@ public static class Ui
         return Keys(b, onPick, title);
     }
 
+    /** A row that opens something: title, optional line under it, and a chevron. Goes in a [List]. */
+    public static Border LinkRow(string title, string sub, Action onClick)
+    {
+        var texts = Stack(Text(title, 15));
+        if (sub.Length > 0) texts.Children.Add(Text(sub, 13, C.Sub));
+        var chevron = Text("›", 18, C.Sub);
+        chevron.VerticalAlignment = VerticalAlignment.Center;
+        chevron.Margin = new Thickness(16, 0, 0, 0);
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.Children.Add(texts);
+        Grid.SetColumn(chevron, 1);
+        g.Children.Add(chevron);
+        var b = new Border { Padding = new Thickness(20, 12, 20, 12), Child = g, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        b.OnEnter(() => b.Background = C.Hover);
+        b.OnLeave(() => b.Background = Brushes.Transparent);
+        b.OnClick(onClick, handled: true);
+        return Keys(b, onClick, title);
+    }
+
     /** A card whose children are separated by thin lines. */
     public static Border List(params Control[] rows)
     {

@@ -54,7 +54,7 @@ public static class Privacy
         new("Learn from my corrections", "Looks at the text box again for two minutes after a dictation and adds names you respell, and words you spell out, to your dictionary.", new[] { Level.Full },
             s => s.LearnWords, (s, on) => s.LearnWords = on, WindowsOnly: true),
         new("Terminal commands (beta)", "In a terminal, what you say becomes a shell command. Sends your system's name, package manager and installed tools to your AI cleanup with the request.", new[] { Level.Full },
-            s => s.ShellCommands, (s, on) => s.ShellCommands = on, NotMac: true),
+            s => s.ShellCommands, (s, on) => s.ShellCommands = on),
     };
 
     /** The switches this computer shows. */

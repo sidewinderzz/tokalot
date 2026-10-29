@@ -13,12 +13,20 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Tokalot Keyboard offers a screenshot you just took on its bar, ready to paste (Settings › Keyboard). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <!-- Recording from a Bluetooth headset's mic (Settings › Recording › Microphone): opening the headset's call
          link. Neither asks anything; BLUETOOTH is only needed for that on Android 11 and older. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <!-- In-app updates: lets Tokalot hand a newer signed APK to Android's installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Settings › Setup › Battery: asks Android to keep its battery saver off Tokalot, so the mic button's service
+         isn't killed in the background. Only when you tap Allow there. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Lets the periodic "is the mic button still running?" check (ServiceGuard.GuardJob) survive a restart of the phone. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Optional, never granted by installing: only if you run the adb command in Settings › Setup. Then, when an
          update leaves the mic button's accessibility service off, Tokalot switches it off and on again itself. -->
     <uses-permission
@@ -36,6 +44,8 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.HOME" />
         </intent>
+        <!-- Terminal commands: whether the termux-api commands can be offered in Termux. -->
+        <package android:name="com.termux.api" />
     </queries>
 
     <application
@@ -90,6 +100,13 @@
             </intent-filter>
         </receiver>
 
+        <!-- Every quarter of an hour or so: if the accessibility switch is on but the service isn't running, bring it back
+             (see ServiceGuard). Some phones' battery savers kill it and never start it again. -->
+        <service
+            android:name=".ServiceGuard$GuardJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <service
             android:name=".OfflineFlowService"
             android:exported="true"
@@ -132,5 +149,37 @@
             android:name=".RecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Tokalot Keyboard: a full keyboard with the mic and AI fix on its suggestion bar (see TokalotKeyboard). -->
+        <service
+            android:name=".TokalotKeyboard"
+            android:exported="true"
+            android:label="@string/keyboard_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
+        <!-- Optional: spots a sign-in code in a new text so the keyboard can offer it (see CodeListener). -->
+        <service
+            android:name=".CodeListener"
+            android:exported="true"
+            android:label="@string/code_listener_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Pictures the keyboard pastes, readable only by the app each one is given to (see KeyboardImages). -->
+        <provider
+            android:name=".KeyboardImageProvider"
+            android:authorities="${applicationId}.kbimages"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

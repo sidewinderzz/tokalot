@@ -61,6 +61,17 @@ internal static unsafe class SelfTest
 
         Check("front app", () => AppDetect.Frontmost() is { } f ? (true, $"{f.Name} ({f.Bundle}, pid {f.Pid})") : (false, "none"));
 
+        Check("terminal detection", () =>
+        {
+            var terminals = new[] { "Terminal", "iTerm2", "Ghostty", "WezTerm", "Alacritty", "kitty" };
+            var others = new[] { "Safari", "TextEdit", "Mail", "Visual Studio Code" };
+            ActiveApp Of(string n) => new("app:" + n.ToLowerInvariant(), n);
+            var missed = terminals.Where(n => !AppDetect.IsTerminal(Of(n))).Concat(others.Where(n => AppDetect.IsTerminal(Of(n)))).ToList();
+            return (missed.Count == 0, missed.Count == 0 ? string.Join(", ", terminals) + " are terminals; " + string.Join(", ", others) + " aren't" : "wrong for " + string.Join(", ", missed));
+        });
+
+        Check("shell context", () => { var d = ShellContext.Describe(); return (d.StartsWith("macOS") && d.Contains("login shell"), d); });
+
         Check("modifier keys", () => (true, "read; held now: " + HotkeyHook.ModifiersDown));
 
         Check("full-screen check", () => { var (full, _) = Overlay.ActiveWindowState(); return (true, "front window full screen: " + full); });
@@ -117,7 +128,7 @@ internal static unsafe class SelfTest
      * offline model, snippets, cleanup) exactly as a recording would be, and prints the result. The
      * file is read back the way a saved recording is, through the audio store.
      */
-    public static int Transcribe(string wav)
+    public static int Transcribe(string wav, bool terminal = false)
     {
         try
         {
@@ -129,7 +140,7 @@ internal static unsafe class SelfTest
             Console.WriteLine(FormattableString.Invariant($"Audio: {samples.Length / (double)Recorder.SampleRate:0.0} s"));
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var dictation = new Dictation();
-            var outcome = dictation.Process(samples, null).GetAwaiter().GetResult();
+            var outcome = dictation.Process(samples, terminal ? new ActiveApp("app:terminal", "Terminal") : null).GetAwaiter().GetResult();
             Console.WriteLine($"Time: {sw.ElapsedMilliseconds} ms");
             if (outcome.Warning != null) Console.WriteLine("Note: " + outcome.Warning);
             Console.WriteLine("Text: " + outcome.Text);

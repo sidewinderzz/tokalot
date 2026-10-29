@@ -77,6 +77,26 @@ cancels the dictation quietly.
   it. No account, no server; API keys and dictation history stay out unless you switch
   those on.
 
+### Terminal commands (beta)
+
+Two switches under Settings › Style: **Terminal commands (beta)**, off until you turn it on, and
+**Start commands with "shell"**, on by default. In a terminal (Terminal, iTerm2, Ghostty, WezTerm,
+Alacritty, kitty, Warp, Hyper, Tabby), start with the word *shell* and what you say becomes a shell
+command: describe it ("shell, show me the ten biggest files in this folder") or speak one ("shell git
+commit dash m quote fix the paste bug quote" gives `git commit -m "fix the paste bug"`). Anything that
+doesn't start with "shell" is dictated as normal text, so a prompt for Claude Code stays as you said
+it. Turn the second switch off and everything you say in a terminal becomes a command.
+
+- It is only **pasted, never run, and Enter is never pressed**: read every command first, most of all
+  one with `sudo` or `rm`.
+- It writes for macOS: zsh, Homebrew ("shell install ffmpeg" gives `brew install ffmpeg`, no `sudo`)
+  and the BSD flags macOS's own `sed`, `find`, `stat` and `date` take. With each request your cleanup
+  AI is told your macOS version, the chip, your login shell, whether Homebrew or MacPorts is installed
+  and which handier tools you have (`fd`, `rg`, `bat`, `eza`, `jq`, `gsed`…). Nothing else about the
+  Mac leaves it.
+- It needs AI cleanup (a Groq or OpenAI key); with the offline model only, you get the plain transcript.
+- The two switches sync with your other devices when sync is on.
+
 Data lives in `~/Library/Application Support/Tokalot` (settings, history, recordings, the offline
 model, `log.txt`), private to your user. API keys are in your login Keychain under "Tokalot".
 

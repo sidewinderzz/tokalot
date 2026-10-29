@@ -8,6 +8,14 @@
 - The Notes page has a search box that looks through the words in every note, its title and its tags. Matching words are highlighted, and opening a result shows them marked; on a voice note, Play starts at the first one.
 - Tag chips above the list filter it, and a sort menu puts notes newest first, oldest first or by title, or shows only a day or a date range.
 - New in Settings › Recording › **Microphone**: pick which mic to record from, and **Prefer a headset when one is connected** to use a headset's mic whenever it's plugged in or paired. Off by default.
+- A tidier Settings › About: the version and Check for updates sit together at the top, and Open-source licenses, Source code and Quit are rows you click, like the rest of Settings.
+
+## New in 0.11.0
+
+- New: **Terminal commands (beta)**, in Settings › Style, off until you turn it on. In Terminal, iTerm2, Ghostty, WezTerm, Alacritty, kitty, Warp, Hyper or Tabby, start with "shell" and say what you want ("shell, show me the ten biggest files in this folder") or speak a command ("shell git commit dash m quote fix the paste bug quote") and a shell command is pasted. Anything that doesn't start with "shell" is dictated as normal text, so prompts for Claude Code and the like are left alone (**Start commands with "shell"** turns that off). It is never run: you read it and press Enter yourself.
+- It writes commands for macOS: zsh, Homebrew (`brew install`, no `sudo`), and the BSD flags macOS's own `sed`, `find` and `date` take. With each request your cleanup AI is told your macOS version, the chip, your login shell, whether Homebrew or MacPorts is installed and which handier tools you have (`fd`, `rg`, `bat`, `gsed`…). It needs AI cleanup.
+- Both Terminal commands switches sync with your other devices (Windows, Linux and Android) when sync is on. Terminal commands is also on the **Privacy** page, where **Everything on** turns it on.
+- For testing: `Tokalot --transcribe <file.wav> --terminal` dictates as if into Terminal.
 
 ## New in 0.10.0
 

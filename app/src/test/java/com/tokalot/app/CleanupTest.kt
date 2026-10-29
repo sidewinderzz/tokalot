@@ -64,4 +64,22 @@ class CleanupTest {
         assertTrue(prompt(AppCategory.MESSAGING).contains("starting each line with \"• \""))
         assertTrue(prompt(AppCategory.AI_CODE).contains("starting each line with \"- \""))
     }
+
+    @Test fun shellPromptIsForTermux() {
+        val p = Cleanup.shellPrompt("Termux", listOf("Tokalot"), hasSnippets = false, env = "Android 15; processor: arm64-v8a")
+        assertTrue(p.contains("bash in Termux on Android"))
+        assertTrue(p.contains("This phone: Android 15; processor: arm64-v8a."))
+        assertTrue(p.contains("never use sudo or su"))
+        assertTrue(p.contains("pkg install"))
+        assertTrue(p.contains("Spell these names exactly like this when they appear: Tokalot"))
+        assertFalse(p.contains("Formatting ("))
+        assertFalse(Cleanup.shellPrompt(null, emptyList(), hasSnippets = false).contains("This phone:"))
+    }
+
+    @Test fun tidyShellKeepsOneLine() {
+        assertTrue(Cleanup.tidyShell("```bash\ndu -ah . | sort -rh | head -n 10\n```") == "du -ah . | sort -rh | head -n 10")
+        assertTrue(Cleanup.tidyShell("$ pkg upgrade") == "pkg upgrade")
+        assertTrue(Cleanup.tidyShell("`ls -la`") == "ls -la")
+        assertTrue(runCatching { Cleanup.tidyShell("  \n ") }.isFailure)
+    }
 }

@@ -117,6 +117,10 @@ object Accents {
 /** Pre-filled "Your instructions" for a fresh install; users can edit or clear it. */
 /** Playback speeds a voice note offers, in the order the speed button steps through them. */
 val NOTE_SPEEDS = floatArrayOf(1f, 1.25f, 1.5f, 2f)
+/** The keyboard's light and dark choices: "auto" follows the phone. */
+val KB_THEMES = listOf("auto", "light", "dark")
+/** The keyboard heights offered, in percent. */
+val KB_HEIGHTS = 80..130
 
 const val DEFAULT_INSTRUCTIONS = "Always write \"lol\" in lowercase."
 
@@ -192,13 +196,19 @@ class Prefs(ctx: Context) {
             "autoLanguage" to "autolang", "polish" to "polish", "sounds" to "sounds", "learnWords" to "learn_words",
             "notesBeta" to "notes_beta", "holdToTalk" to "hold", "haptics" to "haptics", "fitSentence" to "fit_sentence",
             "noteSkipSilence" to "note_skip_silence", "noteSkipUms" to "note_skip_ums",
+            "keyboardAutocorrect" to "kb_autocorrect", "keyboardSwipe" to "kb_swipe", "keyboardAutoCaps" to "kb_autocap",
+            "keyboardDoubleSpace" to "kb_double_space", "keyboardLearn" to "kb_learn", "keyboardNumberRow" to "kb_number_row",
+            "keyboardSymbolHints" to "kb_symbol_hints", "keyboardSound" to "kb_sound", "keyboardVibrate" to "kb_vibrate",
+            "keyboardPopup" to "kb_popup", "keyboardClipboard" to "kb_clipboard", "keyboardClipSuggest" to "kb_clip_suggest",
+            "keyboardScreenshots" to "kb_screenshots", "keyboardCodes" to "kb_codes",
             "headsetMic" to "headset_mic", "headsetMicAll" to "headset_mic_all",
+            "shellCommands" to "shell_commands", "shellCue" to "shell_cue",
         )
 
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
         fun synced(key: String) = key in BOOLEANS.values || key in setOf(
             "stt", "cleanup", "theme", "accent", "sound_set", "note_phrases", "learned_words", "dismissed_words",
-            "note_level", "note_speed",
+            "note_level", "note_speed", "kb_theme", "kb_style", "kb_accent", "kb_toolbar", "kb_height",
         ) || key.startsWith("sttmodel_") || key.startsWith("model_") || key.startsWith("app_")
 
         /** Whether a synced setting's value from the file is one this version can use. */
@@ -212,7 +222,11 @@ class Prefs(ctx: Context) {
                 "theme" -> v is String && v in setOf("system", "light", "dark")
                 "soundSet" -> v is String && Sounds.valid(v) == v
                 "notePhrases" -> v is String
-                "accent" -> v is Number && v.toLong() in 0L..0xFFFFFFFFL
+                "accent", "keyboardAccent" -> v is Number && v.toLong() in 0L..0xFFFFFFFFL
+                "keyboardTheme" -> v is String && v in KB_THEMES
+                "keyboardStyle" -> v is String && v in KeyboardTheme.STYLES
+                "keyboardToolbar" -> v is String && KeyboardToolbar.valid(v)
+                "keyboardHeight" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in KB_HEIGHTS
                 "sttModels", "cleanupModels" -> strings()
                 "androidAppOverrides" -> strings { c -> AppCategory.values().any { it.name == c } }
                 "noteSummaryLevel" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 1..5
@@ -413,8 +427,29 @@ class Prefs(ctx: Context) {
             "fitSentence" to fitSentence,
             "noteSkipSilence" to noteSkipSilence,
             "noteSkipUms" to noteSkipUms,
+            "keyboardAutocorrect" to kbAutocorrect,
+            "keyboardSwipe" to kbSwipe,
+            "keyboardAutoCaps" to kbAutoCaps,
+            "keyboardDoubleSpace" to kbDoubleSpace,
+            "keyboardLearn" to kbLearn,
+            "keyboardNumberRow" to kbNumberRow,
+            "keyboardSymbolHints" to kbSymbolHints,
+            "keyboardSound" to kbSound,
+            "keyboardVibrate" to kbVibrate,
+            "keyboardPopup" to kbPopup,
+            "keyboardClipboard" to kbClipboard,
+            "keyboardClipSuggest" to kbClipSuggest,
+            "keyboardScreenshots" to kbScreenshots,
+            "keyboardCodes" to kbCodes,
+            "keyboardTheme" to kbTheme,
+            "keyboardStyle" to kbStyle,
+            "keyboardAccent" to (kbAccent.toLong() and 0xFFFFFFFFL),
+            "keyboardToolbar" to kbToolbar,
+            "keyboardHeight" to kbHeight,
             "headsetMic" to headsetMic,
             "headsetMicAll" to headsetMicAll,
+            "shellCommands" to shellCommands,
+            "shellCue" to shellCue,
             "noteSummaryLevel" to noteSummaryLevel,
             "noteSpeed" to noteSpeed.toDouble(),
             "notePhrases" to notePhrases,
@@ -457,6 +492,11 @@ class Prefs(ctx: Context) {
             "cleanupModels" -> overrides("model_", v as JSONObject)
             "androidAppOverrides" -> overrides("app_", v as JSONObject)
             "accent" -> ed.putInt("accent", (v as Number).toLong().toInt())
+            "keyboardAccent" -> ed.putInt("kb_accent", (v as Number).toLong().toInt())
+            "keyboardTheme" -> ed.putString("kb_theme", v as String)
+            "keyboardStyle" -> ed.putString("kb_style", v as String)
+            "keyboardToolbar" -> ed.putString("kb_toolbar", v as String)
+            "keyboardHeight" -> ed.putInt("kb_height", (v as Number).toInt())
             "noteSummaryLevel" -> ed.putInt("note_level", (v as Number).toInt())
             "noteSpeed" -> ed.putInt("note_speed", Math.round((v as Number).toDouble() * 100).toInt())
             "learnedWords" -> ed.putString("learned_words", strings(v as JSONArray))
@@ -548,6 +588,86 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("sounds", false)
         set(v) = sp.edit().putBoolean("sounds", v).apply()
 
+    // ---------- the Tokalot keyboard (see TokalotKeyboard) ----------
+
+    /** Fix a mistyped word when space or punctuation is typed. */
+    var kbAutocorrect: Boolean
+        get() = sp.safeBoolean("kb_autocorrect", true)
+        set(v) = sp.edit().putBoolean("kb_autocorrect", v).apply()
+    /** Swipe typing: slide a finger across the letters. */
+    var kbSwipe: Boolean
+        get() = sp.safeBoolean("kb_swipe", true)
+        set(v) = sp.edit().putBoolean("kb_swipe", v).apply()
+    /** Capital letter at the start of each sentence. */
+    var kbAutoCaps: Boolean
+        get() = sp.safeBoolean("kb_autocap", true)
+        set(v) = sp.edit().putBoolean("kb_autocap", v).apply()
+    /** Two spaces type a period and a space. */
+    var kbDoubleSpace: Boolean
+        get() = sp.safeBoolean("kb_double_space", true)
+        set(v) = sp.edit().putBoolean("kb_double_space", v).apply()
+    /** Words typed that the keyboard doesn't know go into the dictionary once used twice (see KeyboardLearn). */
+    var kbLearn: Boolean
+        get() = sp.safeBoolean("kb_learn", true)
+        set(v) = sp.edit().putBoolean("kb_learn", v).apply()
+    /** A row of digits above the letters. */
+    var kbNumberRow: Boolean
+        get() = sp.safeBoolean("kb_number_row", false)
+        set(v) = sp.edit().putBoolean("kb_number_row", v).apply()
+    /** Each letter shows its long-press symbol in the corner. */
+    var kbSymbolHints: Boolean
+        get() = sp.safeBoolean("kb_symbol_hints", true)
+        set(v) = sp.edit().putBoolean("kb_symbol_hints", v).apply()
+    /** Click on each key. */
+    var kbSound: Boolean
+        get() = sp.safeBoolean("kb_sound", false)
+        set(v) = sp.edit().putBoolean("kb_sound", v).apply()
+    /** Short buzz on each key. */
+    var kbVibrate: Boolean
+        get() = sp.safeBoolean("kb_vibrate", true)
+        set(v) = sp.edit().putBoolean("kb_vibrate", v).apply()
+    /** The key shown bigger above the finger as it's pressed. */
+    var kbPopup: Boolean
+        get() = sp.safeBoolean("kb_popup", true)
+        set(v) = sp.edit().putBoolean("kb_popup", v).apply()
+
+    /** Things copied are kept in the keyboard's clipboard list (on this phone only). */
+    var kbClipboard: Boolean
+        get() = sp.safeBoolean("kb_clipboard", true)
+        set(v) = sp.edit().putBoolean("kb_clipboard", v).apply()
+    /** Something just copied shows on the suggestion bar, ready to paste. */
+    var kbClipSuggest: Boolean
+        get() = sp.safeBoolean("kb_clip_suggest", true)
+        set(v) = sp.edit().putBoolean("kb_clip_suggest", v).apply()
+    /** A screenshot just taken shows on the bar, ready to paste (needs access to photos). */
+    var kbScreenshots: Boolean
+        get() = sp.safeBoolean("kb_screenshots", true)
+        set(v) = sp.edit().putBoolean("kb_screenshots", v).apply()
+    /** A sign-in code that just came in a text shows on the bar (needs notification access; see CodeListener). */
+    var kbCodes: Boolean
+        get() = sp.safeBoolean("kb_codes", true)
+        set(v) = sp.edit().putBoolean("kb_codes", v).apply()
+    /** "auto" follows the phone's dark mode; "light" or "dark" always. */
+    var kbTheme: String
+        get() = sp.safeString("kb_theme", "auto")?.takeIf { it in KB_THEMES } ?: "auto"
+        set(v) = sp.edit().putString("kb_theme", v).apply()
+    /** How keys look: one of [KeyboardTheme.STYLES]. */
+    var kbStyle: String
+        get() = sp.safeString("kb_style", KeyboardTheme.CLASSIC)?.takeIf { it in KeyboardTheme.STYLES } ?: KeyboardTheme.CLASSIC
+        set(v) = sp.edit().putString("kb_style", v).apply()
+    /** The keyboard's key height, in percent of the usual (80-130). */
+    var kbHeight: Int
+        get() = sp.safeInt("kb_height", 100).coerceIn(KB_HEIGHTS)
+        set(v) = sp.edit().putInt("kb_height", v.coerceIn(KB_HEIGHTS)).apply()
+    /** The keyboard's top bar buttons, in order (see [KeyboardToolbar]). */
+    var kbToolbar: String
+        get() = KeyboardToolbar.format(KeyboardToolbar.parse(sp.safeString("kb_toolbar", null)))
+        set(v) = sp.edit().putString("kb_toolbar", v).apply()
+    /** The keyboard's accent colour; 0 = the same as the app's. */
+    var kbAccent: Int
+        get() = sp.safeInt("kb_accent", 0)
+        set(v) = sp.edit().putInt("kb_accent", v).apply()
+
     /** Which Sounds style plays (soft, chime, retro, bubble). */
     var soundSet: String
         get() = Sounds.valid(sp.safeString("sound_set", null))
@@ -611,6 +731,16 @@ class Prefs(ctx: Context) {
     var polish: Boolean
         get() = sp.safeBoolean("polish", false)
         set(v) = sp.edit().putBoolean("polish", v).apply()
+
+    /** Synced with the computers: dictating into Termux turns what you say into a shell command (typed, never run). */
+    var shellCommands: Boolean
+        get() = sp.safeBoolean("shell_commands", false)
+        set(v) = sp.edit().putBoolean("shell_commands", v).apply()
+
+    /** With Terminal commands on: only a dictation that starts with the word "shell" becomes a command; anything else is dictated normally. */
+    var shellCue: Boolean
+        get() = sp.safeBoolean("shell_cue", true)
+        set(v) = sp.edit().putBoolean("shell_cue", v).apply()
 
     /**
      * Fit a dictation into the sentence around the cursor: no capital in the middle of a sentence, no
