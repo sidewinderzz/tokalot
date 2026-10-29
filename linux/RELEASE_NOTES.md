@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.16.0
+
+- A tidier Settings › About: the version and Check for updates sit together at the top, and Open-source licenses, Source code and Quit are rows you click, like the rest of Settings.
+
 ## New in 0.15.0
 
 - Tag your voice notes: **Tags…** in a note's ⋮ menu, or **+ Tag** under its date. Click a tag to see every note with it. Tags sync with your phone and other computers.

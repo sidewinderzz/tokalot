@@ -2600,12 +2600,11 @@ public sealed class MainWindow : Window
             col.Children.Add(Spaced(Ui.Text("Each device adds its own counts to the sync file when it syncs.", 13, C.Sub), 4, 8, 0, 0));
         }
 
-        // --- About
+        // --- About: the version and updates on one card, the links as rows on another, the privacy line under them.
         Section(col, "About");
         var about = new StackPanel();
-        about.Children.Add(Ui.Text("Tokalot for Windows " + Updater.CurrentVersion + (RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? " (ARM64)" : ""), 16, bold: true));
-        about.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this PC. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The Ctrl+Win listener only watches for that shortcut; it never records your typing.", 14, C.Sub), 0, 4, 0, 0));
-        about.Children.Add(Spaced(Link("Source code: github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)), 0, 8, 0, 0));
+        about.Children.Add(Ui.Text("Tokalot for Windows", 17, bold: true));
+        about.Children.Add(Ui.Text("Version " + Updater.CurrentVersion + (RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? " (ARM64)" : ""), 13.5, C.Sub));
         // A new version can be installed from here too, not only from the banner on Home.
         var app = App.Current;
         var downloading = app.UpdateProgress != null;
@@ -2613,7 +2612,7 @@ public sealed class MainWindow : Window
             ? $"Downloading Tokalot {app.UpdateVersion}… {app.UpdateProgress}%"
             : $"Version {app.UpdateVersion} is available.", 14, C.Sub);
         settingsUpdateText = status;
-        var check = Ui.Button("Check for updates", async () =>
+        var check = Ui.Button(app.UpdateVersion != null && !downloading ? "Check again" : "Check for updates", async () =>
         {
             if (!Updater.CanUpdate) { status.Text = "Updates work in the installed version (TokalotSetup.exe)."; return; }
             status.Text = "Checking…";
@@ -2621,21 +2620,25 @@ public sealed class MainWindow : Window
             if (v != null) Render(); // brings up the Update button
             else status.Text = Updater.LastCheckFailed ? "Couldn't check for updates. Check your connection and try again." : "You're up to date.";
         });
+        about.Children.Add(Spaced(status, 0, 12, 0, 0));
         about.Children.Add(Spaced(app.UpdateVersion != null && !downloading
             ? Ui.Row(Ui.Button("Update", () => _ = app.InstallUpdate(), filled: true), Spaced(check, 8, 0, 0, 0))
-            : (FrameworkElement)check, 0, 12, 0, 0));
-        about.Children.Add(Spaced(status, 0, 6, 0, 0));
+            : (FrameworkElement)check, 0, 6, 0, 0));
+        col.Children.Add(Ui.Card(about, 20));
+
         var licenses = new TextBox
         {
             Text = Licenses.Text, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, FontSize = 12.5, Foreground = C.Sub,
             Background = C.Field, BorderThickness = new Thickness(0), Padding = new Thickness(12), MaxHeight = 320,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 8, 0, 0),
         };
-        about.Children.Add(Spaced(Link("Open-source licenses", () =>
-            licenses.Visibility = licenses.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible), 0, 12, 0, 0));
-        about.Children.Add(licenses);
-        about.Children.Add(Spaced(Link("Quit Tokalot", () => App.Current.Quit()), 0, 12, 0, 0));
-        col.Children.Add(Ui.Card(about, 20));
+        col.Children.Add(Spaced(Ui.List(
+            Ui.LinkRow("Open-source licenses", "", () =>
+                licenses.Visibility = licenses.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible),
+            Ui.LinkRow("Source code", "github.com/sidewinderzz/tokalot", () => Open(Updater.RepoUrl)),
+            Ui.LinkRow("Quit Tokalot", "", () => App.Current.Quit())), 0, 12, 0, 0));
+        col.Children.Add(licenses);
+        col.Children.Add(Spaced(Ui.Text("Your recordings, history and keys stay on this PC. Dictations go only to the speech and cleanup services you chose, with your own keys. No Tokalot servers, accounts or tracking. The Ctrl+Win listener only watches for that shortcut; it never records your typing.", 13, C.Sub), 4, 12, 0, 0));
 
         BuildPages(col);
     }

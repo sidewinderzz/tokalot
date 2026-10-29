@@ -8,6 +8,7 @@
 - The Notes page has a search box that looks through the words in every note, its title and its tags. Matching words are highlighted, and opening a result shows them marked; on a voice note, Play starts at the first one.
 - Tag chips above the list filter it, and a sort menu puts notes newest first, oldest first or by title, or shows only a day or a date range.
 - New in Settings › Recording › **Microphone**: pick which mic to record from, and **Prefer a headset when one is connected** to use a headset's mic whenever it's plugged in or paired. Off by default.
+- A tidier Settings › About: the version and Check for updates sit together at the top, and Open-source licenses, Source code and Quit are rows you click, like the rest of Settings.
 
 ## New in 0.11.0
 
