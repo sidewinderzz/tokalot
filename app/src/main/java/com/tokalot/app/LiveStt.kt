@@ -112,11 +112,6 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
     @Volatile var lastRate = 0f
         private set
 
-    /**
-     * tail: what was recorded after the last cut. That can be nothing but room noise and the tap on the
-     * button, which the speech model turns into "Thank you.", so it needs half a second of sound to be sent
-     * and a stock phrase from it is dropped. Earlier pieces were cut because speech was heard in them.
-     */
     private var lookedAt = 0 // where the recording had got to when a noisy cut was last considered
 
     /** See FORCE_AFTER. Looked into once a second at most: it reads six seconds of audio. */
@@ -128,8 +123,16 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
         return if (dip || count - sent >= FORCE_HARD) from + at else -1
     }
 
-    private fun one(piece: FloatArray, tail: Boolean = false): String {
-        if (tail && voiced(piece) < 10) return ""
+    /**
+     * tail: what was recorded after the last cut. That can be nothing but room noise and the tap on the
+     * button, which the speech model turns into "Thank you.", so when it has under half a second of sound a
+     * stock phrase from it is dropped. heard: the recorder heard someone talking in it, by its bar that follows
+     * the room. Its sound is then sent however faint: on a quiet microphone the last few seconds of speech can
+     * stay under [voiced]'s fixed bar, and were once dropped. Earlier pieces were cut because speech was heard in them.
+     */
+    private fun one(piece: FloatArray, tail: Boolean = false, heard: Boolean = false): String {
+        val weak = tail && voiced(piece) < 10
+        if (weak && !heard) return ""
         val began = System.nanoTime()
         val text = try {
             TextTools.stripNoise(
@@ -146,7 +149,7 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
             throw e
         }
         if (!tail) lastRate = (System.nanoTime() - began) / 1_000_000f / (piece.size / Recorder.SAMPLE_RATE.toFloat())
-        return if (tail && TextTools.isPhantom(text)) "" else text
+        return if (weak && TextTools.isPhantom(text)) "" else text
     }
 
     /**
@@ -161,7 +164,8 @@ class LiveStt(private val transcribe: (FloatArray, Call) -> String) {
         return try {
             if (sent < all.size && (lastVoice < 0 || lastVoice > sent)) {
                 val tail = all.copyOfRange(sent, all.size)
-                pieces.add(exec.submit<String> { one(tail, tail = true) })
+                val heard = lastVoice > sent
+                pieces.add(exec.submit<String> { one(tail, tail = true, heard = heard) })
             }
             pieces.map { it.get() }.filter { it.isNotEmpty() }.joinToString(" ")
         } catch (_: Exception) {

@@ -127,12 +127,15 @@ public sealed class LiveStt
 
     /**
      * tail: what was recorded after the last cut. That can be nothing but room noise and the key click,
-     * which the speech model turns into "Thank you.", so it needs half a second of sound to be sent and a
-     * stock phrase from it is dropped. Earlier pieces were cut because speech was heard in them.
+     * which the speech model turns into "Thank you.", so when it has under half a second of sound a stock
+     * phrase from it is dropped. heard: the recorder heard someone talking in it, by its bar that follows the
+     * room. Its sound is then sent however faint: on a quiet microphone the last few seconds of speech can
+     * stay under Voiced's fixed bar, and were once dropped. Earlier pieces were cut because speech was heard in them.
      */
-    private async Task<string> One(float[] piece, bool tail = false)
+    private async Task<string> One(float[] piece, bool tail = false, bool heard = false)
     {
-        if (tail && Voiced(piece) < 10) return "";
+        var weak = tail && Voiced(piece) < 10;
+        if (weak && !heard) return "";
         string raw;
         try { raw = await transcribe(piece, cts.Token); }
         // One more try for a passing error (a dropped connection, a busy server). A timeout has cost enough already.
@@ -141,7 +144,7 @@ public sealed class LiveStt
             raw = await transcribe(piece, cts.Token);
         }
         var text = TextTools.StripNoise(raw);
-        return tail && TextTools.IsPhantom(text) ? "" : text;
+        return weak && TextTools.IsPhantom(text) ? "" : text;
     }
 
     /**
@@ -159,7 +162,7 @@ public sealed class LiveStt
             if (sent < all.Length && (LastVoice < 0 || LastVoice > sent))
             {
                 var tail = all[sent..];
-                pieces.Add(One(tail, tail: true));
+                pieces.Add(One(tail, tail: true, heard: LastVoice > sent));
             }
             var texts = await Task.WhenAll(pieces);
             return string.Join(" ", texts.Where(t => t.Length > 0));

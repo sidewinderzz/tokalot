@@ -38,7 +38,13 @@ jobs:
         run: |
           SDKM=$(ls -d $ANDROID_HOME/cmdline-tools/*/bin | sort -V | tail -1)/sdkmanager
           yes | $SDKM --licenses > /dev/null || true
-          $SDKM "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
+          # A download that breaks halfway ("Error on ZipFile unknown archive") once failed a release build: try again.
+          for i in 1 2 3; do
+            $SDKM "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0" && exit 0
+            echo "SDK install failed (try $i of 3); retrying in 20 s."
+            sleep 20
+          done
+          exit 1
 
       # The signing key is stored as a repo secret (base64). It is never committed.
       - name: Restore signing key

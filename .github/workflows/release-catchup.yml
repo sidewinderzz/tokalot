@@ -1,0 +1,56 @@
+name: Publish missed releases
+
+# Each app publishes its release when main has a version that isn't released yet. If that build fails
+# for a passing reason (a download that broke halfway, a busy server), the version stays unreleased
+# until the next push that happens to touch that app. This looks every few hours and rebuilds main for
+# any app whose version on main has no release, so every version ends up on the Releases page.
+on:
+  schedule:
+    - cron: '41 */6 * * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release-catchup.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: release-catchup
+
+jobs:
+  catch-up:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Rebuild apps whose version on main isn't released
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          csproj_version() { sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' "$1" | tr -d '\r'; }
+          ANDROID=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          # Android goes first: the Mac build waits for the other apps' builds of the same commit to pass.
+          set -- \
+            "build.yml v$ANDROID" \
+            "windows.yml desktop-v$(csproj_version windows/Tokalot.Desktop/Tokalot.Desktop.csproj)" \
+            "linux.yml linux-v$(csproj_version linux/Tokalot.Linux/Tokalot.Linux.csproj)" \
+            "mac.yml mac-v$(csproj_version mac/Tokalot.Mac/Tokalot.Mac.csproj)"
+          for entry in "$@"; do
+            read -r wf tag <<< "$entry"
+            if gh release view "$tag" > /dev/null 2>&1; then
+              echo "$tag is released."
+              continue
+            fi
+            BUSY=$(gh run list --workflow "$wf" --branch main --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$BUSY" -gt 0 ]; then
+              echo "$tag isn't released yet, but $wf is already running on main."
+              continue
+            fi
+            echo "$tag isn't released: rebuilding main with $wf."
+            gh workflow run "$wf" --ref main
+            sleep 15 # so the next app's build sees this one queued
+          done

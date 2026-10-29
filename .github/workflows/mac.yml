@@ -242,7 +242,10 @@ jobs:
           fi
           # Publish only once the Android, Windows and Linux builds of this same commit (those that run for it) have passed.
           for i in $(seq 90); do
-            RUNS=$(gh run list --commit "$GITHUB_SHA" --json workflowName,status,conclusion --jq '[.[] | select(.workflowName != "Build Mac app")]')
+            # Only each app's newest run counts, so a build that failed and was then run again (by hand, or
+            # by release-catchup.yml) no longer blocks this one.
+            RUNS=$(gh run list --commit "$GITHUB_SHA" --json workflowName,status,conclusion,createdAt \
+              --jq '[.[] | select(.workflowName != "Build Mac app")] | group_by(.workflowName) | map(max_by(.createdAt) | del(.createdAt))')
             FAILED=$(echo "$RUNS" | jq '[.[] | select(.status == "completed" and .conclusion != "success" and .conclusion != "skipped")] | length')
             PENDING=$(echo "$RUNS" | jq '[.[] | select(.status != "completed")] | length')
             if [ "$FAILED" -gt 0 ]; then echo "Another app's build failed on this commit; not publishing."; echo "$RUNS"; exit 1; fi
