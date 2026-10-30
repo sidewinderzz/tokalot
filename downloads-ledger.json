@@ -2266,7 +2266,7 @@
    "release": "desktop-v1.20.1"
   },
   "689542878": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-1.20.1-full.nupkg",
    "release": "desktop"
   },
@@ -2306,7 +2306,7 @@
    "release": "desktop"
   },
   "689544768": {
-   "count": 24,
+   "count": 29,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2331,6 +2331,6 @@
    "release": "mac-v0.12.1"
   }
  },
- "total": 992,
- "updated": "2026-10-30T14:10:13Z"
+ "total": 998,
+ "updated": "2026-10-30T19:23:39Z"
 }
