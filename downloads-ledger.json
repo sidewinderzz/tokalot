@@ -2306,7 +2306,7 @@
    "release": "desktop"
   },
   "689544768": {
-   "count": 13,
+   "count": 24,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2331,6 +2331,6 @@
    "release": "mac-v0.12.1"
   }
  },
- "total": 981,
- "updated": "2026-10-30T07:08:15Z"
+ "total": 992,
+ "updated": "2026-10-30T14:10:13Z"
 }
