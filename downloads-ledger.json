@@ -2201,7 +2201,7 @@
    "release": "linux-v0.16.1"
   },
   "689539781": {
-   "count": 4,
+   "count": 8,
    "name": "Tokalot-v1.50.apk",
    "release": "v1.50"
   },
@@ -2306,7 +2306,7 @@
    "release": "desktop"
   },
   "689544768": {
-   "count": 7,
+   "count": 13,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2331,6 +2331,6 @@
    "release": "mac-v0.12.1"
   }
  },
- "total": 971,
- "updated": "2026-10-30T01:00:50Z"
+ "total": 981,
+ "updated": "2026-10-30T07:08:15Z"
 }
