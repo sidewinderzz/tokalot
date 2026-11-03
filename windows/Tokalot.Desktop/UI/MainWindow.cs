@@ -1535,8 +1535,7 @@ public sealed class MainWindow : Window
             Render();
         };
         menu.Items.Add(rename);
-        // Shared in to read or play back, it sits on Home; Move to Notes files it, and back again.
-        if (note.Home || info?.Source != null || info?.Audio != null)
+        // Shared in to read or play back, it sits on Home; Move to Notes files it, and any note can go back.
         {
             var move = new MenuItem { Header = note.Home ? "Move to Notes" : "Move to Home" };
             move.Click += (_, _) =>
