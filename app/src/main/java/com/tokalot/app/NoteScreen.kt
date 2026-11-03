@@ -176,10 +176,10 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                     prefs.noteSkipUms = !prefs.noteSkipUms; recut()
                 }
             }
-            // Shared in to read or play back, it sits on Home; Move to Notes files it, and back again.
+            // Shared in to read or play back, it sits on Home; Move to Notes files it, and any note can go back.
             val onHome = Notes.all(this).firstOrNull { it.id == id }?.home ?: note.home
             if (onHome) items += "Move to Notes" to { moveToNotes(id) }
-            else if (info?.source != null || info?.audio != null) items += "Move to Home" to {
+            else items += "Move to Home" to {
                 if (runCatching { Notes.setHome(this, id, true) }.isSuccess) toast("Moved to Home") else toast("Couldn't move it")
             }
             items += "Copy text" to { copy(note.text) }
