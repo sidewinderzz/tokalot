@@ -3,7 +3,8 @@ package com.tokalot.app
 /**
  * Finds a sign-in or verification code in a text message ("Your Google verification code is 123456",
  * "G-482913 is your code", "Use 7731 to log in"), for the keyboard's bar. Only messages that talk about a
- * code count, so a plain number (an address, a price, a phone number) is never offered.
+ * code count, so a plain number (an address, a price, a phone number) is never offered. Email notifications are
+ * read the same way, so a code in an email's preview works too.
  */
 object CodeFinder {
     private val words = Regex(
@@ -13,14 +14,21 @@ object CodeFinder {
     /** 4-8 digits, maybe with a letter prefix ("G-123456") or split in the middle ("123-456", "123 456"). */
     private val code = Regex("""(?<![\w$€£#.,/:-])(?:[A-Z]{1,3}-)?(\d{3,4}[- ]\d{3,4}|\d{4,8})(?![\w%,/:-]|[.,]\w)""")
 
+    /** Numbers that follow these are something else: "account ending 4821", "order #5532", "ref 7710". */
+    private val notCode = Regex(
+        """(?i)\b(ending|ending in|ends in|acct|account|card|order|ref|reference|invoice|ticket|case|ext|suite|unit|box)""" +
+            """\W{0,3}(no\.?|number|#)?\W{0,3}$"""
+    )
+
     /** The code in [text], or null. */
     fun find(text: CharSequence?): String? {
         val t = text?.toString() ?: return null
         if (!words.containsMatchIn(t)) return null
-        val found = code.findAll(t).map { it.value }.filter { c ->
+        val found = code.findAll(t).filter { m ->
+            val c = m.value
             val digits = c.count { it.isDigit() }
-            digits in 4..8 && !isYear(c)
-        }.toList()
+            digits in 4..8 && !isYear(c) && !notCode.containsMatchIn(t.substring(maxOf(0, m.range.first - 24), m.range.first))
+        }.map { it.value }.toList()
         // "G-123456" pastes as 123456, and "123 456" as 123456, as sites ask for the digits.
         return found.firstOrNull()?.filter { it.isDigit() }
     }

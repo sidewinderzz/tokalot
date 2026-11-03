@@ -6,6 +6,13 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.52 · 2026-11-03
+- The keyboard's keys look softly raised instead of flat: a light top edge, a gentle shade down each key and a soft shadow under it, and a key sinks flat while you press it. Classic and Tinted have it. Prefer the old look? Pick Flat in the keyboard's menu or Settings › Keyboard.
+- New screenshots show up on the bar more dependably. Tokalot now recognises screenshots wherever the phone saves them (Pictures, DCIM, a Screenshots album, files named Screenshot), looks again a moment later for phones that save the file late, and keeps offering it for 5 minutes instead of 2.
+- The screenshot's button on the bar is always the same size: a tiny copy of the picture, whole and in its own shape, with "Screenshot" beside it ("Image" for a picture you copied).
+- In an app that doesn't take pictures from keyboards, tapping the screenshot copies it instead, so you can press and hold the text box and Paste.
+- Sign-in codes: a code in an email is offered too, when the email's notification shows it (Gmail, Outlook and other mail apps show the start of the email). Older messages in a conversation, and account or order numbers, are no longer mistaken for a new code.
+
 ## 1.51 · 2026-11-03
 - Reminders and checklists on voice notes (beta). With the mic button, start with "Remind me at 7:30 to lock the shop" or "Make a list for the trip: chargers, cooler, dog food, at 6 load the dogs". Lines with a time ring then; the rest just wait to be ticked. "Remind me" only counts when you say a time, so a text that starts "Remind me what time…" still goes to your friend, and the bubble lets you type it there instead.
 - With the Voice note tile there's nothing to remember: just talk. When AI cleanup is on, the AI also spots a reminder or a list in what you said and sets it up.

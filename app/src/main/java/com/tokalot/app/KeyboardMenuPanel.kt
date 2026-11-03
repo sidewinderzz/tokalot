@@ -108,7 +108,7 @@ class KeyboardMenuPanel(context: Context, private val listener: Listener) : Line
             prefs().kbTheme = it; listener.onMenuSetting()
         })
         list.addView(View(context), LayoutParams(1, dp(8f)))
-        list.addView(pills(listOf("Classic" to KeyboardTheme.CLASSIC, "Tinted" to KeyboardTheme.TINTED,
+        list.addView(pills(listOf("Classic" to KeyboardTheme.CLASSIC, "Flat" to KeyboardTheme.FLAT, "Tinted" to KeyboardTheme.TINTED,
             "Borderless" to KeyboardTheme.BORDERLESS, "High contrast" to KeyboardTheme.CONTRAST), p.kbStyle) {
             prefs().kbStyle = it; listener.onMenuSetting()
         })

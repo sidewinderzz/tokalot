@@ -256,5 +256,13 @@ class KeyboardTest {
         assertNull(CodeFinder.find("Your order total is $1234.56, code-free shipping"))
         assertNull(CodeFinder.find("Your code expires in 2026"))
         assertNull(CodeFinder.find(null))
+        // Emails, as their notification shows them (sender, subject, the start of the email).
+        assertEquals("482913", CodeFinder.find("Microsoft account team Your single-use code Your single-use code is: 482913 If you didn't request a code, ignore this email."))
+        assertEquals("731942", CodeFinder.find("GitHub [GitHub] Please verify your device A sign in attempt requires further verification. Verification code: 731942"))
+        assertEquals("559201", CodeFinder.find("Amazon Sign-in attempt To finish signing in, enter the code below. 559201 This code will expire in 10 minutes."))
+        // An account or order number near a sign-in word is not a code.
+        assertNull(CodeFinder.find("Your statement is ready. Account ending 4821. Log in to view."))
+        assertNull(CodeFinder.find("Order # 5532 shipped. Sign in to track it."))
+        assertEquals("660412", CodeFinder.find("Card ending in 4821: your verification code is 660412"))
     }
 }

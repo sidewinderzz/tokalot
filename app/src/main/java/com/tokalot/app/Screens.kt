@@ -865,12 +865,12 @@ class SettingsScreen(private val a: MainActivity) {
             else getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showInputMethodPicker()
         }
         // Optional extras for the bar, each needing one permission: a screenshot just taken, ready to paste,
-        // and a sign-in code that just came in a text.
+        // and a sign-in code that just came in a text or email.
         val photos = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
         kbRow("Paste new screenshots", checkSelfPermission(photos) == android.content.pm.PackageManager.PERMISSION_GRANTED, "Allowed", "Allow") {
             askPermission(photos, 3)
         }
-        kbRow("Codes from texts", CodeListener.allowed(this), "Allowed", "Allow") {
+        kbRow("Codes from texts and emails", CodeListener.allowed(this), "Allowed", "Allow") {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
         col.addView(kbSetup)
@@ -895,7 +895,7 @@ class SettingsScreen(private val a: MainActivity) {
             if (!it) TokalotKeyboard.clearClips(this)
         }
         kbSwitch("Offer new screenshots", "A screenshot you just took shows on the bar as a small picture; tap it to paste it into apps that take pictures, like texting apps. Needs Paste new screenshots above.", prefs.kbScreenshots) { prefs.kbScreenshots = it }
-        kbSwitch("Offer codes from texts", "A sign-in code that just came in a text shows on the bar for a few minutes, ready to paste. Needs Codes from texts above. Tokalot only looks for the code, keeps nothing and sends nothing.", prefs.kbCodes) { prefs.kbCodes = it }
+        kbSwitch("Offer codes from texts and emails", "A sign-in code that just came in a text, or in an email whose notification shows it, is on the bar for a few minutes, ready to paste. Needs Codes from texts and emails above. Tokalot only looks for the code, keeps nothing and sends nothing.", prefs.kbCodes) { prefs.kbCodes = it }
         kbSwitch("Suggest what I copied", "Something you just copied shows on the bar, ready to paste. A link, email address or phone number in it gets its own button.", prefs.kbClipSuggest) { prefs.kbClipSuggest = it }
         col.addView(kb)
 
@@ -913,7 +913,8 @@ class SettingsScreen(private val a: MainActivity) {
         col.addView(look)
         val styleCard = card()
         listOf(
-            KeyboardTheme.CLASSIC to ("Classic" to "Grey keys, as on Gboard."),
+            KeyboardTheme.CLASSIC to ("Classic" to "Grey keys, softly raised with a light top edge and a gentle shadow."),
+            KeyboardTheme.FLAT to ("Flat" to "The same grey keys, flat."),
             KeyboardTheme.TINTED to ("Tinted" to "Keys and background tinted with the keyboard colour."),
             KeyboardTheme.BORDERLESS to ("Borderless" to "Just the letters, no key shapes."),
             KeyboardTheme.CONTRAST to ("High contrast" to "Pure black or white, easiest to read in sunlight."),
