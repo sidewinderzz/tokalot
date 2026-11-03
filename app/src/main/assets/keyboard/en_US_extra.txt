@@ -1,0 +1,100 @@
+# Tokalot keyboard: additions on top of en_US.txt.gz (which is generated from the AOSP list, see
+# tools/keyboard/make_wordlist.py). Edited by hand. A word here is added, or raised to this probability
+# (0-255; nothing is lowered). "ok" after it clears the list's "possibly offensive" mark.
+#   word<TAB>probability[<TAB>ok]
+# After "=shortcuts": typed<TAB>replacement<TAB>strength (14+ always replaces something that isn't a word).
+ur	110
+u	120
+ya	100	ok
+yea	110
+prolly	85
+tonite	90
+nite	90
+omw	105
+rn	100
+idk	115
+ttyl	85
+wyd	90
+hbu	85
+nvm	90
+bc	95
+gonna	120
+wanna	120
+gotta	110
+kinda	110
+sorta	95
+tho	120
+thru	100
+yall	90
+lemme	90
+dunno	95
+y'all	110
+okay	150
+yeah	160
+auger	110
+augers	90
+nozzle	110
+nozzles	100
+sprayer	110
+sprayers	95
+planter	110
+seeder	100
+drill	130
+combine	140
+header	120
+baler	110
+bales	110
+heifer	100
+heifers	95
+bushels	110
+acres	130
+fertilizer	115
+hydraulic	115
+hydraulics	110
+diesel	120
+welder	110
+welding	115
+plasma	110
+torque	110
+=shortcuts
+definatly	definitely	15
+definately	definitely	15
+defintely	definitely	15
+defenitely	definitely	15
+probly	probably	15
+somthing	something	15
+somethign	something	15
+becuase	because	15
+beacuse	because	15
+thier	their	15
+wierd	weird	15
+untill	until	15
+tommorow	tomorrow	15
+tomorow	tomorrow	15
+tomarrow	tomorrow	15
+recieve	receive	15
+recieved	received	15
+seperate	separate	15
+occured	occurred	15
+thats	that's	15
+whats	what's	15
+hows	how's	15
+theyre	they're	15
+youre	you're	15
+wouldve	would've	15
+couldve	could've	15
+shouldve	should've	15
+inthe	in the	15
+ofthe	of the	15
+tothe	to the	15
+onthe	on the	15
+atthe	at the	15
+andthe	and the	15
+forthe	for the	15
+iam	I am	15
+alot	a lot	15
+nozzel	nozzle	15
+augar	auger	15
+hydrolic	hydraulic	15
+hydralic	hydraulic	15
+fertlizer	fertilizer	15

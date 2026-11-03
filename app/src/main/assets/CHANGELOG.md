@@ -6,6 +6,14 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.54 · 2026-11-03
+- Autocorrect now works in far more apps. Many chat apps and web pages mark their text box "no suggestions", and the keyboard was quietly turning autocorrect off there. It now fixes words everywhere except web and email addresses (and passwords), like Gboard.
+- Two words run together are split: "ofthe" becomes "of the", and "thebdog" becomes "the dog" when your thumb hits B, N, V, C or M instead of the space bar. "alot" becomes "a lot".
+- A name or abbreviation no longer wins over an ordinary word: "mich" becomes "much", not "Mich", and "nad" becomes "and", not "NAD". A name is still fixed when nothing ordinary is close ("kubota" to "Kubota").
+- Common misspellings are fixed ("definatly", "seperate", "nozzel", "augar", "sprayr"), and one vowel typed for another counts as a small slip.
+- Texting words are left alone: ur, prolly, omw, tonite, yea, ya, idk and more. Farm and shop words like auger, nozzle, sprayer, header, heifer and welder rank higher.
+- A typo autocorrect would have fixed is no longer remembered as one of your words. Before, a typo left alone twice (in an address box, say) stopped being corrected and could get learned into your dictionary.
+
 ## 1.53 · 2026-11-03
 - The keyboard's keys look softly raised instead of flat: a light top edge, a gentle shade down each key and a soft shadow under it, and a key sinks flat while you press it. Classic and Tinted have it. Prefer the old look? Pick Flat in the keyboard's menu or Settings › Keyboard.
 - New screenshots show up on the bar more dependably. Tokalot now recognises screenshots wherever the phone saves them (Pictures, DCIM, a Screenshots album, files named Screenshot), looks again a moment later for phones that save the file late, and keeps offering it for 5 minutes instead of 2.

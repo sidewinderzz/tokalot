@@ -202,7 +202,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val app = applicationContext
         Thread {
             val w = runCatching {
-                app.assets.open("keyboard/en_US.txt.gz").use { KeyboardWords.load(GZIPInputStream(it).bufferedReader()) }
+                app.assets.open("keyboard/en_US.txt.gz").use { main ->
+                    app.assets.open("keyboard/en_US_extra.txt").bufferedReader().use { extra -> KeyboardWords.load(GZIPInputStream(main).bufferedReader(), extra) }
+                }
             }.onFailure { android.util.Log.e("TokalotKeyboard", "word list didn't load", it) }.getOrNull()
             val h = runCatching {
                 File(app.filesDir, HISTORY_FILE).takeIf { it.exists() }?.readText()?.let { TypingHistory.parse(it) }
@@ -260,12 +262,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
         )) || (cls == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         predictive = cls == InputType.TYPE_CLASS_TEXT && !password
-        // Addresses, email addresses and boxes that ask for no suggestions still get them on the bar, but a
-        // word is never changed by itself there ("deere.com" must stay as typed).
+        // Web and email addresses still get suggestions on the bar, but a word is never changed by itself there
+        // ("deere.com" must stay as typed). Everywhere else autocorrect works, as on Gboard: many apps and web
+        // pages mark their chat or search box "no suggestions" (React Native and web autocomplete="off" do), and
+        // honouring that left autocorrect quietly off in much of what gets typed.
         plainBox = variation !in setOf(
             InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
-            InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_FILTER,
-        ) && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
+            InputType.TYPE_TEXT_VARIATION_URI,
+        )
         // Gboard swipes in any text box but a password one: a search box, an address bar, a chat app that
         // turns suggestions off.
         swipe = cls == InputType.TYPE_CLASS_TEXT && !password
@@ -631,13 +635,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val typed = word.toString()
         val prev = wordPrev
         var final = typed
-        if (correct && autocorrect && !glided && typed != keepAsTyped) {
-            ac?.suggest(typed, prev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction?.let { final = it }
-        }
+        // What autocorrect makes of it, even where it may not change it, so a typo left alone isn't learned.
+        val fix = if (glided) null else ac?.suggest(typed, prev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction
+        val chosen = typed == keepAsTyped
+        if (correct && autocorrect && !chosen && fix != null) final = fix
         ic.commitText(final + sep, 1)
         lastCorrection = if (final != typed) Correction(typed, final, sep, prev) else null
-        if (typed != keepAsTyped) keepAsTyped = null
-        remember(final, prev, kept = final == typed && !glided)
+        if (!chosen) keepAsTyped = null
+        remember(final, prev, kept = final == typed && !glided && (fix == null || chosen))
         resetWord()
     }
 
@@ -645,7 +650,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private fun commitWord() {
         if (word.isEmpty()) return
         currentInputConnection?.finishComposingText()
-        remember(word.toString(), wordPrev, kept = !glided)
+        val typed = word.toString()
+        val fix = if (glided) null else ac?.suggest(typed, wordPrev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction
+        remember(typed, wordPrev, kept = !glided && (fix == null || typed == keepAsTyped))
         resetWord()
         phantomSpace = false
     }
@@ -661,11 +668,24 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
      * The word was used. [kept]: typed by the user and left as typed, so a word the list doesn't know is
      * learned once it has been kept [KeyboardLearn.TIMES] times.
      */
+    /**
+     * Records a finished word in the typing history. [kept]: typed as it stands on purpose, or nothing better was
+     * near. A typo that autocorrect would have fixed (in an address box, or with autocorrect off) isn't [kept]
+     * and isn't recorded, so it never turns into a "word of yours" that is no longer corrected, nor gets
+     * learned into the dictionary that syncs.
+     */
     private fun remember(w: String, prev: String?, kept: Boolean) {
         if (!personal) return
         val h = history ?: return
-        h.used(w, prev)
         val list = words ?: return
+        if (w.contains(' ')) {
+            // A split ("of the"): each word in turn.
+            var p = prev
+            for (part in w.split(' ').filter { it.isNotEmpty() }) { h.used(part, p); p = part }
+            return
+        }
+        if (!kept && list.probOf(w) < 0) return
+        h.used(w, prev)
         if (kept && KeyboardLearn.worth(w, list) && h.count(w) >= KeyboardLearn.TIMES) learn(w)
     }
 
@@ -746,6 +766,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             val typed = word.toString()
             val prev = wordPrev
             ic.commitText("$s ", 1)
+            // Tapping what was typed on the bar is choosing it: it counts towards learning it.
+            if (s == typed) keepAsTyped = typed
             remember(s, prev, kept = s == typed)
             resetWord()
         } else {
