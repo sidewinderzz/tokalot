@@ -1677,8 +1677,9 @@ public sealed partial class MainWindow : Window
             var move = new MenuItem { Header = note.Home ? "Move to Notes" : "Move to Home" };
             move.Click += (_, _) =>
             {
-                try { Notes.SetHome(id, !note.Home); } catch { Toast("Couldn't move it"); return; }
-                Toast(note.Home ? "Moved to Notes" : "Moved to Home");
+                if (note.Home) { MoveToNotes(id); return; } // also turns Notes on, so it has somewhere to show
+                try { Notes.SetHome(id, true); } catch { Toast("Couldn't move it"); return; }
+                Toast("Moved to Home");
                 Render();
             };
             menu.Items.Add(move);
