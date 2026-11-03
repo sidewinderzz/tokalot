@@ -1,5 +1,11 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.18.0
+
+- Voice messages shared to Tokalot on your phone now show on Home with your dictations (click one to open it, with Summary and Timeline), instead of on the Notes page. Move to Notes files one there; Move to Home sends it back.
+- Any dictation on Home can be saved to Notes from its ⋯ menu.
+- Notes is now a tidy list of names: each note shows its title (or its first line) with the time, and one small line for voice length and tags. With AI cleanup on, untitled notes get a title in the background.
+
 ## New in 0.17.0
 
 - Reminders and checklists made on your phone's voice notes now pass through sync untouched, so they reach your other phones. They don't show here yet.

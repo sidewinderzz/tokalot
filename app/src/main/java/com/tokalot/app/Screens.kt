@@ -329,12 +329,43 @@ class StyleScreen(private val a: MainActivity) {
 
 // ------------------------------------------------------------------ Notes (beta)
 
+/**
+ * Shared voice notes still being transcribed, or that failed or were stopped, each with Remove and Try again. On Home
+ * for shares, and on Notes for ones shared before Home held them.
+ */
+internal fun MainActivity.waitingCard(waiting: List<NoteImport.Info>): View {
+    val c = card()
+    waiting.forEachIndexed { i, w ->
+        if (i > 0) c.addView(divider())
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(12), dp(10))
+        }
+        val going = NoteImport.isRunning(w.id)
+        val length = if (w.duration > 0) " · ${NoteMedia.clock(w.duration)}" else ""
+        box.addView(text("Shared voice note$length", 16f, bold = true))
+        box.addView(text(when {
+            going -> "Transcribing…"
+            w.status == "failed" -> "Couldn't transcribe it: ${w.error}"
+            else -> "Stopped before it finished."
+        }, 14f, C.SUB), lp().margins(this, t = 2))
+        if (!going) box.addView(row(
+            weightSpacer(),
+            pill("Remove") { confirm("Remove this voice note? Its recording is deleted.", "Remove") { NoteImport.deleteMedia(this, w.id); render() } },
+            spacer(wDp = 8),
+            pill("Try again", filled = true) { NoteImport.transcribe(this, w.id) },
+        ), lp().margins(this, t = 6))
+        c.addView(box)
+    }
+    return c
+}
+
 class NotesScreen(private val a: MainActivity) {
     fun build(): View = with(a) {
         val col = column()
         val all = Notes.all(this)
         // The how-to is for getting started; once there are notes, one line is enough (the empty state below has the rest).
-        intro(col, "Notes", if (all.isEmpty()) "One note per dictation, saved here and copied to the clipboard. Start one from the Voice note tile in Quick Settings, or the accessibility shortcut if you set it to notes. You can also share a voice message or text to Tokalot from WhatsApp or any app."
+        intro(col, "Notes", if (all.none { !it.home }) "One note per dictation, saved here and copied to the clipboard. Start one from the Voice note tile in Quick Settings, or the accessibility shortcut if you set it to notes. Voice messages and text you share to Tokalot land on Home; Move to Notes files them here."
             else "One note per dictation, also copied to the clipboard.")
         // The beta asks whether it's worth keeping: a short public form on GitHub, nothing sent from here.
         // Answering or closing it hides it for good.
@@ -354,35 +385,11 @@ class NotesScreen(private val a: MainActivity) {
             addView(row(pill("Useful", filled = true) { open("useful") }, spacer(wDp = 8), pill("Not for me") { open("not for me") }))
         }, lp().margins(this, b = 16))
         NoteImport.prune(this, all.map { it.id }.toSet())
-        val notes = all.filter { it.id != pendingDelete } // deleted a moment ago, while Undo shows
-        // Shared voice notes still being transcribed, or that failed, come first.
-        val waiting = NoteImport.waiting(this)
-        if (waiting.isNotEmpty()) {
-            val c = card()
-            waiting.forEachIndexed { i, w ->
-                if (i > 0) c.addView(divider())
-                val box = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(20), dp(14), dp(12), dp(10))
-                }
-                val going = NoteImport.isRunning(w.id)
-                val length = if (w.duration > 0) " · ${NoteMedia.clock(w.duration)}" else ""
-                box.addView(text("Shared voice note$length", 16f, bold = true))
-                box.addView(text(when {
-                    going -> "Transcribing…"
-                    w.status == "failed" -> "Couldn't transcribe it: ${w.error}"
-                    else -> "Stopped before it finished."
-                }, 14f, C.SUB), lp().margins(this, t = 2))
-                if (!going) box.addView(row(
-                    weightSpacer(),
-                    pill("Remove") { confirm("Remove this voice note? Its recording is deleted.", "Remove") { NoteImport.deleteMedia(this, w.id); render() } },
-                    spacer(wDp = 8),
-                    pill("Try again", filled = true) { NoteImport.transcribe(this, w.id) },
-                ), lp().margins(this, t = 6))
-                c.addView(box)
-            }
-            col.addView(c, lp().margins(this, b = 8))
-        }
+        // Kept on Home (shared in to read or play back) aren't filed here; deleted a moment ago, while Undo shows, neither.
+        val notes = all.filter { !it.home && it.id != pendingDelete }
+        // Voice notes shared before Home held them, still being transcribed or failed, come first.
+        val waiting = NoteImport.waiting(this).filter { !it.home }
+        if (waiting.isNotEmpty()) col.addView(waitingCard(waiting), lp().margins(this, b = 8))
         if (notes.isEmpty() && waiting.isEmpty()) {
             col.addView(card(22).apply {
                 addView(text("No notes yet. Swipe down twice from the top of the screen, tap Tokalot Voice note and talk. Tap the button when you're done. Or share a voice message from WhatsApp to Tokalot.", 16f, C.SUB))
@@ -392,6 +399,7 @@ class NotesScreen(private val a: MainActivity) {
         // Search, tag chips, the sort menu and dates sit above the list; typing only redraws the list under them.
         val media = notes.associate { it.id to NoteImport.info(this, it.id) }
         val items = notes.map { n -> NoteFind.Item(n.id, n.time, n.text, media[n.id]?.title, n.tags, n.plan) }
+        titleSome(items)
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(searchField(), lp().margins(this, b = 4))
         col.addView(filterRow(Notes.allTags(notes)))
@@ -522,13 +530,16 @@ class NotesScreen(private val a: MainActivity) {
         }
     }
 
+    /**
+     * One note in the list: its name as the heading (its title, or its first line when it has none) with the time at the
+     * end, and one quiet line under it (voice note and length, reminder and checklist, tags). While searching, the bit
+     * that matched shows under the name instead.
+     */
     private fun noteRow(n: NoteFind.Item, media: NoteImport.Info?, words: List<String>): View = with(a) {
         val voice = media?.audio != null
-        val time = if (words.isNotEmpty() || notesFilter.sort == NoteFind.Sort.TITLE)
-            java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
+        val time = if (words.isNotEmpty() || notesFilter.sort != NoteFind.Sort.NEWEST && notesFilter.sort != NoteFind.Sort.OLDEST)
+            java.text.SimpleDateFormat("MMM d", java.util.Locale.US).format(java.util.Date(n.time))
         else java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
-        val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}${media.source?.let { " · from $it" } ?: ""}" else time
-        val preview = n.text.trim().replace(Regex("\\s+"), " ")
         // Its reminder and checklist (beta), in a few words: "reminder Tomorrow 6:00 AM · 2 of 5 done".
         val planLine = n.plan?.let { p ->
             listOfNotNull(
@@ -536,6 +547,12 @@ class NotesScreen(private val a: MainActivity) {
                 if (p.items.isNotEmpty()) "${p.items.count { it.done }} of ${p.items.size} done" else null,
             ).joinToString(" · ").ifEmpty { null }
         }
+        val meta = listOfNotNull(
+            if (voice) "voice note${if (media!!.duration > 0) " " + NoteMedia.clock(media.duration) else ""}" else null,
+            media?.source?.let { "from $it" },
+            planLine,
+            n.tags.takeIf { it.isNotEmpty() }?.joinToString(", "),
+        ).joinToString(" · ")
         fun marked(s: String): CharSequence {
             if (words.isEmpty()) return s
             val sp = android.text.SpannableString(s)
@@ -546,33 +563,61 @@ class NotesScreen(private val a: MainActivity) {
             }
             return sp
         }
-        // A titled note leads with its title, then its first line (or, while searching, the bit that matched).
-        val title = n.title
+        val name = noteName(n.title, n.text)
         val snip = if (words.isNotEmpty()) NoteFind.snippet(n.text, words)?.text else null
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(14), dp(16), dp(14))
+            setPadding(dp(20), dp(12), dp(16), dp(12))
             minimumHeight = dp(TOUCH_DP)
+            gravity = Gravity.CENTER_VERTICAL
             background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
                 android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
-            if (title != null) {
-                addView(text(marked(title), 16f, bold = true).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
-                addView(text(marked(snip ?: n.text.trim().lineSequence().first().trim()), 15f, C.SUB).apply {
-                    maxLines = if (snip != null) 2 else 1; ellipsize = android.text.TextUtils.TruncateAt.END
-                }, lp().margins(this@with, t = 2))
-            } else addView(text(marked(snip ?: preview), 16f).apply { maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END })
-            if (n.tags.isNotEmpty()) addView(FlowRow(this@with, dp(4)).apply {
-                n.tags.forEach { addView(tagChip(it)) }
-            }, lp().margins(this@with, t = 6))
             addView(row(
-                if (voice) icon(R.drawable.ic_play, 14, C.SUB).apply { setPadding(0, 0, dp(4), 0) } else spacer(wDp = 0),
-                text(meta + (planLine?.let { " · $it" } ?: ""), 13f, C.SUB),
-            ).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this@with, t = 4))
-            contentDescription = "${title?.let { "$it. " } ?: ""}$meta. ${if (n.tags.isNotEmpty()) "Tags: ${n.tags.joinToString()}. " else ""}${snip ?: preview}"
+                text(marked(name), 16f, bold = n.title != null).apply {
+                    maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                },
+                text(time, 13f, C.SUB).apply { setPadding(dp(10), 0, 0, 0) },
+            ).apply { gravity = Gravity.CENTER_VERTICAL })
+            if (snip != null) addView(text(marked(snip), 14f, C.SUB).apply {
+                maxLines = 2; ellipsize = android.text.TextUtils.TruncateAt.END
+            }, lp().margins(this@with, t = 2))
+            if (meta.isNotEmpty()) addView(row(
+                if (voice) icon(R.drawable.ic_play, 13, C.SUB).apply { setPadding(0, 0, dp(4), 0) } else spacer(wDp = 0),
+                text(meta, 13f, C.SUB).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
+            ).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this@with, t = 2))
+            contentDescription = "$name. $time. ${if (meta.isNotEmpty()) "$meta. " else ""}${snip ?: ""}"
             setOnClickListener { openNote(n.id, notesFilter.query) }
         }
     }
+
+    /**
+     * Gives the untitled notes in the list a title from the AI in the background, a few at a time, so the list reads as
+     * names. Only with AI cleanup on (the notes' words already go to it), and each note is only tried once a run.
+     */
+    private fun titleSome(items: List<NoteFind.Item>) {
+        val prefs = a.prefs
+        if (prefs.cleanup == CleanupChoice.OFF || !NoteImport.canAsk(prefs)) return
+        val due = items.asSequence().filter { it.title == null && it.text.trim().length >= 40 }.filter { titleTried.add(it.id) }.take(TITLES_AT_ONCE).toList()
+        if (due.isEmpty()) return
+        val app = a.applicationContext
+        Thread {
+            var any = false
+            for (n in due) if (NoteImport.makeTitle(app, n.id, n.text) != null) any = true
+            if (any) a.runOnUiThread { if (!a.isDestroyed) a.refreshNotes() }
+        }.start()
+    }
+
+    companion object {
+        private const val TITLES_AT_ONCE = 6
+        /** Notes already sent for a title while the app runs, so a failure isn't asked again on every redraw. */
+        private val titleTried = java.util.Collections.synchronizedSet(HashSet<Long>())
+    }
 }
+
+/** A note's name in a list: its title, or else its first line (cut at 80 characters). */
+fun noteName(title: String?, text: String): String = title ?: text.trim().lineSequence().firstOrNull()?.trim().orEmpty()
+    .let { if (it.length > 80) it.take(79).trimEnd() + "…" else it }.ifEmpty { "Empty note" }
 
 // ------------------------------------------------------------------ Word stats
 

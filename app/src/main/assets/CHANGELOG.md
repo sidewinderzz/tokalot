@@ -6,6 +6,13 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.52 · 2026-11-03
+- Voice messages and text you share to Tokalot now land on Home with your dictations instead of on the Notes page, since you often share them just to read or listen. Tap one to open it big, with the player, Summary and Timeline as before.
+- Move to Notes (on Home, or in the ⋮ menu of an opened one) files a shared message in Notes when you want to keep it. Move to Home sends it back.
+- Any dictation on Home can be saved to Notes from its ⋮ menu. The dictation stays on Home too.
+- Notes is now a tidy list of names: each note shows its title (or its first line) with the time, and one small line for voice length, reminders and tags. With AI cleanup on, untitled notes get a title in the background.
+- Where each shared message lives (Home or Notes) syncs to your computers.
+
 ## 1.51 · 2026-11-03
 - Reminders and checklists on voice notes (beta). With the mic button, start with "Remind me at 7:30 to lock the shop" or "Make a list for the trip: chargers, cooler, dog food, at 6 load the dogs". Lines with a time ring then; the rest just wait to be ticked. "Remind me" only counts when you say a time, so a text that starts "Remind me what time…" still goes to your friend, and the bubble lets you type it there instead.
 - With the Voice note tile there's nothing to remember: just talk. When AI cleanup is on, the AI also spots a reminder or a list in what you said and sets it up.
