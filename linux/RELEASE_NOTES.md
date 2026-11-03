@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.17.0
+
+- Reminders and checklists made on your phone's voice notes now pass through sync untouched, so they reach your other phones. They don't show here yet.
+
 ## New in 0.16.1
 
 - Long dictations no longer lose their last few seconds when you finish softly. The end used to be dropped if it was quieter than the rest, even though the mic had picked it up.

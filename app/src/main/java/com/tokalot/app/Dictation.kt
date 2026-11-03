@@ -51,6 +51,10 @@ class Dictation(context: Context) {
     class Outcome(
         val text: String, val warning: String?, val entryId: Long? = null, val plain: String? = null,
         val fitted: Boolean = false, val note: Boolean = false,
+        /** A note that asked for a reminder or a checklist ("Remind me at 6…", "Make a list…"). */
+        val plan: Plans.Kind? = null,
+        /** For [plan]: everything as heard, start phrase included, for typing it into the text box after all. */
+        val said: String? = null,
     )
 
     companion object {
@@ -67,7 +71,13 @@ class Dictation(context: Context) {
     }
 
     /** One process() call: what cancel() and the deadline act on. */
-    private inner class Job(val live: LiveStt?, val spot: TextTools.Spot?, val onDevice: Boolean, val onDone: (Outcome?, String?) -> Unit) {
+    private inner class Job(
+        val live: LiveStt?, val spot: TextTools.Spot?, val onDevice: Boolean, val onDone: (Outcome?, String?) -> Unit,
+        /** Started from the Voice note tile or shortcut: everything said is a note. */
+        val noteMode: Boolean = false,
+        /** The caller makes notes with reminders and checklists (the mic button does; the keyboard doesn't yet). */
+        val plans: Boolean = false,
+    ) {
         val call = Call()
         /** CANCELLED or TIMED_OUT once the job was stopped from outside. */
         @Volatile var halted: String? = null
@@ -157,11 +167,11 @@ class Dictation(context: Context) {
      */
     fun process(
         samples: FloatArray, appPkg: String?, sparse: Boolean = false, retry: Entry? = null, live: LiveStt? = null,
-        spot: TextTools.Spot? = null, onDevice: Boolean = false, onDone: (Outcome?, String?) -> Unit,
+        spot: TextTools.Spot? = null, onDevice: Boolean = false, noteMode: Boolean = false, plans: Boolean = false, onDone: (Outcome?, String?) -> Unit,
     ) {
         main.removeCallbacks(unload)
         stage = 0
-        val job = Job(live, spot, onDevice, onDone)
+        val job = Job(live, spot, onDevice, onDone, noteMode, plans)
         current = job
         val audioMs = samples.size * 1000L / Recorder.SAMPLE_RATE
         main.postDelayed(job.deadline, Timeouts.deadlineMs(audioMs))
@@ -304,7 +314,10 @@ class Dictation(context: Context) {
         val heard = TextTools.stripNoise(raw)
         if (heard.isBlank() || (sparse && TextTools.isPhantom(heard)) || TextTools.isEcho(heard, prefs.words, sparse)) return Outcome("", warnings.firstOrNull())
         // Voice notes (beta): "Note this…" at the very start makes it a note, written in the plain style.
-        val asNote = if (prefs.notesBeta) TextTools.noteTrigger(heard, prefs.notePhrases.split(',')) else null
+        var asNote = if (prefs.notesBeta) TextTools.noteTrigger(heard, prefs.notePhrases.split(',')) else null
+        // Reminders and checklists (beta): "Remind me at 6 to…" or "Make a list…" at the start is a note too.
+        val planned = if (prefs.notesBeta && job.plans && asNote == null) TextTools.planTrigger(heard, java.time.ZonedDateTime.now(), anyReminder = job.noteMode) else null
+        if (planned != null) asNote = planned.second
         var base = asNote ?: heard
         if (base.isBlank()) return Outcome("", warnings.firstOrNull()) // only the note phrase was said
         if (asNote != null) { category = AppCategory.OTHER; appLabel = null }
@@ -400,7 +413,8 @@ class Dictation(context: Context) {
         Usage.recordDictation(app, TextTools.wordCount(finalText), usedLocal)
         Usage.recordEdits(app, AppContext.fillerCount(base), if (cleaned) AppContext.correctionCount(base) else 0)
         // A command keeps its letters as they are (fitted: nothing for the sentence fitting to change).
-        return Outcome(finalText, warnings.firstOrNull(), id, plain, fitted = shell || (cleaned && spot?.mid == true), note = asNote != null)
+        return Outcome(finalText, warnings.firstOrNull(), id, plain, fitted = shell || (cleaned && spot?.mid == true), note = asNote != null, plan = planned?.first,
+            said = if (planned != null) heard else null)
     }
 
     /**

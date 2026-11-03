@@ -82,6 +82,23 @@ object TextTools {
         return null
     }
 
+    /** Start phrases for a reminder and for a checklist on a voice note (beta). */
+    const val REMINDER_PHRASES = "remind me, set a reminder, new reminder, reminder"
+    const val LIST_PHRASES = "make a list, make a checklist, start a list, new list, new checklist, checklist"
+
+    /**
+     * "Remind me at 7:30 to lock the shop" → a reminder, "Make a list for the trip…" → a checklist, with the phrase
+     * taken off. Only the very start counts. A reminder also needs a time in it, unless [anyReminder] (said into the
+     * Voice note tile, where nothing else is meant): "Remind me what time the game starts?" in a text to a friend
+     * stays a text.
+     */
+    fun planTrigger(text: String, now: java.time.ZonedDateTime, anyReminder: Boolean = false): Pair<Plans.Kind, String>? {
+        noteTrigger(text, LIST_PHRASES.split(','))?.let { return Plans.Kind.LIST to it }
+        val rest = noteTrigger(text, REMINDER_PHRASES.split(',')) ?: return null
+        if (!anyReminder && SpokenTime.find(rest, now) == null) return null
+        return Plans.Kind.REMINDER to rest
+    }
+
     // ---------- fitting a dictation into the text around the cursor ----------
 
     /**

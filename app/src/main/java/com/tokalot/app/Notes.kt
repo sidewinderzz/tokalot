@@ -13,8 +13,11 @@ import java.io.File
  * the other devices through the sync file when one is set up.
  */
 object Notes {
-    /** [tags]: the user's own labels, as [cleanTags] leaves them (sorted, no repeats). */
-    class Note(val id: Long, val time: Long, val text: String, val tags: List<String> = emptyList())
+    /**
+     * [tags]: the user's own labels, as [cleanTags] leaves them (sorted, no repeats). [plan]: its reminder and checklist
+     * (beta), null for none.
+     */
+    class Note(val id: Long, val time: Long, val text: String, val tags: List<String> = emptyList(), val plan: NotePlan? = null)
 
     const val FILE = "notes.json"
     private val main by lazy { Handler(Looper.getMainLooper()) }
@@ -31,7 +34,8 @@ object Notes {
             val o = arr.getJSONObject(it)
             val t = o.optJSONArray("tags")
             Note(o.getLong("id"), o.getLong("time"), o.getString("text"),
-                if (t == null) emptyList() else cleanTags(List(t.length()) { i -> t.optString(i) }))
+                if (t == null) emptyList() else cleanTags(List(t.length()) { i -> t.optString(i) }),
+                NotePlan.parse(o.optJSONObject("plan")))
         }
     }
 
@@ -40,6 +44,7 @@ object Notes {
         list.forEach {
             val o = JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)
             if (it.tags.isNotEmpty()) o.put("tags", JSONArray(it.tags))
+            if (it.plan != null && !it.plan.isEmpty) o.put("plan", it.plan.toJson())
             arr.put(o)
         }
         return arr.toString()
@@ -71,8 +76,8 @@ object Notes {
 
     /** Saves a new note and returns its id. A shared voice note passes the id its audio is saved under. */
     @Synchronized
-    fun add(ctx: Context, text: String, id: Long = System.currentTimeMillis()): Long {
-        save(ctx, listOf(Note(id, id, text)) + forChange(ctx))
+    fun add(ctx: Context, text: String, id: Long = System.currentTimeMillis(), plan: NotePlan? = null): Long {
+        save(ctx, listOf(Note(id, id, text, plan = plan?.takeIf { !it.isEmpty })) + forChange(ctx))
         Sync.changed(ctx)
         return id
     }
@@ -88,8 +93,24 @@ object Notes {
     @Synchronized
     fun setTags(ctx: Context, id: Long, tags: List<String>) {
         val clean = cleanTags(tags)
-        save(ctx, forChange(ctx).map { if (it.id == id) Note(it.id, it.time, it.text, clean) else it })
+        save(ctx, forChange(ctx).map { if (it.id == id) Note(it.id, it.time, it.text, clean, it.plan) else it })
         Sync.changed(ctx)
+    }
+
+    /**
+     * Changes note [id]'s reminder and checklist with [change] (handed null when it has none; returning null or an empty
+     * plan removes it). [text], when given, replaces the note's text too (a list made by the AI gets its heading).
+     * Returns the plan saved, or null when the note is gone. Syncs, and sets the phone's alarms again.
+     */
+    @Synchronized
+    fun updatePlan(ctx: Context, id: Long, text: String? = null, change: (NotePlan?) -> NotePlan?): NotePlan? {
+        val all = forChange(ctx)
+        val note = all.firstOrNull { it.id == id } ?: return null
+        val plan = change(note.plan)?.takeIf { !it.isEmpty }
+        if (plan == note.plan && (text == null || text == note.text)) return plan
+        save(ctx, all.map { if (it.id == id) Note(it.id, it.time, text ?: it.text, it.tags, plan) else it })
+        Sync.changed(ctx)
+        return plan
     }
 
     /** Every tag used on any note, A to Z. */
@@ -104,7 +125,7 @@ object Notes {
     @Synchronized
     private fun texts(ctx: Context): List<SyncNote> {
         val f = file(ctx)
-        return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text, tags = it.tags) } else emptyList()
+        return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text, tags = it.tags, plan = it.plan?.line() ?: "") } else emptyList()
     }
 
     /**
@@ -129,7 +150,7 @@ object Notes {
     @Synchronized
     private fun store(ctx: Context, before: List<SyncNote>, after: List<SyncNote>): Boolean {
         if (texts(ctx) != before.map { it.copy(title = null) }) return false
-        save(ctx, after.map { Note(it.id, it.time, it.text, it.tags.orEmpty()) })
+        save(ctx, after.map { Note(it.id, it.time, it.text, it.tags.orEmpty(), NotePlan.parse(it.plan)) })
         return true
     }
 
@@ -150,6 +171,8 @@ object Notes {
         val tmp = File(f.parentFile, "$FILE.tmp")
         tmp.writeText(toJson(list))
         if (!tmp.renameTo(f)) { f.writeText(tmp.readText()); tmp.delete() }
+        // Every change to the notes can change what rings next.
+        runCatching { Reminders.schedule(ctx, list) }
         main.post { onChange?.invoke() }
     }
 }

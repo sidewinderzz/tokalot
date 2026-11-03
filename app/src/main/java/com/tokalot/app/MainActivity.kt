@@ -279,6 +279,17 @@ class MainActivity : Activity() {
             openNote = null
             return true
         }
+        // From a reminder: that note, on its own page.
+        val noteId = intent?.getLongExtra(EXTRA_NOTE, 0L) ?: 0L
+        if (noteId != 0L) {
+            tab = Tab.NOTES
+            inSettings = false
+            inStats = false
+            openNote = noteId
+            openNoteFind = ""
+            intent?.removeExtra(EXTRA_NOTE)
+            return true
+        }
         val t = intent?.getStringExtra(EXTRA_TAB)?.let { name -> Tab.values().firstOrNull { it.name == name } } ?: return false
         tab = t
         inSettings = false
@@ -1143,6 +1154,7 @@ class MainActivity : Activity() {
         const val ACTION_INSTALL_STATUS = "com.tokalot.app.INSTALL_STATUS"
         /** Which page to open (a [Tab] name). */
         const val EXTRA_TAB = "com.tokalot.app.TAB"
+        const val EXTRA_NOTE = "com.tokalot.app.NOTE"
         /** Open Settings at the Keyboard part. */
         const val EXTRA_SETTINGS = "com.tokalot.app.SETTINGS"
         private const val UNDO_TAG = "undo-delete"

@@ -27,6 +27,10 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Lets the periodic "is the mic button still running?" check (ServiceGuard.GuardJob) survive a restart of the phone. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Reminders on voice notes ring at their exact time, like the clock app's alarms. Android 13 and newer grant
+         USE_EXACT_ALARM at install (Tokalot is installed from GitHub, not the Play Store); 12 uses SCHEDULE_EXACT_ALARM. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <!-- Optional, never granted by installing: only if you run the adb command in Settings › Setup. Then, when an
          update leaves the mic button's accessibility service off, Tokalot switches it off and on again itself. -->
     <uses-permission
@@ -97,6 +101,20 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Reminders on voice notes: rings what's due, Done and Snooze on the notification, and sets the next alarm
+             again after a restart, a clock or time zone change, or an update (see Reminders). -->
+        <receiver
+            android:name=".Reminders$Receiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 

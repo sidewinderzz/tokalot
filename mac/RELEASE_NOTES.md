@@ -2,6 +2,10 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.13.0
+
+- Reminders and checklists made on your phone's voice notes now pass through sync untouched, so they reach your other phones. They don't show here yet.
+
 ## New in 0.12.1
 
 - Long dictations no longer lose their last few seconds when you finish softly. The end used to be dropped if it was quieter than the rest, even though the mic had picked it up.

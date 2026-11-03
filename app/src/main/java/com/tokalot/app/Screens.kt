@@ -391,7 +391,7 @@ class NotesScreen(private val a: MainActivity) {
         }
         // Search, tag chips, the sort menu and dates sit above the list; typing only redraws the list under them.
         val media = notes.associate { it.id to NoteImport.info(this, it.id) }
-        val items = notes.map { n -> NoteFind.Item(n.id, n.time, n.text, media[n.id]?.title, n.tags) }
+        val items = notes.map { n -> NoteFind.Item(n.id, n.time, n.text, media[n.id]?.title, n.tags, n.plan) }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(searchField(), lp().margins(this, b = 4))
         col.addView(filterRow(Notes.allTags(notes)))
@@ -529,6 +529,13 @@ class NotesScreen(private val a: MainActivity) {
         else java.text.SimpleDateFormat("h:mm a", java.util.Locale.US).format(java.util.Date(n.time))
         val meta = if (voice) "$time · voice note${if (media!!.duration > 0) " · " + NoteMedia.clock(media.duration) else ""}${media.source?.let { " · from $it" } ?: ""}" else time
         val preview = n.text.trim().replace(Regex("\\s+"), " ")
+        // Its reminder and checklist (beta), in a few words: "reminder Tomorrow 6:00 AM · 2 of 5 done".
+        val planLine = n.plan?.let { p ->
+            listOfNotNull(
+                if (p.remind != 0L && !p.done) "reminder " + Plans.label(p.remind, java.time.ZonedDateTime.now()) else null,
+                if (p.items.isNotEmpty()) "${p.items.count { it.done }} of ${p.items.size} done" else null,
+            ).joinToString(" · ").ifEmpty { null }
+        }
         fun marked(s: String): CharSequence {
             if (words.isEmpty()) return s
             val sp = android.text.SpannableString(s)
@@ -559,7 +566,7 @@ class NotesScreen(private val a: MainActivity) {
             }, lp().margins(this@with, t = 6))
             addView(row(
                 if (voice) icon(R.drawable.ic_play, 14, C.SUB).apply { setPadding(0, 0, dp(4), 0) } else spacer(wDp = 0),
-                text(meta, 13f, C.SUB),
+                text(meta + (planLine?.let { " · $it" } ?: ""), 13f, C.SUB),
             ).apply { gravity = Gravity.CENTER_VERTICAL }, lp().margins(this@with, t = 4))
             contentDescription = "${title?.let { "$it. " } ?: ""}$meta. ${if (n.tags.isNotEmpty()) "Tags: ${n.tags.joinToString()}. " else ""}${snip ?: preview}"
             setOnClickListener { openNote(n.id, notesFilter.query) }

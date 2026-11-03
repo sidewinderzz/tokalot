@@ -14,8 +14,13 @@ import org.json.JSONTokener
  * One voice note as the sync file holds it. The id is the time it was made, so two devices never pick the same one.
  * Title: null when the note has none, "" when it was cleared on purpose (so no device makes a new one).
  * Tags: null when the side doesn't know tags (a file written by a version from before them), so it never clears any.
+ * Plan: the note's reminder and checklist as one JSON string (see [NotePlan]), "" for none, null when the side doesn't
+ * know plans. The desktop apps carry it without reading it.
  */
-data class SyncNote(val id: Long, val time: Long, val text: String, val title: String? = null, val tags: List<String>? = null)
+data class SyncNote(
+    val id: Long, val time: Long, val text: String, val title: String? = null, val tags: List<String>? = null,
+    val plan: String? = null,
+)
 
 /** One month of one device's counts, as the sync file holds them. */
 data class UsageMonth(
@@ -113,10 +118,11 @@ object SyncFormat {
     /**
      * What this version puts in the file, for telling an older Tokalot it is missing out. 1: dictionary,
      * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history. 3: note tags.
+     * 4: note reminders and checklists ("plan").
      * Raise it whenever something new goes in the file, on every platform at once. [FORMAT] only changes for a
      * change an older version would get wrong, since that one locks older versions out of the file.
      */
-    const val LEVEL = 3
+    const val LEVEL = 4
 
     val CATEGORIES = listOf("MESSAGING", "EMAIL", "AI_CODE", "OTHER")
     val STYLES = listOf("FORMAL", "CASUAL", "VERY_CASUAL")
@@ -168,7 +174,13 @@ object SyncFormat {
                 val id = (n.opt("id") as? Number)?.toLong() ?: return@mapNotNull null
                 val t = n.opt("text") as? String ?: return@mapNotNull null
                 val tags = n.optJSONArray("tags")?.let { a -> SyncMerge.cleanTags((0 until a.length()).mapNotNull { j -> a.opt(j) as? String }) }
-                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t, n.opt("title") as? String, tags)
+                // A plan object, or "" for none; a file from before plans has no "plan" at all (null: unknown).
+                val plan = when (val p = n.opt("plan")) {
+                    is JSONObject -> NotePlan.canon(p.toString())
+                    is String -> NotePlan.canon(p)
+                    else -> null
+                }
+                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t, n.opt("title") as? String, tags, plan)
             }
         }
         val settings = o.optJSONObject("settings")?.let { s ->
@@ -287,6 +299,7 @@ object SyncFormat {
                 arr.put(JSONObject().put("id", n.id).put("time", n.time).put("text", n.text).also { o ->
                     n.title?.let { o.put("title", it) }
                     n.tags?.let { o.put("tags", JSONArray(it)) }
+                    n.plan?.let { o.put("plan", if (it.isEmpty()) "" else JSONObject(it)) }
                 })
             }
         })
@@ -450,7 +463,7 @@ object SyncMerge {
             when {
                 here != null && there != null -> {
                     val title = if (here.title != was?.title) here.title ?: there.title else there.title ?: here.title
-                    out.add((if (was != null && here.text == was.text) there else here).copy(title = title, tags = tags(here.tags, there.tags, was?.tags)))
+                    out.add((if (was != null && here.text == was.text) there else here).copy(title = title, tags = tags(here.tags, there.tags, was?.tags), plan = plan(here.plan, there.plan, was?.plan)))
                 }
                 here != null -> if (was == null) out.add(here) // else: deleted elsewhere
                 there != null -> if (was == null) out.add(there) // else: deleted here
@@ -467,6 +480,18 @@ object SyncMerge {
         there == null -> here
         here == null -> there
         was == null -> if (there.isEmpty()) here else if (here.isEmpty()) there else cleanTags(here + there)
+        here != was -> here
+        else -> there
+    }
+
+    /**
+     * One note's plan (reminder and checklist), as a whole. Changed here since the last sync: this side's. Otherwise the
+     * other side's, unless it doesn't know plans. With none in the base (the first sync after updating), one wins over "".
+     */
+    private fun plan(here: String?, there: String?, was: String?): String? = when {
+        there == null -> here
+        here == null -> there
+        was == null -> if (there.isEmpty()) here else there
         here != was -> here
         else -> there
     }

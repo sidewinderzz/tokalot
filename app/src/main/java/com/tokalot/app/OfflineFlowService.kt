@@ -944,18 +944,24 @@ class OfflineFlowService : AccessibilityService() {
      * started with a note phrase while a text box was open, so a tap types it there instead (and drops the note),
      * in case the phrase was just how the sentence began.
      */
-    private fun saveNote(text: String, offerTyping: Boolean = false) {
-        val id = runCatching { Notes.add(this, text) }.getOrNull()
+    private fun saveNote(text: String, offerTyping: Boolean = false, kind: Plans.Kind? = null, askAi: Boolean = false, said: String? = null) {
+        // A reminder or a list is worked out on the phone at once, so its alarm is set straight away; the AI then tidies
+        // it in the background (see Reminders.refine).
+        val made = kind?.let { Plans.local(it, text, java.time.ZonedDateTime.now()) }
+        val id = runCatching { Notes.add(this, made?.text?.ifEmpty { null } ?: text, plan = made?.plan) }.getOrNull()
         copyToClipboard(text)
+        if (id != null && askAi) Reminders.refine(this, id, text, kind, made) { label -> runCatching { toast(label) } }
+        val saved = made?.let { Reminders.savedLabel(it) } ?: "Saved to Notes"
         if (offerTyping) {
-            showBubble("Saved to Notes · tap to type it here instead", 6000) {
+            showBubble("$saved · tap to type it here instead", 6000) {
                 id?.let { runCatching { Notes.delete(this, it) } }
-                deliver(text)
+                // "Remind me at 6 to call you" was meant for the text box: typed with its start phrase, as said.
+                deliver(said ?: text)
             }
             return
         }
         if (id == null) { toast("Couldn't save to Notes · copied"); return }
-        showBubble("Saved to Notes · copied") {
+        showBubble("$saved · copied") {
             startActivity(
                 Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, MainActivity.Tab.NOTES.name)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -1346,7 +1352,8 @@ class OfflineFlowService : AccessibilityService() {
         val seconds = samples.size / Recorder.SAMPLE_RATE.toFloat()
         startRing(if ((early?.pieceCount ?: 0) > 0) minOf(seconds, 10f) else seconds, early?.lastRate ?: 0f)
         val spot = if (mode == Manual.NOTE) null else cursorSpot()
-        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = spot, onDevice = local) { outcome, err ->
+        dictation.process(samples, targetApp, sparse = !heard, live = early, spot = spot, onDevice = local,
+            noteMode = mode == Manual.NOTE, plans = true) { outcome, err ->
             setState(State.IDLE)
             when {
                 // Nothing is typed; the recording is in the app's history with a Transcribe button.
@@ -1360,9 +1367,12 @@ class OfflineFlowService : AccessibilityService() {
                 }
                 else -> {
                     when {
-                        mode == Manual.NOTE -> saveNote(outcome.text)
-                        // Said "Note this…": a note, with the choice to type it after all if a text box was open.
-                        outcome.note -> saveNote(outcome.text, offerTyping = focusedEditable()?.let { mayType(it) } == true)
+                        // From the Voice note tile: the AI (when cleanup is on) also sees if it's a reminder or a list.
+                        mode == Manual.NOTE -> saveNote(outcome.text, kind = outcome.plan, askAi = true)
+                        // Said "Note this…" (or "Remind me at…", "Make a list…"): a note, with the choice to type it
+                        // after all if a text box was open.
+                        outcome.note -> saveNote(outcome.text, offerTyping = focusedEditable()?.let { mayType(it) } == true,
+                            kind = outcome.plan, askAi = outcome.plan != null, said = outcome.said)
                         else -> deliver(outcome.text, outcome.plain, outcome.entryId, outcome.fitted)
                     }
                     Haptics.play(this, Haptics.Kind.DONE)
