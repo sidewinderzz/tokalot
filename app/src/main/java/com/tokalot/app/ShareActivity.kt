@@ -8,8 +8,8 @@ import android.widget.Toast
 
 /**
  * The "Tokalot" entry in Android's share sheet. A shared voice note (or any recording) is copied in and
- * transcribed into a voice note; shared text is saved as a note. Then the app opens on Notes. Sharing turns
- * voice notes on if they were off. Shows nothing of its own.
+ * transcribed; shared text is saved as it is. Both land on Home with the dictations (Move to Notes files one), and
+ * the app opens there. Sharing turns voice notes on if they were off. Shows nothing of its own.
  */
 class ShareActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,7 +23,7 @@ class ShareActivity : Activity() {
                     Toast.makeText(this, "Nothing Tokalot could save was shared", Toast.LENGTH_LONG).show()
                 } else {
                     startActivity(Intent(this, MainActivity::class.java)
-                        .putExtra(MainActivity.EXTRA_TAB, MainActivity.Tab.NOTES.name)
+                        .putExtra(MainActivity.EXTRA_TAB, MainActivity.Tab.HOME.name)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
                 }
                 finish()

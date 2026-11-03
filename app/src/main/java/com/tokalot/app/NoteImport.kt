@@ -19,7 +19,8 @@ import java.util.concurrent.Executors
  *
  * Each such note has a folder, notes-media/<note id>/, holding info.json and, for a voice note, audio.<ext> as it
  * was shared. A voice note gets its folder first and becomes a note once it's transcribed, so one that fails stays
- * on the Notes page with a Try again button. Only the note's text syncs; the folder stays on this phone (and in backups).
+ * on Home with a Try again button. Shared things land on Home with the dictations (often they're only shared to read or
+ * play back); Move to Notes files one. Only the note's text syncs; the folder stays on this phone (and in backups).
  */
 object NoteImport {
     const val DIR = "notes-media"
@@ -34,6 +35,8 @@ object NoteImport {
         val error get() = o.optString("error")
         val audio: String? get() = o.optString("audio").takeIf { it.isNotEmpty() }
         val duration get() = o.optDouble("duration", 0.0)
+        /** Shared in, so it becomes a note kept on Home. Older shares, made before Home held them, say false. */
+        val home get() = o.optBoolean("home", false)
         /** The app it was shared from ("WhatsApp"), if known. */
         val source: String? get() = o.optString("source").takeIf { it.isNotEmpty() }
         /** Where the recording has no voice, once it's been listened for (see [findSilence]). */
@@ -98,9 +101,9 @@ object NoteImport {
 
     // ---------- bringing things in ----------
 
-    /** Shared text is saved as a note as it is. */
+    /** Shared text is saved as it is, as a note kept on Home. */
     fun addText(ctx: Context, text: String) {
-        Notes.add(ctx, text.trim())
+        Notes.add(ctx, text.trim(), home = true)
     }
 
     /**
@@ -122,7 +125,7 @@ object NoteImport {
             return false
         }
         update(app, id) {
-            it.put("status", "pending").put("audio", file.name).put("mime", mime ?: "").put("duration", durationOf(file))
+            it.put("status", "pending").put("audio", file.name).put("mime", mime ?: "").put("duration", durationOf(file)).put("home", true)
             if (source != null) it.put("source", source)
             if (caption != null) it.put("caption", caption)
         }
@@ -158,7 +161,7 @@ object NoteImport {
                     o.put("segments", JSONArray().also { a -> segments.forEach { a.put(JSONArray().put(it.start).put(it.end).put(it.text.trim())) } })
                     if (o.optDouble("duration", 0.0) <= 0 && words.isNotEmpty()) o.put("duration", words.last().end)
                 }
-                Notes.add(app, text, id)
+                Notes.add(app, text, id, home = info(app, id)?.home == true)
                 makeTitle(app, id, text)
             } catch (e: Exception) {
                 update(app, id) { it.put("status", "failed").put("error", e.message ?: "Couldn't transcribe it") }

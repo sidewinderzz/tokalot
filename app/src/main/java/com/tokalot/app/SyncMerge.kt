@@ -16,10 +16,12 @@ import org.json.JSONTokener
  * Tags: null when the side doesn't know tags (a file written by a version from before them), so it never clears any.
  * Plan: the note's reminder and checklist as one JSON string (see [NotePlan]), "" for none, null when the side doesn't
  * know plans. The desktop apps carry it without reading it.
+ * Home: true when the note sits on Home with the dictations (shared in to read or play back) rather than on the Notes
+ * page; null when the side doesn't know (a file from before level 5), so it never moves one.
  */
 data class SyncNote(
     val id: Long, val time: Long, val text: String, val title: String? = null, val tags: List<String>? = null,
-    val plan: String? = null,
+    val plan: String? = null, val home: Boolean? = null,
 )
 
 /** One month of one device's counts, as the sync file holds them. */
@@ -118,11 +120,11 @@ object SyncFormat {
     /**
      * What this version puts in the file, for telling an older Tokalot it is missing out. 1: dictionary,
      * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history. 3: note tags.
-     * 4: note reminders and checklists ("plan").
+     * 4: note reminders and checklists ("plan"). 5: notes kept on Home ("home").
      * Raise it whenever something new goes in the file, on every platform at once. [FORMAT] only changes for a
      * change an older version would get wrong, since that one locks older versions out of the file.
      */
-    const val LEVEL = 4
+    const val LEVEL = 5
 
     val CATEGORIES = listOf("MESSAGING", "EMAIL", "AI_CODE", "OTHER")
     val STYLES = listOf("FORMAL", "CASUAL", "VERY_CASUAL")
@@ -180,7 +182,7 @@ object SyncFormat {
                     is String -> NotePlan.canon(p)
                     else -> null
                 }
-                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t, n.opt("title") as? String, tags, plan)
+                SyncNote(id, (n.opt("time") as? Number)?.toLong() ?: id, t, n.opt("title") as? String, tags, plan, n.opt("home") as? Boolean)
             }
         }
         val settings = o.optJSONObject("settings")?.let { s ->
@@ -300,6 +302,7 @@ object SyncFormat {
                     n.title?.let { o.put("title", it) }
                     n.tags?.let { o.put("tags", JSONArray(it)) }
                     n.plan?.let { o.put("plan", if (it.isEmpty()) "" else JSONObject(it)) }
+                    n.home?.let { o.put("home", it) }
                 })
             }
         })
@@ -463,7 +466,7 @@ object SyncMerge {
             when {
                 here != null && there != null -> {
                     val title = if (here.title != was?.title) here.title ?: there.title else there.title ?: here.title
-                    out.add((if (was != null && here.text == was.text) there else here).copy(title = title, tags = tags(here.tags, there.tags, was?.tags), plan = plan(here.plan, there.plan, was?.plan)))
+                    out.add((if (was != null && here.text == was.text) there else here).copy(title = title, tags = tags(here.tags, there.tags, was?.tags), plan = plan(here.plan, there.plan, was?.plan), home = home(here.home, there.home, was?.home)))
                 }
                 here != null -> if (was == null) out.add(here) // else: deleted elsewhere
                 there != null -> if (was == null) out.add(there) // else: deleted here
@@ -492,6 +495,18 @@ object SyncMerge {
         there == null -> here
         here == null -> there
         was == null -> if (there.isEmpty()) here else there
+        here != was -> here
+        else -> there
+    }
+
+    /**
+     * Whether a note sits on Home. Moved here since the last sync: this side's. Otherwise the other side's, unless it
+     * doesn't know. With none in the base (the first sync after updating), Home wins: it was shared in on some device.
+     */
+    private fun home(here: Boolean?, there: Boolean?, was: Boolean?): Boolean? = when {
+        there == null -> here
+        here == null -> there
+        was == null -> here || there
         here != was -> here
         else -> there
     }
