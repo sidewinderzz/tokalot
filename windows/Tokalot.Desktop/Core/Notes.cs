@@ -19,6 +19,12 @@ public sealed class Note
      * other phones. Not shown on the desktop yet. Null when it has none.
      */
     public string? Plan { get; set; }
+    /**
+     * It sits on Home with the dictations instead of on the Notes page: something shared in on the phone (a WhatsApp
+     * voice message, say) to read or play back, until Move to Notes files it.
+     */
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Home { get; set; }
 }
 
 /** Voice notes (beta), one per dictation, stored as one JSON file next to history. Newest first. Shared through the sync file. */
@@ -77,8 +83,11 @@ public static class Notes
     /** Saves a new note and returns it. */
     public static Note Add(string text) => Add(text, 0);
 
-    /** Saves a new note with [id] (a recording's, so its folder in NoteImport stays with it), or a new id if 0 or taken. */
-    public static Note Add(string text, long id)
+    /**
+     * Saves a new note with [id] (a recording's, so its folder in NoteImport stays with it), or a new id if 0 or taken.
+     * [time]: when it was said, if not now (a dictation saved to Notes keeps its own).
+     */
+    public static Note Add(string text, long id, long time = 0)
     {
         lock (Gate)
         {
@@ -86,7 +95,7 @@ public static class Notes
             var now = DateTimeOffset.Now.ToUnixTimeMilliseconds();
             // Two notes in the same millisecond still get their own ids.
             if (id <= 0 || l.Any(n => n.Id == id)) id = Math.Max(now, l.Count > 0 ? l.Max(n => n.Id) + 1 : now);
-            var note = new Note { Id = id, Time = now, Text = text };
+            var note = new Note { Id = id, Time = time > 0 ? time : now, Text = text };
             l.Insert(0, note);
             Save();
             Sync.Queue();
@@ -107,6 +116,22 @@ public static class Notes
         }
         Sync.Queue();
     }
+
+    /** Moves note [id] to Home ([home] true) or files it on the Notes page. Syncs. */
+    public static void SetHome(long id, bool home)
+    {
+        lock (Gate)
+        {
+            var n = Load().FirstOrDefault(x => x.Id == id);
+            if (n == null || n.Home == home) return;
+            n.Home = home;
+            Save();
+        }
+        Sync.Queue();
+    }
+
+    /** Whether there's a note with this id (a dictation saved to Notes keeps the dictation's id). */
+    public static bool Has(long id) { lock (Gate) return Load().Any(n => n.Id == id); }
 
     /** Every tag used on any note, A to Z. */
     public static List<string> AllTags(IEnumerable<Note> notes) => CleanTags(notes.SelectMany(n => n.Tags ?? new()));
@@ -151,7 +176,7 @@ public static class Notes
             l = l.ToList();
         }
         // Titles live with the media, outside the lock: NoteImport takes its own, and asks for the notes while holding it.
-        return l.Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text, NoteImport.SyncTitle(n.Id), TagLine(n.Tags), n.Plan ?? "")).ToList();
+        return l.Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text, NoteImport.SyncTitle(n.Id), TagLine(n.Tags), n.Plan ?? "", n.Home)).ToList();
     }
 
     /** Stores a sync's result, unless a note was added or deleted here since [before] was read. */
@@ -160,11 +185,11 @@ public static class Notes
         HashSet<long> ids;
         lock (Gate)
         {
-            if (unread || !Load().Select(n => (n.Id, n.Time, n.Text, TagLine(n.Tags))).SequenceEqual(before.Select(n => (n.Id, n.Time, n.Text, n.Tags ?? "")))) return false;
+            if (unread || !Load().Select(n => (n.Id, n.Time, n.Text, TagLine(n.Tags), n.Home)).SequenceEqual(before.Select(n => (n.Id, n.Time, n.Text, n.Tags ?? "", n.Home ?? false)))) return false;
             cache = after.Select(n => new Note
             {
                 Id = n.Id, Time = n.Time, Text = n.Text, Tags = string.IsNullOrEmpty(n.Tags) ? null : TagList(n.Tags),
-                Plan = string.IsNullOrEmpty(n.Plan) ? null : n.Plan,
+                Plan = string.IsNullOrEmpty(n.Plan) ? null : n.Plan, Home = n.Home ?? false,
             }).ToList();
             Save();
             ids = cache.Select(n => n.Id).ToHashSet();

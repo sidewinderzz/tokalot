@@ -27,7 +27,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 
 /**
- * One note, opened from the Notes page. A shared voice note gets a player whose transcript follows along (tap a
+ * One note, opened from the Notes page (or from Home, for something shared in). A shared voice note gets a player whose transcript follows along (tap a
  * word to jump there) and can skip silence and "um"s, plus an index of its points. Every note can be summarized at
  * five levels of detail and gets a short title from the AI. Summaries, the index and the title are saved with the
  * note, so they're only made once.
@@ -175,6 +175,12 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                 items += "Skip ums: ${if (prefs.noteSkipUms) "on" else "off"}" to {
                     prefs.noteSkipUms = !prefs.noteSkipUms; recut()
                 }
+            }
+            // Shared in to read or play back, it sits on Home; Move to Notes files it, and back again.
+            val onHome = Notes.all(this).firstOrNull { it.id == id }?.home ?: note.home
+            if (onHome) items += "Move to Notes" to { moveToNotes(id) }
+            else if (info?.source != null || info?.audio != null) items += "Move to Home" to {
+                if (runCatching { Notes.setHome(this, id, true) }.isSuccess) toast("Moved to Home") else toast("Couldn't move it")
             }
             items += "Copy text" to { copy(note.text) }
             items += "Share" to {

@@ -193,10 +193,10 @@ public sealed partial class MainWindow : Window
             Dispatcher.UIThread.Post(() =>
             {
                 historyRedrawQueued = 0;
-                if (CurrentPage == Page.Home) FillHistory();
+                if (CurrentPage == Page.Home && openNoteId == null) FillHistory();
             }, DispatcherPriority.Background);
         };
-        onPlayer = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Home) FillHistory(); });
+        onPlayer = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Home && openNoteId == null) FillHistory(); });
         History.Changed += onHistory;
         Player.Changed += onPlayer;
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); };
@@ -217,7 +217,7 @@ public sealed partial class MainWindow : Window
         });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
-        onNoteImport = () => Dispatcher.UIThread.Post(() => { if (CurrentPage == Page.Notes) Render(); });
+        onNoteImport = () => Dispatcher.UIThread.Post(() => { if (CurrentPage is Page.Notes or Page.Home) Render(); });
         NoteImport.Changed += onNoteImport;
         Closed += (_, _) => NoteImport.Changed -= onNoteImport;
         // Seen before the focused control gets the key (WPF's PreviewKeyDown).
@@ -230,7 +230,7 @@ public sealed partial class MainWindow : Window
                 search.Focus();
             }
             else if (e.Key == Key.Escape && (editing != null || editingNew)) { e.Handled = true; editing = null; editingNew = false; Render(); }
-            else if (e.Key == Key.Escape && CurrentPage == Page.Notes && openNoteId != null) { e.Handled = true; if (noteRenaming) { noteRenaming = false; Render(); } else CloseNote(); }
+            else if (e.Key == Key.Escape && openNoteId != null) { e.Handled = true; if (noteRenaming) { noteRenaming = false; Render(); } else CloseNote(); }
             else if (e.Key == Key.Escape && CurrentPage == Page.Home && !string.IsNullOrEmpty(search.Text)) { e.Handled = true; search.Text = ""; }
         }, RoutingStrategies.Tunnel);
         SizeChanged += (_, _) => { if (IsLoaded && IsWide != wideLayout) Render(); };
@@ -427,7 +427,7 @@ public sealed partial class MainWindow : Window
     {
         if (!S.WelcomeDone && WelcomeDue()) { S.WelcomeDone = true; S.Save(); } // clicked away from the welcome: it's skipped
         if (openNoteId != null) { NotePlayer.Stop(false); openNoteId = null; } // the sidebar's Notes goes back to the list too
-        if (p != Page.Notes) CommitDelete();
+        if (p != Page.Notes && p != Page.Home) CommitDelete();
         if (p != CurrentPage) scroller.Offset = default;
         CurrentPage = p;
         Render();
@@ -454,7 +454,7 @@ public sealed partial class MainWindow : Window
             case Page.Stats: BuildStats(col); break;
         }
         wideLayout = IsWide;
-        scroller.Content = wideLayout && !welcome && CurrentPage != Page.Settings && !(CurrentPage == Page.Notes && openNoteId != null) ? TwoColumns(col) : StripMarkers(col);
+        scroller.Content = wideLayout && !welcome && CurrentPage != Page.Settings && openNoteId == null ? TwoColumns(col) : StripMarkers(col);
         scroller.UpdateLayout();
         scroller.Offset = new Vector(0, offset);
         NoteChip();
@@ -625,6 +625,8 @@ public sealed partial class MainWindow : Window
 
     private void BuildHome(StackPanel col)
     {
+        // Something shared in, opened from the list: its page, like a note's.
+        if (openNoteId is { } open) { BuildNote(col, open); return; }
         var app = App.Current;
         if (app.UpdateVersion != null)
         {
@@ -707,10 +709,16 @@ public sealed partial class MainWindow : Window
         if (box == null) return;
         box.Children.Clear();
         var q = (search.Text ?? "").Trim();
-        var all = History.All();
-        var list = q.Length == 0 ? all : all.Where(e =>
-            e.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Raw.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            e.AppLabel.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        // Dictations, and notes kept on Home (things shared in on the phone), newest first.
+        var shared = Notes.All().Where(n => n.Home && n.Id != pendingDelete)
+            .Select(n => new HomeItem(n.Time, null, n, NoteImport.Get(n.Id)));
+        var all = History.All().Select(e => new HomeItem(e.Time, e, null, null)).Concat(shared)
+            .OrderByDescending(i => i.Time).ToList();
+        var list = q.Length == 0 ? all : all.Where(i => i.Entry is { } e
+            ? e.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Raw.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+              e.AppLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
+            : i.Note!.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || (i.Info?.Title ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+              (i.Info?.Source ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
         if (list.Count == 0)
         {
             box.Children.Add(Spaced(Ui.Heading(q.Length == 0 ? "Today" : "No matches", 30), 0, 24, 0, 12));
@@ -732,7 +740,7 @@ public sealed partial class MainWindow : Window
                 lastDay = day;
             }
             else group!.Children.Add(Ui.Divider());
-            group!.Children.Add(EntryView(e));
+            group!.Children.Add(e.Entry != null ? EntryView(e.Entry) : SharedView(e.Note!, e.Info));
         }
         if (list.Count > historyLimit)
         {
@@ -813,6 +821,85 @@ public sealed partial class MainWindow : Window
             AudioStore.Delete(e.Id);
         };
         menu.Items.Add(copyOrig);
+        if (!e.Pending)
+        {
+            // Saved to Notes it's a note of its own there (same id, so this one knows), and the dictation stays here.
+            var save = new MenuItem { Header = Notes.Has(e.Id) ? "Open in Notes" : "Save to Notes" };
+            save.Click += (_, _) => SaveToNotes(e);
+            menu.Items.Add(save);
+        }
+        menu.Items.Add(del);
+        more.ContextMenu = menu;
+        box.Children.Add(Spread(row, more));
+        return box;
+    }
+
+    /** One thing in Home's list: a dictation, or a note kept on Home (shared in on the phone) with what's known about it. */
+    private sealed record HomeItem(long Time, Entry? Entry, Note? Note, NoteImport.Info? Info);
+
+    /** Files a dictation as a note too, under its own id and time (or opens that note when it's already there). */
+    private void SaveToNotes(Entry e)
+    {
+        if (!Notes.Has(e.Id))
+        {
+            try { Notes.Add(e.Text, e.Id, e.Time); } catch { Toast("Couldn't save the note"); return; }
+            if (!S.NotesBeta) { S.NotesBeta = true; S.Save(); }
+            Toast("Saved to Notes");
+            RenderNav();
+            return;
+        }
+        if (!S.NotesBeta) { S.NotesBeta = true; S.Save(); }
+        CurrentPage = Page.Notes;
+        OpenNote(e.Id);
+    }
+
+    /** Files a note kept on Home on the Notes page. */
+    private void MoveToNotes(long id)
+    {
+        try { Notes.SetHome(id, false); } catch { Toast("Couldn't move it"); return; }
+        if (!S.NotesBeta) { S.NotesBeta = true; S.Save(); }
+        Toast("Moved to Notes");
+        Render();
+    }
+
+    /**
+     * Something shared into Tokalot on the phone (a WhatsApp voice message, say), kept on Home with the dictations: its
+     * title, the start of its text and where it came from. Clicking it opens its page (Summary, Timeline, the player when
+     * the recording is on this computer); Move to Notes files it on the Notes page.
+     */
+    private Control SharedView(Note n, NoteImport.Info? info)
+    {
+        var box = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
+        if (info?.Title is { } title)
+        {
+            var head = Ui.Text(title, 16.5, bold: true);
+            head.MaxLines = 2;
+            head.TextTrimming = TextTrimming.CharacterEllipsis;
+            box.Children.Add(Spaced(head, 0, 0, 0, 4));
+        }
+        var t = Ui.Text(n.Text.Trim(), 16.5);
+        t.MaxLines = 6;
+        t.TextTrimming = TextTrimming.CharacterEllipsis;
+        t.Cursor = Cursors.Hand;
+        t.Background = Brushes.Transparent;
+        t.OnClick(() => OpenNote(n.Id));
+        box.Children.Add(t);
+        var voice = info?.Audio != null || info?.Duration > 0;
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
+        meta += " · " + (voice ? "Shared voice message" : "Shared");
+        if (info?.Source != null) meta += " from " + info.Source;
+        if (info?.Duration > 0) meta += " · " + NoteMedia.Clock(info!.Duration);
+        box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
+        var row = Ui.Row(
+            Ui.Button("Open", () => OpenNote(n.Id), filled: true),
+            Ui.Button("Move to Notes", () => MoveToNotes(n.Id)),
+            Ui.Button("Copy", () => { _ = TextInjector.Copy(n.Text); Toast("Copied"); }, icon: "copy"));
+        foreach (var a in row.Children) a.Margin = new Thickness(0, 0, 8, 0);
+        var menu = Ui.Menu();
+        Border more = null!;
+        more = Ui.Button("", () => menu.Open(more), icon: "more");
+        var del = new MenuItem { Header = "Delete" };
+        del.Click += (_, _) => DeleteNote(n.Id);
         menu.Items.Add(del);
         more.ContextMenu = menu;
         box.Children.Add(Spread(row, more));
@@ -1025,7 +1112,8 @@ public sealed partial class MainWindow : Window
                 Spaced(Ui.Text(status, 13.5, running ? C.Sub : C.Warn), 0, 2, 0, actions.Count > 0 ? 10 : 0),
                 Ui.Row(actions.ToArray())), 20), 0, 0, 0, 16));
         }
-        var notes = Notes.All().Where(n => n.Id != pendingDelete).ToList();
+        // Notes kept on Home (shared in on the phone) aren't filed here.
+        var notes = Notes.All().Where(n => !n.Home && n.Id != pendingDelete).ToList();
         if (notes.Count == 0)
         {
             col.Children.Add(Ui.Card(Ui.Text(S.SyncFile.Length > 0
@@ -1338,52 +1426,65 @@ public sealed partial class MainWindow : Window
     };
 
     /**
-     * A note in the list: its title and first line (or, while searching, the bit that matched, words marked), its tags,
-     * and when it was made ([withDate]: the day too, when the list isn't split into days). Clicking it opens the note.
+     * One note in the list: its name as the heading (its title, or its first line when it has none) with the time at the
+     * end, and one quiet line under it (voice note and length, where it came from, tags). While searching, the bit that
+     * matched shows under the name too. Clicking it opens the note.
      */
     private Control NoteRow(NoteFind.Item n, NoteImport.Info? info, List<string> words, bool withDate)
     {
         var voice = info?.Audio != null;
         var snip = words.Count > 0 ? NoteFind.Snippet(n.Text, words) : null;
-        var flat = System.Text.RegularExpressions.Regex.Replace(n.Text.Trim(), @"\s+", " ");
-        // With a title: the title in bold, and the start of the text (or the bit that matched) under it, in grey.
-        var preview = Marked(Ui.Text("", 16.5, bold: n.Title != null), n.Title ?? snip ?? flat, words);
-        preview.MaxLines = 2;
-        preview.TextTrimming = TextTrimming.CharacterEllipsis;
-        var lines = Ui.Stack(preview);
-        if (n.Title != null)
+        var name = Marked(Ui.Text("", 16, bold: n.Title != null), NoteName(n.Title, n.Text), words);
+        name.MaxLines = 1;
+        name.TextTrimming = TextTrimming.CharacterEllipsis;
+        var time = Ui.Text(DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString(withDate ? "MMM d" : "h:mm tt", CultureInfo.InvariantCulture), 13, C.Sub);
+        time.Margin = new Thickness(12, 0, 0, 0);
+        time.VerticalAlignment = VerticalAlignment.Center;
+        var lines = Ui.Stack(Spread(name, time));
+        if (snip != null)
         {
-            var first = Marked(Ui.Text("", 14.5, C.Sub), snip ?? flat, words);
-            first.MaxLines = snip != null ? 3 : 1;
-            first.TextTrimming = TextTrimming.CharacterEllipsis;
-            lines.Children.Add(Spaced(first, 0, 2, 0, 0));
+            var found = Marked(Ui.Text("", 14, C.Sub), snip, words);
+            found.MaxLines = 2;
+            found.TextTrimming = TextTrimming.CharacterEllipsis;
+            lines.Children.Add(Spaced(found, 0, 2, 0, 0));
         }
-        if (n.Tags.Count > 0)
+        var parts = new List<string>();
+        if (voice) parts.Add("voice note" + (info!.Duration > 0 ? " " + NoteMedia.Clock(info.Duration) : ""));
+        if (info?.Source != null) parts.Add("from " + info.Source);
+        if (n.Tags.Count > 0) parts.Add(string.Join(", ", n.Tags));
+        if (parts.Count > 0)
         {
-            var tagRow = new WrapPanel { Margin = new Thickness(0, 6, 0, -6) };
-            foreach (var t in n.Tags) tagRow.Children.Add(TagChip(t));
-            lines.Children.Add(tagRow);
+            var metaRow = Ui.Row();
+            if (voice) metaRow.Children.Add(Spaced(Icons.Get("play", 13, C.Sub), 0, 0, 4, 0));
+            var meta = Ui.Text(string.Join(" · ", parts), 13, C.Sub);
+            meta.MaxLines = 1;
+            meta.TextTrimming = TextTrimming.CharacterEllipsis;
+            metaRow.Children.Add(meta);
+            lines.Children.Add(Spaced(metaRow, 0, 3, 0, 0));
         }
-        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString(withDate ? "MMM d, h:mm tt" : "h:mm tt", CultureInfo.InvariantCulture);
-        if (voice)
-        {
-            meta += " · voice note";
-            if (info!.Duration > 0) meta += " · " + NoteMedia.Clock(info.Duration);
-            if (info.Source != null) meta += " · from " + info.Source;
-        }
-        var metaRow = Ui.Row();
-        if (voice) metaRow.Children.Add(Spaced(Icons.Get("play", 14, C.Sub), 0, 0, 4, 0));
-        metaRow.Children.Add(Ui.Text(meta, 13.5, C.Sub));
         var row = new Border
         {
-            Padding = new Thickness(16, 12, 16, 12), Margin = new Thickness(6), CornerRadius = new CornerRadius(22),
-            Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = Ui.Stack(lines, Spaced(metaRow, 0, 6, 0, 0)),
+            Padding = new Thickness(16, 10, 16, 10), Margin = new Thickness(6, 3, 6, 3), CornerRadius = new CornerRadius(18),
+            Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = lines,
         };
         row.OnEnter(() => row.Background = C.Hover);
         row.OnLeave(() => row.Background = Brushes.Transparent);
         var find = notesFilter.Query;
         row.OnClick(() => OpenNote(n.Id, find));
-        return Ui.Keys(row, () => OpenNote(n.Id, find), "Open note" + (n.Title is { } t2 ? ": " + t2 : ""));
+        // Untitled notes get a title from the AI in the background, a few at a time, so the list reads as names. Only with
+        // AI cleanup on (the notes' words already go to it); each note is asked once per window.
+        if (n.Title == null && info?.TitleOff != true && n.Text.Trim().Length >= 40 && S.Cleanup != "OFF" && listTitling < 3 && titleTried.Add(n.Id))
+            ListTitle(n.Id, n.Text);
+        return Ui.Keys(row, () => OpenNote(n.Id, find), "Open note: " + NoteName(n.Title, n.Text));
+    }
+
+    /** A note's name in a list: its title, or else its first line (cut at 80 characters). */
+    private static string NoteName(string? title, string text)
+    {
+        if (!string.IsNullOrWhiteSpace(title)) return title;
+        var first = text.Trim().Split('\n')[0].Trim();
+        if (first.Length > 80) first = first[..79].TrimEnd() + "…";
+        return first.Length > 0 ? first : "Empty note";
     }
 
     // ---------- one note ----------
@@ -1477,7 +1578,19 @@ public sealed partial class MainWindow : Window
 
     private async void MakeTitle(long id, string text)
     {
-        if (await NoteImport.MakeTitle(S, id, text) != null && CurrentPage == Page.Notes) Render();
+        if (await NoteImport.MakeTitle(S, id, text) != null && CurrentPage is Page.Notes or Page.Home) Render();
+    }
+
+    /** Titles being made for the list right now. */
+    private int listTitling;
+
+    private async void ListTitle(long id, string text)
+    {
+        listTitling++;
+        string? made = null;
+        try { made = await NoteImport.MakeTitle(S, id, text); } catch { }
+        finally { listTitling--; }
+        if (made != null && CurrentPage == Page.Notes && openNoteId == null) Render();
     }
 
     /** Summary and Timeline: quiet outline pills with an icon, filled while their card is open. */
@@ -1504,7 +1617,7 @@ public sealed partial class MainWindow : Window
      */
     private void BuildNote(StackPanel col, long id)
     {
-        var back = Ui.Button("Notes", CloseNote, icon: "back");
+        var back = Ui.Button(CurrentPage == Page.Home ? "Home" : "Notes", CloseNote, icon: "back");
         var note = id == pendingDelete ? null : Notes.All().FirstOrDefault(x => x.Id == id);
         if (note == null)
         {
@@ -1559,6 +1672,18 @@ public sealed partial class MainWindow : Window
         var tagsItem = new MenuItem { Header = "Tags…" };
         tagsItem.Click += (_, _) => EditTags(id);
         menu.Items.Add(tagsItem);
+        // Shared in to read or play back, it sits on Home; Move to Notes files it, and back again.
+        if (note.Home || info?.Source != null || info?.Audio != null)
+        {
+            var move = new MenuItem { Header = note.Home ? "Move to Notes" : "Move to Home" };
+            move.Click += (_, _) =>
+            {
+                try { Notes.SetHome(id, !note.Home); } catch { Toast("Couldn't move it"); return; }
+                Toast(note.Home ? "Moved to Notes" : "Moved to Home");
+                Render();
+            };
+            menu.Items.Add(move);
+        }
         var copy = new MenuItem { Header = "Copy text" };
         copy.Click += (_, _) => { _ = TextInjector.Copy(note.Text); Toast("Copied"); };
         menu.Items.Add(copy);
@@ -1948,7 +2073,7 @@ public sealed partial class MainWindow : Window
 
     /** "Back to playing" shows while a voice note plays and the page was scrolled away from it. */
     private void NoteChip() =>
-        followChip.IsVisible = CurrentPage == Page.Notes && openNoteId != null && noteFile != null && !noteFollow && NotePlayer.Playing && NotePlayer.File == noteFile;
+        followChip.IsVisible = openNoteId != null && noteFile != null && !noteFollow && NotePlayer.Playing && NotePlayer.File == noteFile;
 
     private void NoteFollowAgain()
     {

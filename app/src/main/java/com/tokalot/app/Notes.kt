@@ -15,9 +15,14 @@ import java.io.File
 object Notes {
     /**
      * [tags]: the user's own labels, as [cleanTags] leaves them (sorted, no repeats). [plan]: its reminder and checklist
-     * (beta), null for none.
+     * (beta), null for none. [home]: it sits on Home with the dictations instead of on the Notes page (something shared
+     * into Tokalot just to read or play back), until Move to Notes files it.
      */
-    class Note(val id: Long, val time: Long, val text: String, val tags: List<String> = emptyList(), val plan: NotePlan? = null)
+    class Note(val id: Long, val time: Long, val text: String, val tags: List<String> = emptyList(), val plan: NotePlan? = null,
+               val home: Boolean = false) {
+        fun copy(text: String = this.text, tags: List<String> = this.tags, plan: NotePlan? = this.plan, home: Boolean = this.home) =
+            Note(id, time, text, tags, plan, home)
+    }
 
     const val FILE = "notes.json"
     private val main by lazy { Handler(Looper.getMainLooper()) }
@@ -35,7 +40,7 @@ object Notes {
             val t = o.optJSONArray("tags")
             Note(o.getLong("id"), o.getLong("time"), o.getString("text"),
                 if (t == null) emptyList() else cleanTags(List(t.length()) { i -> t.optString(i) }),
-                NotePlan.parse(o.optJSONObject("plan")))
+                NotePlan.parse(o.optJSONObject("plan")), o.optBoolean("home", false))
         }
     }
 
@@ -45,6 +50,7 @@ object Notes {
             val o = JSONObject().put("id", it.id).put("time", it.time).put("text", it.text)
             if (it.tags.isNotEmpty()) o.put("tags", JSONArray(it.tags))
             if (it.plan != null && !it.plan.isEmpty) o.put("plan", it.plan.toJson())
+            if (it.home) o.put("home", true)
             arr.put(o)
         }
         return arr.toString()
@@ -74,10 +80,13 @@ object Notes {
         }
     }
 
-    /** Saves a new note and returns its id. A shared voice note passes the id its audio is saved under. */
+    /**
+     * Saves a new note and returns its id. A shared voice note passes the id its audio is saved under, and [home] so it
+     * shows on Home rather than on the Notes page. [time] defaults to the id (a dictation saved to Notes keeps its own).
+     */
     @Synchronized
-    fun add(ctx: Context, text: String, id: Long = System.currentTimeMillis(), plan: NotePlan? = null): Long {
-        save(ctx, listOf(Note(id, id, text, plan = plan?.takeIf { !it.isEmpty })) + forChange(ctx))
+    fun add(ctx: Context, text: String, id: Long = System.currentTimeMillis(), plan: NotePlan? = null, home: Boolean = false, time: Long = id): Long {
+        save(ctx, listOf(Note(id, time, text, plan = plan?.takeIf { !it.isEmpty }, home = home)) + forChange(ctx))
         Sync.changed(ctx)
         return id
     }
@@ -93,9 +102,21 @@ object Notes {
     @Synchronized
     fun setTags(ctx: Context, id: Long, tags: List<String>) {
         val clean = cleanTags(tags)
-        save(ctx, forChange(ctx).map { if (it.id == id) Note(it.id, it.time, it.text, clean, it.plan) else it })
+        save(ctx, forChange(ctx).map { if (it.id == id) it.copy(tags = clean) else it })
         Sync.changed(ctx)
     }
+
+    /** Moves note [id] to Home ([home] true) or files it on the Notes page. Syncs. */
+    @Synchronized
+    fun setHome(ctx: Context, id: Long, home: Boolean) {
+        val all = forChange(ctx)
+        if (all.none { it.id == id && it.home != home }) return
+        save(ctx, all.map { if (it.id == id) it.copy(home = home) else it })
+        Sync.changed(ctx)
+    }
+
+    /** Whether there's a note with this id (a dictation saved to Notes keeps the dictation's id). */
+    fun has(ctx: Context, id: Long) = all(ctx).any { it.id == id }
 
     /**
      * Changes note [id]'s reminder and checklist with [change] (handed null when it has none; returning null or an empty
@@ -108,7 +129,7 @@ object Notes {
         val note = all.firstOrNull { it.id == id } ?: return null
         val plan = change(note.plan)?.takeIf { !it.isEmpty }
         if (plan == note.plan && (text == null || text == note.text)) return plan
-        save(ctx, all.map { if (it.id == id) Note(it.id, it.time, text ?: it.text, it.tags, plan) else it })
+        save(ctx, all.map { if (it.id == id) it.copy(text = text ?: it.text, plan = plan) else it })
         Sync.changed(ctx)
         return plan
     }
@@ -125,7 +146,7 @@ object Notes {
     @Synchronized
     private fun texts(ctx: Context): List<SyncNote> {
         val f = file(ctx)
-        return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text, tags = it.tags, plan = it.plan?.line() ?: "") } else emptyList()
+        return if (f.exists()) parse(f.readText()).map { SyncNote(it.id, it.time, it.text, tags = it.tags, plan = it.plan?.line() ?: "", home = it.home) } else emptyList()
     }
 
     /**
@@ -150,7 +171,7 @@ object Notes {
     @Synchronized
     private fun store(ctx: Context, before: List<SyncNote>, after: List<SyncNote>): Boolean {
         if (texts(ctx) != before.map { it.copy(title = null) }) return false
-        save(ctx, after.map { Note(it.id, it.time, it.text, it.tags.orEmpty(), NotePlan.parse(it.plan)) })
+        save(ctx, after.map { Note(it.id, it.time, it.text, it.tags.orEmpty(), NotePlan.parse(it.plan), it.home ?: false) })
         return true
     }
 

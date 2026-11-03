@@ -53,7 +53,7 @@ class MainActivity : Activity() {
     private var inSettings = false
     /** The word stats page, opened from the stats card on Home. Like Settings, it has a back arrow and no tab bar. */
     private var inStats = false
-    /** The note opened from the Notes page, if any, and its screen (which owns a player to stop). */
+    /** The note opened from the Notes page or from Home, if any, and its screen (which owns a player to stop). */
     private var openNote: Long? = null
     private var noteScreen: NoteScreen? = null
     /** The search words the note was opened from, to highlight in it. */
@@ -200,8 +200,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        History.onChange = { if (!inSettings && tab == Tab.HOME) render() }
-        Notes.onChange = { if (!inSettings && tab == Tab.NOTES && openNote == null) render() }
+        History.onChange = { if (onHomeList()) render() }
+        Notes.onChange = { refreshNotes() }
         render()
         // Check again once Android has had time to start the service (see serviceStuck).
         // With the one-time permission (Settings › Setup), Tokalot switches it off and on itself.
@@ -210,7 +210,7 @@ class MainActivity : Activity() {
             val broken = ServiceGuard.broken(this) && SystemClock.uptimeMillis() - android.os.Process.getStartUptimeMillis() > STUCK_GRACE_MS
             if (broken) MicLog.add(this, "app opened: the service isn't running (switch ${if (serviceEnabled()) "on" else "off"})")
             if (broken && ServiceGuard.repair(this)) toast("Turned Tokalot's mic button back on")
-            else if (serviceStuck() && !inSettings && tab == Tab.HOME) render()
+            else if (serviceStuck() && onHomeList()) render()
         }, STUCK_GRACE_MS + 500)
         Sync.onDone = { changed -> if (!isDestroyed) syncFinished(changed) }
         Sync.request(this)
@@ -560,7 +560,7 @@ class MainActivity : Activity() {
                         }
                     }
                     Toast.makeText(app, msg, Toast.LENGTH_LONG).show()
-                    if (!isDestroyed && !inSettings && tab == Tab.HOME) render()
+                    if (!isDestroyed && onHomeList()) render()
                 }
             }
         }.start()
@@ -585,6 +585,14 @@ class MainActivity : Activity() {
             tab != Tab.HOME -> { tab = Tab.HOME; render() }
             else -> @Suppress("DEPRECATION") super.onBackPressed()
         }
+    }
+
+    /** Home's list is what's showing (not Settings, the stats or an open note). */
+    private fun onHomeList() = !inSettings && !inStats && openNote == null && tab == Tab.HOME
+
+    /** Redraws Home or the Notes list after the notes changed, unless a note is open (its player must keep going). */
+    fun refreshNotes() {
+        if (!inSettings && !inStats && openNote == null && (tab == Tab.NOTES || tab == Tab.HOME)) render()
     }
 
     /** Opens one note on its own page (its player, summary and index), with the words of [find] highlighted. */
@@ -653,7 +661,7 @@ class MainActivity : Activity() {
     /** Rebuilds the visible screen. Screens are cheap to build, so we just redraw. */
     fun render() {
         if (tab == Tab.NOTES && !prefs.notesBeta) tab = Tab.HOME // the beta was switched off
-        if (inSettings || inStats || tab != Tab.NOTES) finishDelete() // left the notes: Undo goes with them
+        if (inSettings || inStats || (tab != Tab.NOTES && tab != Tab.HOME)) finishDelete() // left the notes: Undo goes with them
         logoBars?.accentColor = C.visible(prefs.accent) // follows the button color picked in Settings
         inWelcome = WelcomeScreen.due(this)
         headerLeft.removeAllViews()
@@ -675,7 +683,7 @@ class MainActivity : Activity() {
         })
         renderNav()
         // Keep the scroll position when redrawing the same screen (expanding an entry, download progress…).
-        val note = openNote.takeIf { !inSettings && !inStats && tab == Tab.NOTES }
+        val note = openNote.takeIf { !inSettings && !inStats && (tab == Tab.NOTES || tab == Tab.HOME) }
         val key = if (inWelcome) "welcome${WelcomeScreen.step}" else if (inSettings) "settings:${SettingsScreen.page}" else if (inStats) "stats" else if (note != null) "note$note" else tab.name
         val prevScroll = if (key == lastScreen) (content.getChildAt(0) as? ScrollView)?.scrollY ?: 0 else 0
         lastScreen = key
@@ -1001,15 +1009,25 @@ class MainActivity : Activity() {
         return c
     }
 
-    /** (Re)builds just the history list, filtered by the search box. */
+    /** One thing in Home's list: a dictation, or a note kept on Home (something shared in), with what's known about it. */
+    private class HomeItem(val time: Long, val entry: Entry? = null, val note: Notes.Note? = null, val info: NoteImport.Info? = null)
+
+    /** (Re)builds just the history list, filtered by the search box: dictations and things shared in, newest first. */
     private fun fillHistory() {
         val box = historyBox ?: return
         box.removeAllViews()
-        val all = History.all(this)
         val q = query.lowercase()
-        val list = if (q.isEmpty()) all else all.filter {
-            it.text.lowercase().contains(q) || it.raw.lowercase().contains(q) ||
-                (it.app.isNotEmpty() && AppContext.label(this, it.app).lowercase().contains(q))
+        // Shared voice notes still being transcribed (or that failed) wait at the top.
+        val waiting = NoteImport.waiting(this).filter { it.home }
+        if (waiting.isNotEmpty() && q.isEmpty()) box.addView(waitingCard(waiting), lp().margins(this, t = 16))
+        val shared = Notes.all(this).filter { it.home && it.id != pendingDelete }.map { HomeItem(it.time, note = it, info = NoteImport.info(this, it.id)) }
+        val all = (History.all(this).map { HomeItem(it.time, entry = it) } + shared).sortedByDescending { it.time }
+        val list = if (q.isEmpty()) all else all.filter { item ->
+            val e = item.entry
+            if (e != null) e.text.lowercase().contains(q) || e.raw.lowercase().contains(q) ||
+                (e.app.isNotEmpty() && AppContext.label(this, e.app).lowercase().contains(q))
+            else item.note!!.text.lowercase().contains(q) || item.info?.title?.lowercase()?.contains(q) == true ||
+                item.info?.source?.lowercase()?.contains(q) == true
         }
         if (list.isEmpty()) {
             box.addView(dayHeading(if (q.isEmpty()) "Today" else "No matches"))
@@ -1033,7 +1051,7 @@ class MainActivity : Activity() {
             } else {
                 group?.addView(divider())
             }
-            group?.addView(entryView(e))
+            group?.addView(if (e.entry != null) entryView(e.entry) else sharedView(e.note!!, e.info))
         }
         if (list.size > historyLimit) {
             box.addView(row(pill("Show older") { historyLimit += 200; fillHistory() }).apply {
@@ -1117,6 +1135,9 @@ class MainActivity : Activity() {
         more = pill(null, R.drawable.ic_more, desc = "More") {
             val items = ArrayList<Pair<String, () -> Unit>>()
             if (!e.pending) items.add("Copy original" to { copy(e.raw.ifBlank { e.text }) })
+            // Saved to Notes it's a note of its own there (same id, so this one knows), and the dictation stays here.
+            if (!e.pending && Notes.has(this@MainActivity, e.id)) items.add("Open in Notes" to { openNote(e.id) })
+            else if (!e.pending) items.add("Save to Notes" to { saveToNotes(e) })
             items.add("Delete" to {
                 if (playingId == e.id) stopPlayback(redraw = false)
                 if (retryingId == e.id) cancelRetry()
@@ -1129,6 +1150,70 @@ class MainActivity : Activity() {
         actions.addView(more)
         box.addView(actions)
         return box
+    }
+
+    /** Files a dictation as a note too, under the dictation's own id and time, and turns Notes on if it was off. */
+    private fun saveToNotes(e: Entry) {
+        if (Notes.has(this, e.id)) return openNote(e.id)
+        if (runCatching { Notes.add(this, e.text, e.id, time = e.time) }.isFailure) return toast("Couldn't save the note")
+        if (!prefs.notesBeta) {
+            prefs.notesBeta = true
+            runCatching { StartTile.setNoteTile(this, true) }
+            renderNav()
+        }
+        toast("Saved to Notes")
+    }
+
+    /**
+     * Something shared into Tokalot (a WhatsApp voice message, say), kept on Home with the dictations: its title, the
+     * start of its text, and where it came from. Tapping it opens it on its own page, with the player, Summary and
+     * Timeline. Move to Notes files it on the Notes page.
+     */
+    private fun sharedView(n: Notes.Note, info: NoteImport.Info?): View {
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(14))
+            background = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(C.RIPPLE), null,
+                android.graphics.drawable.ColorDrawable(android.graphics.Color.WHITE))
+            setOnClickListener { openNote(n.id) }
+        }
+        val voice = info?.audio != null
+        info?.title?.let { box.addView(text(it, 18f, bold = true).apply { maxLines = 2; ellipsize = TextUtils.TruncateAt.END }, lp().margins(this, b = 4)) }
+        box.addView(text(n.text.trim(), 18f).apply { maxLines = 6; ellipsize = TextUtils.TruncateAt.END })
+        val meta = buildString {
+            append(SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date(n.time)))
+            append(" · ").append(if (voice) "Shared voice message" else "Shared")
+            info?.source?.let { append(" from $it") }
+            if (voice && info!!.duration > 0) append(" · ${NoteMedia.clock(info.duration)}")
+        }
+        box.addView(text(meta, 14f, C.SUB), lp().margins(this, t = 10, b = 8))
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        actions.addView(if (voice) pill("Listen", R.drawable.ic_play) { openNote(n.id) } else pill("Open") { openNote(n.id) })
+        actions.addView(spacer(wDp = 8))
+        actions.addView(pill("Move to Notes") { moveToNotes(n.id) })
+        actions.addView(weightSpacer())
+        lateinit var more: View
+        more = pill(null, R.drawable.ic_more, desc = "More") {
+            popupMenu(more, listOf(
+                "Copy text" to { copy(n.text) },
+                "Delete" to { deleteNote(n.id) },
+            ))
+        }
+        actions.addView(more)
+        box.addView(actions)
+        box.contentDescription = listOfNotNull(info?.title, meta, n.text.take(200)).joinToString(". ")
+        return box
+    }
+
+    /** Files something kept on Home on the Notes page (and turns Notes on if it was off). */
+    fun moveToNotes(id: Long) {
+        if (runCatching { Notes.setHome(this, id, false) }.isFailure) return toast("Couldn't move it")
+        if (!prefs.notesBeta) {
+            prefs.notesBeta = true
+            runCatching { StartTile.setNoteTile(this, true) }
+        }
+        toast("Moved to Notes")
+        if (openNote == null) render() else renderNav() // an open note keeps playing
     }
 
     private fun toggle(set: HashSet<Long>, id: Long) {
