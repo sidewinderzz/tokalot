@@ -785,6 +785,16 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("note_word_hint_seen", false)
         set(v) = sp.edit().putBoolean("note_word_hint_seen", v).apply()
 
+    /**
+     * Reminders show their text on the lock screen (Android's own "hide sensitive content" setting can still hide it).
+     * Off: they ring, but show nothing there until the phone is unlocked. This phone only. Until it's set, it follows
+     * the privacy level: off for Most private (speech on the phone and no AI cleanup), on otherwise.
+     */
+    var reminderLockText: Boolean
+        get() = if (sp.contains("reminder_lock_text")) sp.safeBoolean("reminder_lock_text", true)
+            else !(stt == SttChoice.LOCAL && cleanup == CleanupChoice.OFF)
+        set(v) = sp.edit().putBoolean("reminder_lock_text", v).apply()
+
     var notesBeta: Boolean
         get() = sp.safeBoolean("notes_beta", false)
         set(v) = sp.edit().putBoolean("notes_beta", v).apply()

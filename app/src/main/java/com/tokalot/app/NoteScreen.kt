@@ -104,6 +104,10 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
         showTags(note.tags)
         col.addView(tagRow, lp().margins(this, t = -4, b = 4))
 
+        // Its reminder and checklist (beta), when it has them.
+        val planCard = PlanCard(this, id)
+        col.addView(planCard.view(), lp().margins(this, t = 4))
+
         val body = if (voice) text(spanned(), 17f).apply {
             movementMethod = LinkMovementMethod.getInstance()
             highlightColor = 0
@@ -162,6 +166,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                 },
             )
             items += "Tags" to { editTags(note.id) { showTags(it) } }
+            if (!planCard.hasReminder()) items += "Add reminder" to { planCard.addReminder(more) }
+            if (!planCard.hasList()) items += "Add a checklist" to { planCard.addChecklist() }
             if (voice) {
                 items += "Skip silence: ${if (prefs.noteSkipSilence) "on" else "off"}" to {
                     prefs.noteSkipSilence = !prefs.noteSkipSilence; recut()

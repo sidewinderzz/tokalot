@@ -28,7 +28,7 @@ public static class Sync
      * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history. 3: note tags.
      * Raise it whenever something new goes in the file, on every platform at once (SyncFormat.LEVEL on Android).
      */
-    public const int Level = 3;
+    public const int Level = 4; // 4: note reminders and checklists ("plan")
 
     /** The synced part of the settings. Styles holds only the categories the user set themselves. */
     public sealed record Data(List<string> Words, List<Snippet> Snippets, Dictionary<string, string> Styles, string Instructions)
@@ -70,13 +70,29 @@ public static class Sync
      * Tags: comma-separated (Notes.TagLine), "" for none, null when the side doesn't know tags (a file written by a
      * version from before them), so it never clears any.
      */
-    public sealed record SyncNote(long Id, long Time, string Text, string? Title = null, string? Tags = null);
+    // Plan: the note's reminder and checklist (made on the phone) as one JSON object in a string, "" for none, null when
+    // the side doesn't know plans. The desktop apps carry it as it is, so it reaches the other phones; they don't show it yet.
+    public sealed record SyncNote(long Id, long Time, string Text, string? Title = null, string? Tags = null, string? Plan = null);
+
+    /** A note's "plan" as the file has it, in one form to compare: an object's JSON, "" for none, null when it isn't there. */
+    private static string? PlanOf(JsonNode? n) => n switch
+    {
+        JsonObject o => o.Count == 0 ? "" : o.ToJsonString(),
+        JsonValue v when v.GetValueKind() == JsonValueKind.String => "",
+        _ => null,
+    };
 
     private static JsonNode? NoteJson(SyncNote n)
     {
         var o = new JsonObject { ["id"] = n.Id, ["time"] = n.Time, ["text"] = n.Text };
         if (n.Title != null) o["title"] = n.Title;
         if (n.Tags != null) o["tags"] = new JsonArray(Notes.TagList(n.Tags).Select(t => (JsonNode?)t).ToArray());
+        if (n.Plan != null)
+        {
+            JsonNode? plan = null;
+            if (n.Plan.Length > 0) try { plan = JsonNode.Parse(n.Plan) as JsonObject; } catch (JsonException) { }
+            o["plan"] = plan ?? JsonValue.Create("");
+        }
         return o;
     }
 
@@ -363,7 +379,7 @@ public static class Sync
             if (here != null && there != null)
             {
                 var title = here.Title != b?.Title ? here.Title ?? there.Title : there.Title ?? here.Title;
-                output.Add((b != null && here.Text == b.Text ? there : here) with { Title = title, Tags = MergeTags(here.Tags, there.Tags, b?.Tags) });
+                output.Add((b != null && here.Text == b.Text ? there : here) with { Title = title, Tags = MergeTags(here.Tags, there.Tags, b?.Tags), Plan = MergePlan(here.Plan, there.Plan, b?.Plan) });
             }
             else if (b == null) output.Add((here ?? there)!); // else: deleted on one side
         }
@@ -374,6 +390,15 @@ public static class Sync
      * One note's tags. Changed here since the last sync: this side's. Otherwise the other side's, unless it doesn't know
      * tags. With no tags in the basis (the first sync after updating), a side that has some wins over one that has none.
      */
+    private static string? MergePlan(string? here, string? there, string? was)
+    {
+        // As a whole, like the phone (SyncMerge.plan): changed here wins; a side that doesn't know plans never clears one.
+        if (there == null) return here;
+        if (here == null) return there;
+        if (was == null) return there.Length == 0 ? here : there;
+        return here != was ? here : there;
+    }
+
     private static string? MergeTags(string? here, string? there, string? was)
     {
         if (there == null) return here;
@@ -454,7 +479,7 @@ public static class Sync
             {
                 var id = Num(o["id"])!.Value;
                 var tags = o["tags"] is JsonArray ta ? Notes.TagLine(Notes.CleanTags(ta.OfType<JsonValue>().Where(v => v.GetValueKind() == JsonValueKind.String).Select(v => v.ToString()))) : null;
-                return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString(), o["title"] is JsonValue t ? t.ToString() : null, tags);
+                return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString(), o["title"] is JsonValue t ? t.ToString() : null, tags, PlanOf(o["plan"]));
             })
             .ToList();
         SortedDictionary<string, string>? settings = null;

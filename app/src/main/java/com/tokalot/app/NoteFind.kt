@@ -11,7 +11,7 @@ object NoteFind {
     data class Filter(val query: String = "", val tag: String? = null, val sort: Sort = Sort.NEWEST, val from: Long = 0, val to: Long = 0)
 
     /** One note as the list sees it. [title] is the AI's or the user's title, or null. */
-    data class Item(val id: Long, val time: Long, val text: String, val title: String?, val tags: List<String>)
+    data class Item(val id: Long, val time: Long, val text: String, val title: String?, val tags: List<String>, val plan: NotePlan? = null)
 
     /** The words of a search, lowercased. Every one of them has to be in a note for it to match. */
     fun words(query: String): List<String> = query.lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }

@@ -14,6 +14,11 @@ public sealed class Note
     public string Text { get; set; } = "";
     /** The user's own labels, as Notes.CleanTags leaves them (sorted, no repeats). Null in a file from before tags. */
     public List<string>? Tags { get; set; }
+    /**
+     * Its reminder and checklist, made on the phone (beta): JSON kept exactly as the sync file has it, so it reaches the
+     * other phones. Not shown on the desktop yet. Null when it has none.
+     */
+    public string? Plan { get; set; }
 }
 
 /** Voice notes (beta), one per dictation, stored as one JSON file next to history. Newest first. Shared through the sync file. */
@@ -146,7 +151,7 @@ public static class Notes
             l = l.ToList();
         }
         // Titles live with the media, outside the lock: NoteImport takes its own, and asks for the notes while holding it.
-        return l.Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text, NoteImport.SyncTitle(n.Id), TagLine(n.Tags))).ToList();
+        return l.Select(n => new Sync.SyncNote(n.Id, n.Time, n.Text, NoteImport.SyncTitle(n.Id), TagLine(n.Tags), n.Plan ?? "")).ToList();
     }
 
     /** Stores a sync's result, unless a note was added or deleted here since [before] was read. */
@@ -156,7 +161,11 @@ public static class Notes
         lock (Gate)
         {
             if (unread || !Load().Select(n => (n.Id, n.Time, n.Text, TagLine(n.Tags))).SequenceEqual(before.Select(n => (n.Id, n.Time, n.Text, n.Tags ?? "")))) return false;
-            cache = after.Select(n => new Note { Id = n.Id, Time = n.Time, Text = n.Text, Tags = string.IsNullOrEmpty(n.Tags) ? null : TagList(n.Tags) }).ToList();
+            cache = after.Select(n => new Note
+            {
+                Id = n.Id, Time = n.Time, Text = n.Text, Tags = string.IsNullOrEmpty(n.Tags) ? null : TagList(n.Tags),
+                Plan = string.IsNullOrEmpty(n.Plan) ? null : n.Plan,
+            }).ToList();
             Save();
             ids = cache.Select(n => n.Id).ToHashSet();
         }

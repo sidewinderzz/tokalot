@@ -308,6 +308,33 @@ class SyncTest {
         assertEquals(30, SyncMerge.cleanTags(listOf("x".repeat(50))).single().length)
     }
 
+    // ---------- note plans (reminders and checklists) ----------
+
+    private val trip = NotePlan(items = listOf(PlanItem(1, "Pack chargers"), PlanItem(2, "Load the dogs", at = 1_800_000_000_000))).line()
+    private val ticked = NotePlan(items = listOf(PlanItem(1, "Pack chargers", done = true), PlanItem(2, "Load the dogs", at = 1_800_000_000_000))).line()
+
+    @Test fun planChangedOnOneSideWins() {
+        val base = listOf(a.copy(plan = trip))
+        assertEquals(listOf(a.copy(plan = ticked)), notes(listOf(a.copy(plan = ticked)), listOf(a.copy(plan = trip)), base)) // here
+        assertEquals(listOf(a.copy(plan = ticked)), notes(listOf(a.copy(plan = trip)), listOf(a.copy(plan = ticked)), base)) // there
+        assertEquals(listOf(a.copy(plan = "")), notes(listOf(a.copy(plan = "")), listOf(a.copy(plan = trip)), base)) // removed here
+    }
+
+    /** An older Tokalot (or one that doesn't know plans) writes notes without them, and that never clears a plan. */
+    @Test fun aSideWithoutPlansNeverClearsThem() {
+        assertEquals(listOf(a.copy(plan = trip)), notes(listOf(a.copy(plan = trip)), listOf(a), listOf(a.copy(plan = trip))))
+        assertEquals(listOf(a.copy(plan = trip)), notes(listOf(a), listOf(a.copy(plan = trip)), listOf(a)))
+        // First sync after updating: a plan wins over none.
+        assertEquals(listOf(a.copy(plan = trip)), notes(listOf(a.copy(plan = "")), listOf(a.copy(plan = trip)), listOf(a)))
+    }
+
+    @Test fun plansSurviveTheFileAndTheBase() {
+        val state = SyncState(notes = listOf(b.copy(plan = trip), a.copy(plan = "")))
+        val r = SyncFormat.parse(SyncFormat.encode(state, null, 1, "Android"))!!
+        assertEquals(state.notes, r.notes)
+        assertEquals(state.notes, SyncFormat.parseBase(SyncFormat.encodeBase(state), "").notes)
+    }
+
     // ---------- usage ----------
 
     private val oct = mapOf("2026-10" to UsageMonth(words = 500, dictations = 20))

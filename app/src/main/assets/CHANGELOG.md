@@ -6,6 +6,14 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.51 · 2026-11-03
+- Reminders and checklists on voice notes (beta). With the mic button, start with "Remind me at 7:30 to lock the shop" or "Make a list for the trip: chargers, cooler, dog food, at 6 load the dogs". Lines with a time ring then; the rest just wait to be ticked. "Remind me" only counts when you say a time, so a text that starts "Remind me what time…" still goes to your friend, and the bubble lets you type it there instead.
+- With the Voice note tile there's nothing to remember: just talk. When AI cleanup is on, the AI also spots a reminder or a list in what you said and sets it up.
+- On a note: a bell pill for its reminder, tick boxes for its list, and a time on any line (tap the little bell). Add a reminder or a checklist to any note from its ⋮ menu. Reminders can ring as a notification or like an alarm clock, with Done and Snooze buttons.
+- Reminders use the same kind of alarm as the clock app, so they ring on time even when the phone is asleep, and they're set again after a restart, an update or a time zone change. If something on the phone would stop them (notifications off, battery saver), the note says so with a button to fix it.
+- New on the Privacy page: Reminder text on the lock screen. Off (and on Most private), reminders still ring but show their text only once the phone is unlocked.
+- Reminders and checklists sync to your computers, which keep them for your other phones; the computers don't show them yet.
+
 ## 1.50 · 2026-10-29
 - Long dictations no longer lose their last few seconds when you finish softly. The end used to be dropped if it was quieter than the rest, even though the mic had picked it up.
 
