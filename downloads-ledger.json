@@ -2201,7 +2201,7 @@
    "release": "linux-v0.16.1"
   },
   "689539781": {
-   "count": 11,
+   "count": 12,
    "name": "Tokalot-v1.50.apk",
    "release": "v1.50"
   },
@@ -2306,7 +2306,7 @@
    "release": "desktop"
   },
   "689544768": {
-   "count": 127,
+   "count": 129,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2334,8 +2334,83 @@
    "count": 0,
    "name": "Tokalot-beta.apk",
    "release": "android-beta"
+  },
+  "706369802": {
+   "count": 0,
+   "name": "Tokalot-linux-arm64-0.17.0.tar.gz",
+   "release": "linux-v0.17.0"
+  },
+  "706369804": {
+   "count": 0,
+   "name": "Tokalot-linux-x64-0.17.0.tar.gz",
+   "release": "linux-v0.17.0"
+  },
+  "706374075": {
+   "count": 0,
+   "name": "Tokalot-v1.51.apk",
+   "release": "v1.51"
+  },
+  "706376140": {
+   "count": 0,
+   "name": "RELEASES-win-arm64",
+   "release": "desktop-v1.21.0"
+  },
+  "706376143": {
+   "count": 0,
+   "name": "Tokalot-1.21.0-win-arm64-full.nupkg",
+   "release": "desktop-v1.21.0"
+  },
+  "706376145": {
+   "count": 0,
+   "name": "Tokalot-win-Portable.zip",
+   "release": "desktop-v1.21.0"
+  },
+  "706376146": {
+   "count": 0,
+   "name": "Tokalot-1.21.0-full.nupkg",
+   "release": "desktop-v1.21.0"
+  },
+  "706376147": {
+   "count": 0,
+   "name": "RELEASES",
+   "release": "desktop-v1.21.0"
+  },
+  "706376177": {
+   "count": 0,
+   "name": "Tokalot-win-arm64-Portable.zip",
+   "release": "desktop-v1.21.0"
+  },
+  "706376193": {
+   "count": 0,
+   "name": "TokalotSetup-arm64.exe",
+   "release": "desktop-v1.21.0"
+  },
+  "706376380": {
+   "count": 0,
+   "name": "TokalotSetup.exe",
+   "release": "desktop-v1.21.0"
+  },
+  "706376441": {
+   "count": 0,
+   "name": "assets.win-arm64.json",
+   "release": "desktop-v1.21.0"
+  },
+  "706376446": {
+   "count": 0,
+   "name": "assets.win.json",
+   "release": "desktop-v1.21.0"
+  },
+  "706376478": {
+   "count": 0,
+   "name": "releases.win-arm64.json",
+   "release": "desktop-v1.21.0"
+  },
+  "706376482": {
+   "count": 0,
+   "name": "releases.win.json",
+   "release": "desktop-v1.21.0"
   }
  },
- "total": 1145,
- "updated": "2026-11-03T15:09:29Z"
+ "total": 1148,
+ "updated": "2026-11-03T16:57:45Z"
 }
