@@ -1021,7 +1021,7 @@
    "release": "desktop-v1.13.0"
   },
   "654875786": {
-   "count": 2,
+   "count": 3,
    "name": "assets.win.json",
    "release": "desktop-v1.13.0"
   },
@@ -1111,22 +1111,22 @@
    "release": "desktop-v1.14.0"
   },
   "656874703": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.14.0"
   },
   "656874706": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.14.0"
   },
   "656874708": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.14.0"
   },
   "656874722": {
-   "count": 2,
+   "count": 3,
    "name": "releases.win.json",
    "release": "desktop-v1.14.0"
   },
@@ -1191,22 +1191,22 @@
    "release": "desktop-v1.15.0"
   },
   "656991310": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.15.0"
   },
   "656991331": {
-   "count": 2,
+   "count": 3,
    "name": "assets.win.json",
    "release": "desktop-v1.15.0"
   },
   "656991350": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.15.0"
   },
   "656991360": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win.json",
    "release": "desktop-v1.15.0"
   },
@@ -1261,22 +1261,22 @@
    "release": "desktop-v1.15.1"
   },
   "657261470": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.15.1"
   },
   "657261474": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.15.1"
   },
   "657261480": {
-   "count": 2,
+   "count": 3,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.15.1"
   },
   "657261501": {
-   "count": 1,
+   "count": 3,
    "name": "releases.win.json",
    "release": "desktop-v1.15.1"
   },
@@ -1401,22 +1401,22 @@
    "release": "desktop-v1.15.2"
   },
   "657907732": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.15.2"
   },
   "657907742": {
-   "count": 3,
+   "count": 4,
    "name": "assets.win.json",
    "release": "desktop-v1.15.2"
   },
   "657907744": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.15.2"
   },
   "657907754": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win.json",
    "release": "desktop-v1.15.2"
   },
@@ -1541,22 +1541,22 @@
    "release": "desktop-v1.16.0"
   },
   "657967435": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.16.0"
   },
   "657967439": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.16.0"
   },
   "657967452": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.16.0"
   },
   "657967465": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win.json",
    "release": "desktop-v1.16.0"
   },
@@ -1686,22 +1686,22 @@
    "release": "desktop-v1.17.0"
   },
   "668155517": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.17.0"
   },
   "668155520": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.17.0"
   },
   "668155521": {
-   "count": 2,
+   "count": 3,
    "name": "releases.win.json",
    "release": "desktop-v1.17.0"
   },
   "668155522": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.17.0"
   },
@@ -1821,22 +1821,22 @@
    "release": "desktop-v1.18.0"
   },
   "668174369": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.18.0"
   },
   "668174375": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.18.0"
   },
   "668174377": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.18.0"
   },
   "668174389": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win.json",
    "release": "desktop-v1.18.0"
   },
@@ -1961,22 +1961,22 @@
    "release": "desktop-v1.19.0"
   },
   "670398016": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.19.0"
   },
   "670398040": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.19.0"
   },
   "670398061": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.19.0"
   },
   "670398073": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win.json",
    "release": "desktop-v1.19.0"
   },
@@ -2106,22 +2106,22 @@
    "release": "desktop-v1.20.0"
   },
   "689057495": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.20.0"
   },
   "689057499": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.20.0"
   },
   "689057530": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.20.0"
   },
   "689057534": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win.json",
    "release": "desktop-v1.20.0"
   },
@@ -2201,7 +2201,7 @@
    "release": "linux-v0.16.1"
   },
   "689539781": {
-   "count": 10,
+   "count": 11,
    "name": "Tokalot-v1.50.apk",
    "release": "v1.50"
   },
@@ -2246,22 +2246,22 @@
    "release": "desktop-v1.20.1"
   },
   "689542260": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.20.1"
   },
   "689542295": {
-   "count": 1,
+   "count": 2,
    "name": "assets.win.json",
    "release": "desktop-v1.20.1"
   },
   "689542297": {
-   "count": 2,
+   "count": 3,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.20.1"
   },
   "689542299": {
-   "count": 1,
+   "count": 2,
    "name": "releases.win.json",
    "release": "desktop-v1.20.1"
   },
@@ -2306,7 +2306,7 @@
    "release": "desktop"
   },
   "689544768": {
-   "count": 119,
+   "count": 127,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2329,8 +2329,13 @@
    "count": 1,
    "name": "Tokalot-mac-arm64-0.12.1.zip",
    "release": "mac-v0.12.1"
+  },
+  "704791086": {
+   "count": 0,
+   "name": "Tokalot-beta.apk",
+   "release": "android-beta"
   }
  },
- "total": 1094,
- "updated": "2026-11-03T06:48:55Z"
+ "total": 1145,
+ "updated": "2026-11-03T15:09:29Z"
 }
