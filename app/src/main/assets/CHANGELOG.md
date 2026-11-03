@@ -6,7 +6,7 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
-## 1.52 · 2026-11-03
+## 1.53 · 2026-11-03
 - The keyboard's keys look softly raised instead of flat: a light top edge, a gentle shade down each key and a soft shadow under it, and a key sinks flat while you press it. Classic and Tinted have it. Prefer the old look? Pick Flat in the keyboard's menu or Settings › Keyboard.
 - New screenshots show up on the bar more dependably. Tokalot now recognises screenshots wherever the phone saves them (Pictures, DCIM, a Screenshots album, files named Screenshot), looks again a moment later for phones that save the file late, and keeps offering it for 5 minutes instead of 2.
 - The screenshot's button on the bar is always the same size: a tiny copy of the picture, whole and in its own shape, with "Screenshot" beside it ("Image" for a picture you copied).
