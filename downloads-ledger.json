@@ -2221,7 +2221,7 @@
    "release": "desktop-v1.20.1"
   },
   "689542102": {
-   "count": 1,
+   "count": 2,
    "name": "Tokalot-win-Portable.zip",
    "release": "desktop-v1.20.1"
   },
@@ -2241,7 +2241,7 @@
    "release": "desktop-v1.20.1"
   },
   "689542259": {
-   "count": 2,
+   "count": 3,
    "name": "TokalotSetup.exe",
    "release": "desktop-v1.20.1"
   },
@@ -2451,7 +2451,7 @@
    "release": "desktop"
   },
   "706379530": {
-   "count": 3,
+   "count": 6,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2481,6 +2481,6 @@
    "release": "android-beta"
   }
  },
- "total": 1171,
- "updated": "2026-11-03T21:00:04Z"
+ "total": 1176,
+ "updated": "2026-11-04T01:22:44Z"
 }
