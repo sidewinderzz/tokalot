@@ -543,7 +543,7 @@ class Dictation(context: Context) {
             WhisperBridge.setAbort(abortFlag, false)
             job.call.check()
             val bytes = try {
-                WhisperBridge.transcribe(whisperCtx, abortFlag, samples, threads, hint)
+                WhisperBridge.transcribe(whisperCtx, abortFlag, Loudness.forSpeech(samples), threads, hint)
             } catch (e: IllegalStateException) {
                 job.call.check() // aborted by a cancel or the deadline: that's what gets reported
                 throw e // a real failure: the recording is kept as a failed entry that can be retried

@@ -121,6 +121,7 @@ public static class CloudStt
         // Long recordings are bigger uploads and take longer to transcribe: allow half their length on top.
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(25000 + samples.Length / (Recorder.SampleRate / 500));
+        samples = Loudness.ForSpeech(samples); // a quiet microphone's soft words are otherwise missed
         try
         {
             // FLAC is the same audio in about half the bytes. A service that won't take it gets WAV.
@@ -187,5 +188,52 @@ public static class CloudStt
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
         using var res = await Net.Http.SendAsync(req, ct);
         return ((int)res.StatusCode, await res.Content.ReadAsStringAsync(ct));
+    }
+}
+
+/**
+ * Brings a quiet recording up to a normal speaking level before speech recognition. Some laptop microphones
+ * (seen on a Windows on ARM laptop) record speech 15-18 dB below normal, peaking around a twentieth of full
+ * scale. Whisper then misses soft words or whole soft endings. The saved recording is left as it was.
+ */
+public static class Loudness
+{
+    /** The level speech is brought up to: the loud parts of it (RMS of the top 5% of 50 ms stretches). */
+    public const float Target = 0.1f;
+    /** Never more than this (18 dB), so a recording of nothing but room noise isn't made into a roar. */
+    public const float MaxGain = 8f;
+    /** The loudest 50 ms stretch is never raised past this RMS. */
+    public const float Loudest = 0.25f;
+
+    /** How much ForSpeech would raise a by (1 = left alone). */
+    public static float Gain(float[] a)
+    {
+        const int win = 800; // 50 ms
+        int n = a.Length / win;
+        if (n < 4) return 1f;
+        var rms = new float[n];
+        for (int w = 0; w < n; w++)
+        {
+            double sum = 0;
+            for (int i = w * win; i < (w + 1) * win; i++) sum += a[i] * a[i];
+            rms[w] = (float)Math.Sqrt(sum / win);
+        }
+        Array.Sort(rms);
+        var loud = rms[Math.Min(n - 1, n * 95 / 100)];
+        if (loud <= 0.0005f) return 1f; // silence: nothing to bring up
+        // A short command in a long recording: the top 5% can be room noise. Never push the loudest stretch past
+        // Loudest, so speech that is already at a normal level is never raised into clipping.
+        var g = Math.Min(Math.Min(MaxGain, Target / loud), Loudest / rms[n - 1]);
+        return g < 1.25f ? 1f : g; // already at a normal level
+    }
+
+    /** a, raised to a normal speaking level when it is quiet (a new array), or a itself. */
+    public static float[] ForSpeech(float[] a)
+    {
+        var g = Gain(a);
+        if (g == 1f) return a;
+        var o = new float[a.Length];
+        for (int i = 0; i < a.Length; i++) o[i] = Math.Clamp(a[i] * g, -0.99f, 0.99f);
+        return o;
     }
 }
