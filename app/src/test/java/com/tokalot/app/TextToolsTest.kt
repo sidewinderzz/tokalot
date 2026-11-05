@@ -16,14 +16,14 @@ class TextToolsTest {
     }
 
     @Test fun promptEchoOnSilence() {
-        val words = listOf("Tokalot", "srg62003", "Shelby")
-        assertTrue(TextTools.isEcho("Thank you. Thank you. Hó, Tokalot, srg62003.", words, sparse = false))
+        val words = listOf("Tokalot", "qz4417", "Marisol")
+        assertTrue(TextTools.isEcho("Thank you. Thank you. Hó, Tokalot, qz4417.", words, sparse = false))
         assertTrue(TextTools.isEcho("Thank you. Thank you.", words, sparse = true))
         assertTrue(TextTools.isEcho("Tokalot.", words, sparse = true))
         // Something was actually said
         assertTrue(!TextTools.isEcho("Thank you. Thank you.", words, sparse = false))
         assertTrue(!TextTools.isEcho("Tokalot is working.", words, sparse = false))
-        assertTrue(!TextTools.isEcho("Send it to Shelby, Tokalot, and the vet.", words, sparse = false))
+        assertTrue(!TextTools.isEcho("Send it to Marisol, Tokalot, and the vet.", words, sparse = false))
         assertTrue(!TextTools.isEcho("Tokalot", words, sparse = false))
     }
 

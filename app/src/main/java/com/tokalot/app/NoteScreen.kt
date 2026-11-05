@@ -512,7 +512,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     }
 
     /**
-     * Shelby's "Stretch": pressing the speed button grows it upward into a wheel, with the speed lit right on
+     * The "Stretch" speed wheel: pressing the speed button grows it upward into a wheel, with the speed lit right on
      * the button and faster speeds stacked above it (the button sits at the bottom of the screen, so the wheel never
      * grows down past it); dragging up goes faster, down slower, and letting go shrinks it back. About 6 dp a step, and a quick
      * flick goes up to twice as far, so 0.5× to 4× fits in one thumb reach. A tap without a drag is a click.
