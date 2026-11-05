@@ -926,8 +926,16 @@ class SettingsScreen(private val a: MainActivity) {
         // Optional extras for the bar, each needing one permission: a screenshot just taken, ready to paste,
         // and a sign-in code that just came in a text or email.
         val photos = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
-        kbRow("Paste new screenshots", checkSelfPermission(photos) == android.content.pm.PackageManager.PERMISSION_GRANTED, "Allowed", "Allow") {
-            askPermission(photos, 3)
+        val photosOk = checkSelfPermission(photos) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        // "Select photos" on Android 14+ lets Tokalot see only the pictures picked then, never a new screenshot:
+        // that needs "Allow all", which is only on the app's permission page once a choice was made.
+        val somePhotos = !photosOk && Build.VERSION.SDK_INT >= 34 &&
+            checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        kbRow(if (somePhotos) "Paste new screenshots (needs Allow all photos)" else "Paste new screenshots", photosOk, "Allowed", if (somePhotos) "Allow all" else "Allow") {
+            if (somePhotos) {
+                toast("Photos and videos › Allow all")
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName")))
+            } else askPermission(photos, 3)
         }
         kbRow("Codes from texts and emails", CodeListener.allowed(this), "Allowed", "Allow") {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))

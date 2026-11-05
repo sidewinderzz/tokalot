@@ -25,8 +25,8 @@ class KeyboardTest {
         assertTrue(words.size > 150_000)
         assertTrue(words.probOf("the") > 200)
         assertTrue(words.probOf("tractor") > 0)
-        // Farm, shop and texting words were added to the list.
-        assertTrue(words.probOf("swather") > 0)
+        // Texting words were added to the list; nothing trade-specific (it's a public app).
+        assertTrue(words.probOf("swather") < 0)
         assertTrue(words.probOf("lol") > 100)
         assertTrue(words.next("thank")!!.contains("you"))
     }
@@ -45,7 +45,7 @@ class KeyboardTest {
     }
 
     @Test fun realWordsAndSlangAreLeftAlone() {
-        for (w in listOf("its", "were", "nut", "lol", "ok", "thx", "swather", "hay", "baler")) assertNull(w, fixed(w))
+        for (w in listOf("its", "were", "nut", "lol", "ok", "thx", "hay", "baler")) assertNull(w, fixed(w))
         // Numbers, addresses and shouting aren't touched.
         assertNull(fixed("4wd"))
         assertNull(fixed("www.deere.com"))
@@ -72,13 +72,14 @@ class KeyboardTest {
         assertEquals("Kubota", fixed("kubota"))
     }
 
-    @Test fun textingAndFarmWords() {
-        for (w in listOf("ur", "prolly", "omw", "tonite", "yea", "auger", "nozzle")) assertNull(w, fixed(w))
+    @Test fun textingWordsAndMisspellings() {
+        for (w in listOf("ur", "prolly", "omw", "tonite", "yea")) assertNull(w, fixed(w))
         assertEquals("definitely", fixed("definatly"))
-        assertEquals("nozzle", fixed("nozzel"))
-        assertEquals("auger", fixed("augar"))
-        assertEquals("sprayer", fixed("sprayr"))
         assertEquals("separate", fixed("seperate"))
+        // Shelby's sentence from 1.56, where nothing was fixed because the word list never loaded.
+        assertEquals("the", fixed("theb"))
+        assertEquals("supposed", fixed("supoosed"))
+        assertEquals("I", fixed("i"))
     }
 
     @Test fun contextHelps() {

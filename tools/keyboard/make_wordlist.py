@@ -88,15 +88,14 @@ def parse(path):
 
 
 
-# Words the 2014 list lacks or ranks too low: texting shorthand, and farm, shop and machinery terms.
+# Words the 2014 list lacks or ranks too low: texting shorthand and greetings. Nothing trade- or
+# region-specific: Tokalot is a public app (hand-kept additions live in assets/keyboard/en_US_extra.txt).
 # Each is raised to at least this probability (0-255); nothing is ever lowered.
 EXTRA = {
     "lol": 140, "lmao": 110, "omg": 120, "idk": 115, "thx": 110, "ty": 90, "btw": 115, "brb": 90, "imo": 95,
     "tbh": 105, "ikr": 85, "smh": 90, "np": 90, "pls": 100, "plz": 85, "ya": 100, "nah": 115, "ok": 150,
     "yep": 110, "nope": 110, "yup": 105, "hmm": 100, "haha": 125, "hahaha": 100, "lmk": 100, "cuz": 90,
-    "swather": 70, "swathers": 60, "haybine": 60, "discbine": 55, "haylage": 60, "baleage": 55, "bushhog": 55,
     "hello": 150, "hey": 150, "hi": 130,
-    "skidsteer": 60, "no-till": 60, "MIG": 70, "TIG": 70, "Fendt": 55, "Claas": 55, "Bobcat": 70, "windrower": 50,
 }
 
 
