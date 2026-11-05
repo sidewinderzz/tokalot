@@ -557,8 +557,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                         fillSpeedDrawer(drawer)
                     }
                 }))
-                addView(text("Speeds up where the talking is slow and eases off where it's fast. Never slower than 1×.", 13f, C.SUB), lp().margins(this, t = 4))
-            } else addView(text("Flick the wheel to pick a speed. Hold the speed button to go back to 1×.", 13f, C.SUB), lp().margins(this, t = 4))
+                addView(text("Speeds up where the talking is slow and eases off where it's fast. Never slower than 1×.", 13f, C.SUB), lp().margins(this@with, t = 4))
+            } else addView(text("Flick the wheel to pick a speed. Hold the speed button to go back to 1×.", 13f, C.SUB), lp().margins(this@with, t = 4))
         }
         drawer.addView(row(wheel, side).apply { gravity = Gravity.CENTER_VERTICAL }, lp())
     }
