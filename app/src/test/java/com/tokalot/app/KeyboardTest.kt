@@ -76,7 +76,7 @@ class KeyboardTest {
         for (w in listOf("ur", "prolly", "omw", "tonite", "yea")) assertNull(w, fixed(w))
         assertEquals("definitely", fixed("definatly"))
         assertEquals("separate", fixed("seperate"))
-        // Shelby's sentence from 1.56, where nothing was fixed because the word list never loaded.
+        // A real sentence from 1.56, where nothing was fixed because the word list never loaded.
         assertEquals("the", fixed("theb"))
         assertEquals("supposed", fixed("supoosed"))
         assertEquals("I", fixed("i"))
