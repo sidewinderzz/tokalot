@@ -651,6 +651,8 @@ public sealed partial class MainWindow : Window
         // The permissions this platform needs that aren't in place yet, each naming what to do.
         PlatformWarnings(col);
 
+        WhatsNewCard(col);
+
         // For people who updated: privacy levels are new, and their settings didn't change.
         if (!S.PrivacyCardSeen)
         {
@@ -2770,10 +2772,49 @@ public sealed partial class MainWindow : Window
         return true;
     }
 
+    // ---------- What's new ----------
+
+    /** The update the What's new card is about. Raise it (and change the slides) to show a new one. */
+    private const string WhatsNewVersion = "notes-1.56";
+    private int whatsNewAt;
+
+    private static readonly (string Title, string Text)[] WhatsNewSlides =
+    {
+        ("Shared messages land on Home", "Voice messages and text you share on your phone now show up on Home with your dictations. Move to Notes files one."),
+        ("A speed wheel for voice notes", "Click the speed button under a voice note and scroll the wheel, from 0.5× to 4×. Auto speed brings slow talkers up to the pace you pick."),
+        ("Copy what you need", "Copy text copies the whole note in one click. The Summary and Timeline each have their own Copy button too."),
+        ("Find any setting", "Settings has a search box that knows everyday words. Your note defaults have their own Notes page."),
+        ("New on your phone", "The Android app can now read articles, PDFs and Word files aloud, and its keyboard fixes run-together words and common misspellings. Have a look if you like, or skip it."),
+    };
+
+    /** Shown once on Home after updating (a new install skips it): a few short slides, Back / Next, then Done. */
+    private void WhatsNewCard(StackPanel col)
+    {
+        if (S.WhatsNewSeen == WhatsNewVersion) return;
+        if (S.Fresh && !S.WelcomeDone) return; // the welcome marks it seen
+        void Close() { S.WhatsNewSeen = WhatsNewVersion; S.Save(); whatsNewAt = 0; Render(); }
+        var at = Math.Clamp(whatsNewAt, 0, WhatsNewSlides.Length - 1);
+        var (title, text) = WhatsNewSlides[at];
+        var last = at == WhatsNewSlides.Length - 1;
+        var left = at == 0
+            ? Ui.Button("Skip", Close)
+            : Ui.Button("Back", () => { whatsNewAt = at - 1; Render(); });
+        var right = new List<Control>();
+        if (last) right.Add(Spaced(Ui.Button("Get the Android app", () => Open(Updater.RepoUrl + "/releases/latest")), 0, 0, 8, 0));
+        right.Add(last ? Ui.Button("Done", Close, filled: true) : Ui.Button("Next", () => { whatsNewAt = at + 1; Render(); }, filled: true));
+        var c = Ui.Stack(
+            Ui.Text($"WHAT'S NEW · {at + 1} OF {WhatsNewSlides.Length}", 11.5, C.Sub, bold: true),
+            Spaced(Ui.Text(title, 16, bold: true), 0, 4, 0, 0),
+            Spaced(Ui.Text(text, 14, C.Sub), 0, 4, 0, 12),
+            Spread(left, right.ToArray()));
+        col.Children.Add(Spaced(Ui.Card(c, 20), 0, 0, 0, 14));
+    }
+
     private void FinishWelcome()
     {
         S.WelcomeDone = true;
         S.PrivacyCardSeen = true; // they've just picked a level
+        S.WhatsNewSeen = WhatsNewVersion; // nothing is new on a new install
         S.Save();
         welcomeStep = 0;
         scroller.Offset = default;

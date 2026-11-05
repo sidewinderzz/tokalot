@@ -1,5 +1,10 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.20.0
+
+- A short What's new card shows once on Home after this update, with a slide for each new feature and one about what's new in the Android app (skip it if you like).
+- The note's Copy button is now called Copy text, so it's clear it copies the whole note. The Timeline has its own Copy button now, like the Summary.
+
 ## New in 0.19.0
 
 - Voice notes have a speed wheel. Click the speed button under a note and scroll or drag the wheel to any speed from 0.5× to 4×. Scrolling over the button works too, and right-clicking it goes back to 1×.
