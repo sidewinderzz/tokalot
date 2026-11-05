@@ -29,12 +29,13 @@ class ListenTextTest {
     }
 
     @Test fun pdfLinesBecomeParagraphs() {
-        val long = "This line of the paragraph runs right across the page width of the document"
-        val pages = listOf("Field Guide\n$long\n$long\nends here.\n1", "Field Guide\nNext part\n$long\nends too.\n2", "Field Guide\n$long\nlast.\n3")
+        // Body lines differ page to page; only the header and page numbers repeat.
+        fun long(n: Int) = "Line $n of the paragraph runs right across the page width of the document"
+        val pages = listOf("Field Guide\n${long(1)}\n${long(2)}\nends here.\n1", "Field Guide\nNext part\n${long(3)}\nends too.\n2", "Field Guide\n${long(4)}\nlast.\n3")
         val blocks = ListenText.reflow(ListenText.withoutPageFurniture(pages))
         assertTrue(blocks.none { it == "Field Guide" || it == "1" })
         assertTrue(blocks.contains("Next part"))
-        assertTrue(blocks.first().startsWith(long) && blocks.first().endsWith("ends here."))
+        assertTrue(blocks.first().startsWith(long(1)) && blocks.first().endsWith("ends here."))
     }
 
     @Test fun wordParagraphs() {
