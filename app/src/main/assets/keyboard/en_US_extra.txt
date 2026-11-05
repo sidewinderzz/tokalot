@@ -31,31 +31,6 @@ dunno	95
 y'all	110
 okay	150
 yeah	160
-auger	110
-augers	90
-nozzle	110
-nozzles	100
-sprayer	110
-sprayers	95
-planter	110
-seeder	100
-drill	130
-combine	140
-header	120
-baler	110
-bales	110
-heifer	100
-heifers	95
-bushels	110
-acres	130
-fertilizer	115
-hydraulic	115
-hydraulics	110
-diesel	120
-welder	110
-welding	115
-plasma	110
-torque	110
 =shortcuts
 definatly	definitely	15
 definately	definitely	15
@@ -93,8 +68,3 @@ andthe	and the	15
 forthe	for the	15
 iam	I am	15
 alot	a lot	15
-nozzel	nozzle	15
-augar	auger	15
-hydrolic	hydraulic	15
-hydralic	hydraulic	15
-fertlizer	fertilizer	15

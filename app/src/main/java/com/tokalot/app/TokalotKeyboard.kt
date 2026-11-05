@@ -202,9 +202,12 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val app = applicationContext
         Thread {
             val w = runCatching {
-                app.assets.open("keyboard/en_US.txt.gz").use { main ->
-                    app.assets.open("keyboard/en_US_extra.txt").bufferedReader().use { extra -> KeyboardWords.load(GZIPInputStream(main).bufferedReader(), extra) }
-                }
+                // The build unzips .gz assets and drops the ".gz" (the APK holds keyboard/en_US.txt), so asking
+                // for the .gz name failed and the keyboard ran with no word list at all: no suggestions, no
+                // autocorrect, no swipe. Both names are tried, the plain one first.
+                val main = runCatching { app.assets.open("keyboard/en_US.txt") }.getOrNull()?.bufferedReader()
+                    ?: GZIPInputStream(app.assets.open("keyboard/en_US.txt.gz")).bufferedReader()
+                main.use { m -> app.assets.open("keyboard/en_US_extra.txt").bufferedReader().use { extra -> KeyboardWords.load(m, extra) } }
             }.onFailure { android.util.Log.e("TokalotKeyboard", "word list didn't load", it) }.getOrNull()
             val h = runCatching {
                 File(app.filesDir, HISTORY_FILE).takeIf { it.exists() }?.readText()?.let { TypingHistory.parse(it) }
@@ -214,6 +217,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
                 loading = false
                 words = w; history = h; emoji = e
                 instance?.loaded()
+                if (w == null) instance?.notice("Suggestions and autocorrect are off: the word list didn't load", 5000)
             }
         }.start()
     }
