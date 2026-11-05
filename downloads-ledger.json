@@ -2706,12 +2706,12 @@
    "release": "desktop"
   },
   "712190367": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-1.24.0-win-arm64-full.nupkg",
    "release": "desktop"
   },
   "712190409": {
-   "count": 5,
+   "count": 6,
    "name": "Tokalot-v1.56.apk",
    "release": "v1.56"
   },
@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 13,
+   "count": 21,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2756,7 +2756,7 @@
    "release": "desktop"
   },
   "712191683": {
-   "count": 0,
+   "count": 4,
    "name": "releases.win-arm64.json",
    "release": "desktop"
   },
@@ -2771,11 +2771,11 @@
    "release": "mac-v0.16.0"
   },
   "712224937": {
-   "count": 1,
+   "count": 2,
    "name": "Tokalot-beta.apk",
    "release": "android-beta"
   }
  },
- "total": 1273,
- "updated": "2026-11-05T15:28:22Z"
+ "total": 1288,
+ "updated": "2026-11-05T21:59:40Z"
 }
