@@ -570,6 +570,8 @@ public sealed class MainWindow : Window
 
         SpelledCard(col);
 
+        WhatsNewCard(col);
+
         // For people who updated: privacy levels are new, and their settings didn't change.
         if (!S.PrivacyCardSeen)
         {
@@ -1588,7 +1590,7 @@ public sealed class MainWindow : Window
             buttons.Children.Add(timeline);
         }
         // The whole text in one click (a summary has its own copy button on its panel).
-        var copyPill = NotePill("⧉", "Copy", false, () => { _ = TextInjector.Copy(note.Text); Toast("Copied"); });
+        var copyPill = NotePill("⧉", "Copy text", false, () => { _ = TextInjector.Copy(note.Text); Toast("Copied"); });
         copyPill.Margin = new Thickness(8, 0, 0, 0);
         buttons.Children.Add(copyPill);
         col.Children.Add(Spaced(buttons, 0, 0, 0, 14));
@@ -1798,6 +1800,24 @@ public sealed class MainWindow : Window
         return Ui.Card(box, 22);
     }
 
+    /** The timeline as plain text: topic headings, then "m:ss  point" lines. */
+    private static string TimelineText(List<NoteMedia.Point> points)
+    {
+        var b = new System.Text.StringBuilder();
+        var heading = "";
+        foreach (var p in points)
+        {
+            if (p.Topic.Length > 0 && !p.Topic.Equals(heading, StringComparison.OrdinalIgnoreCase))
+            {
+                heading = p.Topic;
+                if (b.Length > 0) b.Append('\n');
+                b.Append(p.Topic).Append('\n');
+            }
+            b.Append(NoteMedia.Clock(p.Time)).Append("  ").Append(p.Text).Append('\n');
+        }
+        return b.ToString().TrimEnd();
+    }
+
     private Border TimelinePanel(long id, NoteImport.Info? info, List<NoteMedia.Segment> segments, string? busy)
     {
         var box = Ui.Stack(Ui.Text("Timeline", 15.5, bold: true),
@@ -1832,8 +1852,8 @@ public sealed class MainWindow : Window
                 box.Children.Add(Ui.Keys(row, () => NotePlay(at), NoteMedia.Clock(p.Time) + ", " + p.Text));
             }
             var redo = Ui.Button("Redo", () => RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments)));
-            redo.Margin = new Thickness(0, 10, 0, 0);
-            box.Children.Add(redo);
+            var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(TimelineText(points)); Toast("Copied"); }, icon: "copy");
+            box.Children.Add(Spaced(Ui.Row(copy, redo), 0, 10, 0, 0));
         }
         return Ui.Card(box, 22);
     }
@@ -2655,10 +2675,49 @@ public sealed class MainWindow : Window
         return true;
     }
 
+    // ---------- What's new ----------
+
+    /** The update the What's new card is about. Raise it (and change the slides) to show a new one. */
+    private const string WhatsNewVersion = "notes-1.56";
+    private int whatsNewAt;
+
+    private static readonly (string Title, string Text)[] WhatsNewSlides =
+    {
+        ("Shared messages land on Home", "Voice messages and text you share on your phone now show up on Home with your dictations. Move to Notes files one."),
+        ("A speed wheel for voice notes", "Click the speed button under a voice note and scroll the wheel, from 0.5× to 4×. Auto speed brings slow talkers up to the pace you pick."),
+        ("Copy what you need", "Copy text copies the whole note in one click. The Summary and Timeline each have their own Copy button too."),
+        ("Find any setting", "Settings has a search box that knows everyday words. Your note defaults have their own Notes page."),
+        ("New on your phone", "The Android app can now read articles, PDFs and Word files aloud, and its keyboard fixes run-together words and common misspellings. Have a look if you like, or skip it."),
+    };
+
+    /** Shown once on Home after updating (a new install skips it): a few short slides, Back / Next, then Done. */
+    private void WhatsNewCard(StackPanel col)
+    {
+        if (S.WhatsNewSeen == WhatsNewVersion) return;
+        if (S.Fresh && !S.WelcomeDone) return; // the welcome marks it seen
+        void Close() { S.WhatsNewSeen = WhatsNewVersion; S.Save(); whatsNewAt = 0; Render(); }
+        var at = Math.Clamp(whatsNewAt, 0, WhatsNewSlides.Length - 1);
+        var (title, text) = WhatsNewSlides[at];
+        var last = at == WhatsNewSlides.Length - 1;
+        var left = at == 0
+            ? Ui.Button("Skip", Close)
+            : Ui.Button("Back", () => { whatsNewAt = at - 1; Render(); });
+        var right = new List<UIElement>();
+        if (last) right.Add(Spaced(Ui.Button("Get the Android app", () => Open(Updater.RepoUrl + "/releases/latest")), 0, 0, 8, 0));
+        right.Add(last ? Ui.Button("Done", Close, filled: true) : Ui.Button("Next", () => { whatsNewAt = at + 1; Render(); }, filled: true));
+        var c = Ui.Stack(
+            Ui.Text($"WHAT'S NEW · {at + 1} OF {WhatsNewSlides.Length}", 11.5, C.Sub, bold: true),
+            Spaced(Ui.Text(title, 16, bold: true), 0, 4, 0, 0),
+            Spaced(Ui.Text(text, 14, C.Sub), 0, 4, 0, 12),
+            Spread(left, right.ToArray()));
+        col.Children.Add(Spaced(Ui.Card(c, 20), 0, 0, 0, 14));
+    }
+
     private void FinishWelcome()
     {
         S.WelcomeDone = true;
         S.PrivacyCardSeen = true; // they've just picked a level
+        S.WhatsNewSeen = WhatsNewVersion; // nothing is new on a new install
         S.Save();
         welcomeStep = 0;
         scroller.ScrollToTop();

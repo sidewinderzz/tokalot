@@ -151,6 +151,8 @@ public sealed class Settings
     public bool WelcomeStarted { get; set; }
     /** The one-time card that introduces privacy levels to people who updated. */
     public bool PrivacyCardSeen { get; set; }
+    /** The version whose one-time What's new card on Home was seen or skipped ("" = none yet). Not synced. */
+    public string WhatsNewSeen { get; set; } = "";
     /** No settings file existed when this run started: a new install (see the welcome). */
     [JsonIgnore] public bool Fresh { get; private set; }
     /** Optional sync: the shared file's path on this computer ("" = off), and whether this computer puts its API keys in it. */

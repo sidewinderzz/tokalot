@@ -27,7 +27,7 @@ import kotlin.math.abs
  */
 object Tour {
     /** The version these slides are about. Raise it (and change the slides) to show a new tour. */
-    const val VERSION = "1.27"
+    const val VERSION = "1.56"
 
     private fun sp(ctx: android.content.Context) = ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
 
@@ -45,28 +45,39 @@ object Tour {
 
     private class Slide(val title: String, val text: String, val picture: MainActivity.() -> View, val action: Pair<String, () -> Unit>? = null)
 
-    private fun slides(a: MainActivity) = listOf(
+    private fun slides(a: MainActivity) = listOfNotNull(
         Slide(
-            "Fits into the sentence",
-            "Dictate into the middle of a sentence and it fits in: no capital at the start, no period when the sentence carries on.",
-            { fitPicture() },
+            "Shared messages land on Home",
+            "Voice messages and text you share now show up on Home with your dictations. Tap Move to Notes to file one.",
+            { homePicture() },
         ),
         Slide(
-            "Spell it once",
-            "Spell a name out while you talk and it's written once, spelled right. Tokalot then offers to add it to your dictionary.",
-            { spelledPicture() },
+            "Stretch the speed button",
+            "Press the speed button and drag up for faster, down for slower. Auto speed brings slow talkers up to the pace you pick.",
+            { speedPicture() },
         ),
         Slide(
-            "No text box needed",
-            "Add the Dictate tile to Quick Settings, or hold both volume keys (Android 11+), and talk while you read or scroll. With no text box selected, the text goes on the clipboard.",
-            { tilePicture() },
+            "Copy what you need",
+            "Copy text copies the whole note in one tap. The Summary and Timeline each have their own copy button too.",
+            { copyPicture() },
         ),
         Slide(
-            "Voice notes (beta)",
-            "Save what you say as a note instead: from the Voice note tile, or start any dictation with \"Note this\". Off until you turn it on.",
-            { notePicture() },
-            "Turn it on" to { a.openSettings(SettingsScreen.SHORTCUTS) },
+            "Find any setting",
+            "Settings has a search box that knows everyday words. Your note defaults have their own Notes page.",
+            { searchPicture() },
         ),
+        Slide(
+            "Listen to articles (beta)",
+            "Share a link, PDF or Word file to Listen in Tokalot and it plays like a voice note.",
+            { listenPicture() },
+            "Try it" to { a.toast("Open a web page, PDF or Word file, tap Share, then pick Listen in Tokalot.") },
+        ),
+        // Only for people who use the Tokalot keyboard.
+        if (TokalotKeyboard.isEnabled(a)) Slide(
+            "Smarter keyboard",
+            "Autocorrect now fixes run-together words and common misspellings, and leaves texting words like omw alone.",
+            { keysPicture() },
+        ) else null,
     )
 
     /** Shows the slides; Next / Back and a swipe move between them, and closing marks them seen. */
@@ -178,67 +189,81 @@ object Tour {
         return b
     }
 
-    private fun MainActivity.fitPicture(): View {
-        return stage(
-            box(span("I want " to 0, "T" to 2, "the blue one" to 1, "." to 2, " and the red one." to 0), "Before"),
-            box(span("I want " to 0, "the blue one" to 1, " and the red one." to 0), "Now"),
-        )
+    private fun MainActivity.chip(label: String, on: Boolean = false) = text(label, 13f, if (on) C.CARD else C.TEXT).apply {
+        background = if (on) rounded(C.TEXT, 100) else rounded(C.CARD, 100, C.LINE, 1)
+        setPadding(dp(12), dp(6), dp(12), dp(6))
     }
 
-    private fun MainActivity.spelledPicture(): View {
-        val chip = row(
-            text("Kowalski", 15f, bold = true).apply { layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) },
-            text("Add", 14f, C.CARD).apply {
-                background = rounded(C.TEXT, 100)
-                setPadding(dp(14), dp(5), dp(14), dp(5))
-            },
-        ).apply {
-            background = rounded(C.CARD, 12, C.LINE, 1)
-            setPadding(dp(12), dp(7), dp(8), dp(7))
-        }
-        return stage(
-            text("“Ask Kowalski, K-O-W-A-L-S-K-I, about the report”", 14f, C.SUB).apply { gravity = Gravity.CENTER },
-            box(span("Ask " to 0, "Kowalski" to 1, " about the report." to 0), "Typed"),
-            chip,
-        )
+    private fun MainActivity.chips(vararg c: View) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        c.forEachIndexed { i, v -> if (i > 0) addView(spacer(wDp = 6)); addView(v) }
     }
 
-    private fun MainActivity.tilePicture(): View {
-        fun tile(iconRes: Int, label: String, on: Boolean) = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            background = rounded(if (on) C.TEXT else C.CARD, 100)
-            setPadding(dp(14), dp(10), dp(18), dp(10))
-            addView(icon(iconRes, 20, if (on) C.CARD else C.TEXT))
-            addView(text(label, 14f, if (on) C.CARD else C.TEXT).apply { setPadding(dp(8), 0, 0, 0) })
-        }
-        val tiles = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            addView(tile(R.drawable.ic_mic, "Dictate", true))
-            addView(spacer(wDp = 8))
-            addView(tile(R.drawable.ic_note, "Voice note", false))
-        }
-        val copied = text("Copied ✓  The text is on your clipboard", 13f, Color.parseColor("#E2E2E6")).apply {
-            background = rounded(Color.parseColor("#E6404044"), 8)
-            setPadding(dp(12), dp(7), dp(12), dp(7))
-            gravity = Gravity.CENTER
-        }
-        return stage(tiles, text("or hold both volume keys", 13f, C.SUB).apply { gravity = Gravity.CENTER }, copied)
+    /** A note card: a small caps label over one line of text. */
+    private fun MainActivity.noteCard(label: String, body: CharSequence) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        background = rounded(C.CARD, 14, C.LINE, 1)
+        setPadding(dp(12), dp(7), dp(12), dp(7))
+        addView(text(label, 11f, C.SUB, bold = true).apply { letterSpacing = 0.06f })
+        addView(text(body, 14f), lp().margins(this@noteCard, t = 2))
     }
 
-    private fun MainActivity.notePicture(): View {
-        val note = LinearLayout(this).apply {
+    private fun MainActivity.homePicture(): View = stage(
+        noteCard("SHARED · WHATSAPP · 8:12 PM", "“Running late, be there by six”"),
+        noteCard("DICTATION · 7:40 PM", "Pick up milk on the way home"),
+        chips(chip("Move to Notes", on = true)),
+    )
+
+    private fun MainActivity.speedPicture(): View {
+        val wheel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = rounded(C.CARD, 14, C.LINE, 1)
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            addView(text("TODAY · 9:41 AM", 11f, C.SUB, bold = true).apply { letterSpacing = 0.08f })
-            addView(text(span("Call Joe about the invoice." to 1), 15f), lp().margins(this@notePicture, t = 3))
+            gravity = Gravity.CENTER_HORIZONTAL
+            background = rounded(C.CARD, 22, C.LINE, 1)
+            setPadding(dp(6), dp(4), dp(6), dp(4))
+            listOf("2.0×", "1.9×", "1.8×").forEach { addView(text(it, 12f, C.SUB).apply { gravity = Gravity.CENTER }) }
+            addView(text("1.7×", 16f, bold = true).apply {
+                gravity = Gravity.CENTER
+                background = rounded((C.visible(prefs.accent) and 0x00FFFFFF) or 0x48000000, 100)
+                setPadding(dp(10), dp(2), dp(10), dp(2))
+            }, lp().margins(this@speedPicture, t = 2))
         }
-        return stage(
-            text("“Note this, call Joe about the invoice”", 14f, C.SUB).apply { gravity = Gravity.CENTER },
-            note,
-            text("Saved to Notes · copied", 13f, C.SUB).apply { gravity = Gravity.CENTER },
-        )
+        val side = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(chip("Auto speed: on"))
+            addView(chip("Aim for 180 wpm"), lp().margins(this@speedPicture, t = 6))
+        }
+        val r = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(wheel); addView(spacer(wDp = 16)); addView(side)
+        }
+        return stage(r, text("Press and drag up, from 0.5× to 4×", 13f, C.SUB).apply { gravity = Gravity.CENTER })
     }
+
+    private fun MainActivity.copyPicture(): View = stage(
+        chips(chip("Summary"), chip("Timeline"), chip("⧉ Copy text", on = true)),
+        text("Copied the whole note ✓", 14f).apply {
+            gravity = Gravity.CENTER
+            background = rounded(C.FIELD, 12)
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        },
+    )
+
+    private fun MainActivity.searchPicture(): View = stage(
+        text("🔍  slow talkers", 14f).apply { background = rounded(C.FIELD, 12); setPadding(dp(12), dp(8), dp(12), dp(8)) },
+        noteCard("NOTES › PLAYBACK", "Auto speed"),
+        noteCard("NOTES › PLAYBACK", "Default playback speed"),
+    )
+
+    private fun MainActivity.listenPicture(): View = stage(
+        text("Share a link, PDF or Word file", 13f, C.SUB).apply { gravity = Gravity.CENTER },
+        chips(chip("Copy link"), chip("Listen in Tokalot", on = true), chip("Save")),
+        noteCard("READ ALOUD · 12 MIN", "Why we need more sleep"),
+    )
+
+    private fun MainActivity.keysPicture(): View = stage(
+        box("ofthe teh omw", "You type"),
+        box(span("of the" to 1, " " to 0, "the" to 1, " omw" to 0), "Keyboard fixes"),
+    )
 }
