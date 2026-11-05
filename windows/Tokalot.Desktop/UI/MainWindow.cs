@@ -1587,6 +1587,10 @@ public sealed class MainWindow : Window
             timeline.Margin = new Thickness(8, 0, 0, 0);
             buttons.Children.Add(timeline);
         }
+        // The whole text in one click (a summary has its own copy button on its panel).
+        var copyPill = NotePill("⧉", "Copy", false, () => { _ = TextInjector.Copy(note.Text); Toast("Copied"); });
+        copyPill.Margin = new Thickness(8, 0, 0, 0);
+        buttons.Children.Add(copyPill);
         col.Children.Add(Spaced(buttons, 0, 0, 0, 14));
 
         noteBusy.TryGetValue(id, out var busy);
