@@ -335,6 +335,29 @@ class SyncTest {
         assertEquals(state.notes, SyncFormat.parseBase(SyncFormat.encodeBase(state), "").notes)
     }
 
+    // ---------- notes kept on Home ----------
+
+    @Test fun movedOnOneSideWins() {
+        val base = listOf(a.copy(home = true))
+        assertEquals(listOf(a.copy(home = false)), notes(listOf(a.copy(home = false)), listOf(a.copy(home = true)), base)) // filed here
+        assertEquals(listOf(a.copy(home = false)), notes(listOf(a.copy(home = true)), listOf(a.copy(home = false)), base)) // filed there
+        assertEquals(listOf(a.copy(home = true)), notes(listOf(a.copy(home = true)), listOf(a.copy(home = true)), base))
+    }
+
+    /** An older Tokalot writes notes without "home", and that never moves one. On the first sync after updating, Home wins. */
+    @Test fun aSideWithoutHomeNeverMovesOne() {
+        assertEquals(listOf(a.copy(home = true)), notes(listOf(a.copy(home = true)), listOf(a), listOf(a.copy(home = true))))
+        assertEquals(listOf(a.copy(home = true)), notes(listOf(a), listOf(a.copy(home = true)), listOf(a)))
+        assertEquals(listOf(a.copy(home = true)), notes(listOf(a.copy(home = false)), listOf(a.copy(home = true)), listOf(a)))
+    }
+
+    @Test fun homeSurvivesTheFileAndTheBase() {
+        val state = SyncState(notes = listOf(b.copy(home = true), a.copy(home = false)))
+        val r = SyncFormat.parse(SyncFormat.encode(state, null, 1, "Android"))!!
+        assertEquals(state.notes, r.notes)
+        assertEquals(state.notes, SyncFormat.parseBase(SyncFormat.encodeBase(state), "").notes)
+    }
+
     // ---------- usage ----------
 
     private val oct = mapOf("2026-10" to UsageMonth(words = 500, dictations = 20))

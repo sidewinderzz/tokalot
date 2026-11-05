@@ -62,6 +62,14 @@ object NoteMedia {
         }
     }
 
+    /** Words joined with a paragraph break before each word in [breaks] (read aloud keeps the page's paragraphs). */
+    fun text(words: List<Word>, breaks: Set<Int>): String = buildString {
+        words.forEachIndexed { i, w ->
+            if (i > 0) append(if (i in breaks) "\n\n" else " ")
+            append(w.text)
+        }
+    }
+
     /** The index of the word playing at [t], or -1 before the first. */
     fun wordAt(words: List<Word>, t: Double): Int {
         var lo = 0
@@ -307,6 +315,83 @@ object NoteMedia {
             if (points.size >= MAX_POINTS) break
         }
         return points.sortedBy { it.time }
+    }
+
+    // ---------- speed ----------
+
+    /** The speeds the speed wheel offers: 0.5× to 4× in steps of 0.1. */
+    val WHEEL_SPEEDS: List<Float> = (5..40).map { it / 10f }
+
+    const val MIN_SPEED = 0.5f
+    const val MAX_SPEED = 4f
+
+    /** Auto speed never goes past this, however slow the talking. */
+    const val AUTO_MAX = 3f
+
+    /** The paces Auto speed can aim for, in words a minute. 230 is a quick but easy listen. */
+    val TARGET_WPM = listOf(180, 200, 230, 260, 300, 350)
+    const val DEFAULT_WPM = 230
+
+    /** "1×", "1.5×", "0.8×". */
+    fun speedLabel(s: Float): String {
+        val r = Math.round(s * 10) / 10f
+        return if (r == r.toInt().toFloat()) "${r.toInt()}×" else "$r×"
+    }
+
+    /** Roughly how many syllables a word has (groups of vowels, a silent final e left out). At least 1. */
+    fun syllables(word: String): Int {
+        var w = word.lowercase().filter { it in 'a'..'z' }
+        if (w.isEmpty()) return 1
+        if (w.length > 2 && w.endsWith("e") && !w.endsWith("le")) w = w.dropLast(1)
+        var n = 0
+        var inVowel = false
+        for (c in w) {
+            val v = c in "aeiouy"
+            if (v && !inVowel) n++
+            inVowel = v
+        }
+        return n.coerceAtLeast(1)
+    }
+
+    /** An average English word has about this many syllables; it turns a syllable rate into words a minute. */
+    private const val SYLLABLES_PER_WORD = 1.45
+
+    /**
+     * How fast the talking is around [t], in words a minute, over the [window] seconds before it. Counted in
+     * syllables (then turned back into words), so long words said slowly count as slow and a string of short
+     * words said quickly counts as quick. Only the time spent saying the words counts: gaps between them are
+     * Skip silence's job. Null when there's too little talking there to tell.
+     */
+    fun paceAt(words: List<Word>, t: Double, window: Double = 4.0): Double? {
+        var syl = 0
+        var talk = 0.0
+        for (w in words) {
+            if (w.end < t - window) continue
+            if (w.start > t + 0.3) break
+            val d = (w.end - w.start).coerceIn(0.05, 2.0)
+            syl += syllables(w.text)
+            talk += d
+        }
+        if (talk < 1.0 || syl < 3) return null
+        return syl / SYLLABLES_PER_WORD / talk * 60
+    }
+
+    /**
+     * The speed that brings talking at [pace] words a minute up to [target]: never slower than 1× (Auto only
+     * speeds up) and never past [AUTO_MAX].
+     */
+    fun autoSpeed(pace: Double?, target: Int): Float {
+        if (pace == null || pace <= 0) return 1f
+        return (target / pace).toFloat().coerceIn(1f, AUTO_MAX)
+    }
+
+    /**
+     * One step from the speed playing now toward [want], [dt] seconds after the last step (about half a second
+     * apart works well): it glides there over a second or so instead of jumping, in steps of 0.05×.
+     */
+    fun glide(now: Float, want: Float, dt: Double): Float {
+        val next = now + (want - now) * (dt * 1.2).coerceAtMost(1.0).toFloat()
+        return Math.round(next * 20) / 20f
     }
 
     fun clock(seconds: Double): String {

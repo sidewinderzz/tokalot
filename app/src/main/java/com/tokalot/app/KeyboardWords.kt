@@ -43,7 +43,8 @@ class KeyboardWords private constructor() {
         /** A word added by the user (Tokalot's dictionary, or learned while typing) counts as this common. */
         const val USER_PROB = 170
 
-        fun load(reader: BufferedReader): KeyboardWords {
+        /** The word list, plus the hand-kept additions in [extra] (en_US_extra.txt: words, then "=shortcuts"). */
+        fun load(reader: BufferedReader, extra: BufferedReader? = null): KeyboardWords {
             val w = KeyboardWords()
             var section = 0
             val pending = ArrayList<Triple<String, Int, Boolean>>(170_000)
@@ -70,6 +71,7 @@ class KeyboardWords private constructor() {
             w.offensive = BooleanArray(pending.size + 64)
             w.sameKey = IntArray(pending.size + 64) { -1 }
             for ((form, p, x) in pending) w.add(form, p, x)
+            extra?.let { w.addExtra(it) }
             // The dictionary lists next words in no useful order: commonest first.
             for ((k, list) in w.nextWords) w.nextWords[k] = list.sortedByDescending { w.probOf(it) }.toTypedArray()
             return w
@@ -84,6 +86,22 @@ class KeyboardWords private constructor() {
                 else MARKS.replace(Normalizer.normalize(lower, Normalizer.Form.NFD), "")
             return if (plain.indexOf('\'') < 0 && plain.indexOf('’') < 0) plain
                 else plain.replace("'", "").replace("’", "")
+        }
+    }
+
+    /** Words added or made more common, and more fixed replacements, on top of the generated list. */
+    private fun addExtra(reader: BufferedReader) {
+        var shortcutsNow = false
+        reader.forEachLine { line ->
+            if (line.isEmpty() || line.startsWith("#")) return@forEachLine
+            if (line == "=shortcuts") { shortcutsNow = true; return@forEachLine }
+            val t = line.split('\t')
+            if (shortcutsNow) {
+                if (t.size >= 3) shortcuts[t[0].lowercase()] = t[1] to (t[2].toIntOrNull() ?: 0)
+            } else if (t.size >= 2) {
+                val id = add(t[0], t[1].toIntOrNull() ?: 0, false)
+                if (id >= 0 && t.size > 2 && t[2] == "ok") offensive[id] = false
+            }
         }
     }
 

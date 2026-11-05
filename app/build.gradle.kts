@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 34
         // Bump both for every release you install on top of an older one.
-        versionCode = 55
-        versionName = "1.51"
+        versionCode = 59
+        versionName = "1.55"
 
         // arm64 only: every modern phone, and it keeps the APK small and the build fast.
         // Override with -Pabis=x86_64 for the emulator used by the screenshot workflow.
@@ -74,6 +74,8 @@ android {
 }
 
 dependencies {
+    // Read aloud: the text of shared PDFs (Apache 2.0).
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     testImplementation("junit:junit:4.13.2")
     // Unit tests run on a plain JVM, where Android's built-in org.json is only a stub.
     testImplementation("org.json:json:20240303")

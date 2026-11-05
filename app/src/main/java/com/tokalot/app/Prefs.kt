@@ -115,8 +115,6 @@ object Accents {
 }
 
 /** Pre-filled "Your instructions" for a fresh install; users can edit or clear it. */
-/** Playback speeds a voice note offers, in the order the speed button steps through them. */
-val NOTE_SPEEDS = floatArrayOf(1f, 1.25f, 1.5f, 2f)
 /** The keyboard's light and dark choices: "auto" follows the phone. */
 val KB_THEMES = listOf("auto", "light", "dark")
 /** The keyboard heights offered, in percent. */
@@ -195,7 +193,7 @@ class Prefs(ctx: Context) {
             "autoStop" to "autostop", "quickSkip" to "quick_skip", "liveStt" to "live_stt", "weakSignal" to "weak_signal",
             "autoLanguage" to "autolang", "polish" to "polish", "sounds" to "sounds", "learnWords" to "learn_words",
             "notesBeta" to "notes_beta", "holdToTalk" to "hold", "haptics" to "haptics", "fitSentence" to "fit_sentence",
-            "noteSkipSilence" to "note_skip_silence", "noteSkipUms" to "note_skip_ums",
+            "noteSkipSilence" to "note_skip_silence", "noteSkipUms" to "note_skip_ums", "noteAutoSpeed" to "note_auto_speed",
             "keyboardAutocorrect" to "kb_autocorrect", "keyboardSwipe" to "kb_swipe", "keyboardAutoCaps" to "kb_autocap",
             "keyboardDoubleSpace" to "kb_double_space", "keyboardLearn" to "kb_learn", "keyboardNumberRow" to "kb_number_row",
             "keyboardSymbolHints" to "kb_symbol_hints", "keyboardSound" to "kb_sound", "keyboardVibrate" to "kb_vibrate",
@@ -208,7 +206,7 @@ class Prefs(ctx: Context) {
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
         fun synced(key: String) = key in BOOLEANS.values || key in setOf(
             "stt", "cleanup", "theme", "accent", "sound_set", "note_phrases", "learned_words", "dismissed_words",
-            "note_level", "note_speed", "kb_theme", "kb_style", "kb_accent", "kb_toolbar", "kb_height",
+            "note_level", "note_speed", "note_wpm", "kb_theme", "kb_style", "kb_accent", "kb_toolbar", "kb_height",
         ) || key.startsWith("sttmodel_") || key.startsWith("model_") || key.startsWith("app_")
 
         /** Whether a synced setting's value from the file is one this version can use. */
@@ -230,7 +228,8 @@ class Prefs(ctx: Context) {
                 "sttModels", "cleanupModels" -> strings()
                 "androidAppOverrides" -> strings { c -> AppCategory.values().any { it.name == c } }
                 "noteSummaryLevel" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 1..5
-                "noteSpeed" -> v is Number && NOTE_SPEEDS.any { Math.abs(it - v.toDouble()) < 0.001 }
+                "noteSpeed" -> v is Number && v.toDouble() in NoteMedia.MIN_SPEED.toDouble()..NoteMedia.MAX_SPEED.toDouble()
+                "noteTargetWpm" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 100..500
                 "learnedWords", "dismissedWords" -> v is JSONArray && (0 until v.length()).all { v.opt(it) is String }
                 else -> name in BOOLEANS && v is Boolean
             }
@@ -427,6 +426,7 @@ class Prefs(ctx: Context) {
             "fitSentence" to fitSentence,
             "noteSkipSilence" to noteSkipSilence,
             "noteSkipUms" to noteSkipUms,
+            "noteAutoSpeed" to noteAutoSpeed,
             "keyboardAutocorrect" to kbAutocorrect,
             "keyboardSwipe" to kbSwipe,
             "keyboardAutoCaps" to kbAutoCaps,
@@ -452,6 +452,7 @@ class Prefs(ctx: Context) {
             "shellCue" to shellCue,
             "noteSummaryLevel" to noteSummaryLevel,
             "noteSpeed" to noteSpeed.toDouble(),
+            "noteTargetWpm" to noteTargetWpm,
             "notePhrases" to notePhrases,
             "androidAppOverrides" to overrides("app_"),
         )
@@ -499,6 +500,7 @@ class Prefs(ctx: Context) {
             "keyboardHeight" -> ed.putInt("kb_height", (v as Number).toInt())
             "noteSummaryLevel" -> ed.putInt("note_level", (v as Number).toInt())
             "noteSpeed" -> ed.putInt("note_speed", Math.round((v as Number).toDouble() * 100).toInt())
+            "noteTargetWpm" -> ed.putInt("note_wpm", (v as Number).toInt())
             "learnedWords" -> ed.putString("learned_words", strings(v as JSONArray))
             "dismissedWords" -> ed.putString("dismissed_words", strings(v as JSONArray))
             else -> BOOLEANS[name]?.let { ed.putBoolean(it, v as Boolean) }
@@ -765,10 +767,38 @@ class Prefs(ctx: Context) {
         get() = sp.safeInt("note_level", 3).coerceIn(1, 5)
         set(v) = sp.edit().putInt("note_level", v).apply()
 
-    /** Voice note playback speed, one of [NOTE_SPEEDS]. Kept as a percentage. */
+    /** Voice note playback speed, 0.5× to 4× (the speed wheel). Kept as a percentage. */
     var noteSpeed: Float
-        get() = (sp.safeInt("note_speed", 100) / 100f).takeIf { s -> NOTE_SPEEDS.any { Math.abs(it - s) < 0.001 } } ?: 1f
-        set(v) = sp.edit().putInt("note_speed", Math.round(v * 100)).apply()
+        get() = (sp.safeInt("note_speed", 100) / 100f).takeIf { it in NoteMedia.MIN_SPEED..NoteMedia.MAX_SPEED } ?: 1f
+        set(v) = sp.edit().putInt("note_speed", Math.round(v.coerceIn(NoteMedia.MIN_SPEED, NoteMedia.MAX_SPEED) * 100)).apply()
+
+    /** The one-time "changed for this note" tip from a note's ⋮ menu has been shown. Kept on this device. */
+    var noteOverrideHintSeen: Boolean
+        get() = sp.safeBoolean("note_override_hint", false)
+        set(v) = sp.edit().putBoolean("note_override_hint", v).apply()
+
+    /** Auto speed: voice notes speed up where the talking is slow, aiming for [noteTargetWpm]. */
+    var noteAutoSpeed: Boolean
+        get() = sp.safeBoolean("note_auto_speed", false)
+        set(v) = sp.edit().putBoolean("note_auto_speed", v).apply()
+
+    /** The pace Auto speed aims for, in words a minute. */
+    var noteTargetWpm: Int
+        get() = sp.safeInt("note_wpm", NoteMedia.DEFAULT_WPM).coerceIn(100, 500)
+        set(v) = sp.edit().putInt("note_wpm", v).apply()
+
+    /** Read aloud's voice: one of Gemini's voices by name, or [Listen.PHONE_VOICE] for the phone's own. Kept on this phone. */
+    var listenVoice: String
+        get() = sp.safeString("listen_voice", null).orEmpty().let { if (it == Listen.PHONE_VOICE || Listen.VOICES.containsKey(it)) it else Listen.DEFAULT_VOICE }
+        set(v) = sp.edit().putString("listen_voice", v).apply()
+
+    /**
+     * Read aloud may send the text to Gemini for its voice (Privacy). Until it's set it follows AI cleanup, so the
+     * privacy level picked before read aloud came along still matches.
+     */
+    var listenCloudVoice: Boolean
+        get() = if (sp.contains("listen_cloud")) sp.safeBoolean("listen_cloud", true) else cleanup != CleanupChoice.OFF
+        set(v) = sp.edit().putBoolean("listen_cloud", v).apply()
 
     /** Record from a connected Bluetooth headset's mic, falling back to the phone's when none is connected. */
     var headsetMic: Boolean

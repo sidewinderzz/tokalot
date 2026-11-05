@@ -36,6 +36,8 @@ object Privacy {
             { it.cleanup != CleanupChoice.OFF }) { p, on ->
             if (on) p.cleanup = cloudCleanup(p) else { p.lastCleanup = p.cleanup; p.cleanup = CleanupChoice.OFF }
         },
+        Switch("Cloud voice for read aloud", "Sends what you share to Listen in Tokalot to Gemini, with your key, for a natural voice. Off: the phone's own voice reads it and nothing leaves the phone.", CLOUD,
+            { it.listenCloudVoice }) { p, on -> p.listenCloudVoice = on },
         Switch("Transcribe while I talk", "Sends what you've said so far each time you pause, so long dictations come back quickly.", CLOUD,
             { it.liveStt }) { p, on -> p.liveStt = on },
         Switch("Fit into the sentence", "Uses where the cursor sits (not the text) so a dictation mid-sentence starts in lowercase.", CLOUD,
@@ -51,7 +53,7 @@ object Privacy {
             { it.kbClipSuggest }) { p, on -> p.kbClipSuggest = on },
         Switch("Keyboard: offer new screenshots", "A screenshot you just took shows on the keyboard's bar, ready to paste. Needs photo access.", CLOUD,
             { it.kbScreenshots }) { p, on -> p.kbScreenshots = on },
-        Switch("Keyboard: codes from texts", "A sign-in code that just came in a text shows on the keyboard's bar. Needs notification access; nothing is kept or sent.", setOf(Level.FULL),
+        Switch("Keyboard: codes from texts and emails", "A sign-in code that just came in a text or email shows on the keyboard's bar. Needs notification access; nothing is kept or sent.", setOf(Level.FULL),
             { it.kbCodes }) { p, on -> p.kbCodes = on },
         Switch("Reminder text on the lock screen", "Voice note reminders show what they're for on the lock screen. Off: they still ring, and show their text once the phone is unlocked.", CLOUD,
             { it.reminderLockText }) { p, on -> p.reminderLockText = on },

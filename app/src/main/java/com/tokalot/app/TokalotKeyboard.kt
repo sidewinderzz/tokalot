@@ -59,7 +59,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         /** The clipboard list: kept out of backups (see [ClipHistory]). */
         private const val CLIPS_FILE = "keyboard_clips.json"
         /** How long a new screenshot or copied picture is offered on the bar. */
-        private const val IMAGE_FRESH_MS = 2 * 60 * 1000L
+        private const val IMAGE_FRESH_MS = 5 * 60 * 1000L
         private const val RECENT_MAX = 32
         /** Typed after a word, these end it and let autocorrect fix it. */
         private const val CORRECT_AFTER = ".,!?;:)]}\"\n"
@@ -202,7 +202,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val app = applicationContext
         Thread {
             val w = runCatching {
-                app.assets.open("keyboard/en_US.txt.gz").use { KeyboardWords.load(GZIPInputStream(it).bufferedReader()) }
+                app.assets.open("keyboard/en_US.txt.gz").use { main ->
+                    app.assets.open("keyboard/en_US_extra.txt").bufferedReader().use { extra -> KeyboardWords.load(GZIPInputStream(main).bufferedReader(), extra) }
+                }
             }.onFailure { android.util.Log.e("TokalotKeyboard", "word list didn't load", it) }.getOrNull()
             val h = runCatching {
                 File(app.filesDir, HISTORY_FILE).takeIf { it.exists() }?.readText()?.let { TypingHistory.parse(it) }
@@ -260,12 +262,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
         )) || (cls == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         predictive = cls == InputType.TYPE_CLASS_TEXT && !password
-        // Addresses, email addresses and boxes that ask for no suggestions still get them on the bar, but a
-        // word is never changed by itself there ("deere.com" must stay as typed).
+        // Web and email addresses still get suggestions on the bar, but a word is never changed by itself there
+        // ("deere.com" must stay as typed). Everywhere else autocorrect works, as on Gboard: many apps and web
+        // pages mark their chat or search box "no suggestions" (React Native and web autocomplete="off" do), and
+        // honouring that left autocorrect quietly off in much of what gets typed.
         plainBox = variation !in setOf(
             InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
-            InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_FILTER,
-        ) && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
+            InputType.TYPE_TEXT_VARIATION_URI,
+        )
         // Gboard swipes in any text box but a password one: a search box, an address bar, a chat app that
         // turns suggestions off.
         swipe = cls == InputType.TYPE_CLASS_TEXT && !password
@@ -631,13 +635,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val typed = word.toString()
         val prev = wordPrev
         var final = typed
-        if (correct && autocorrect && !glided && typed != keepAsTyped) {
-            ac?.suggest(typed, prev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction?.let { final = it }
-        }
+        // What autocorrect makes of it, even where it may not change it, so a typo left alone isn't learned.
+        val fix = if (glided) null else ac?.suggest(typed, prev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction
+        val chosen = typed == keepAsTyped
+        if (correct && autocorrect && !chosen && fix != null) final = fix
         ic.commitText(final + sep, 1)
         lastCorrection = if (final != typed) Correction(typed, final, sep, prev) else null
-        if (typed != keepAsTyped) keepAsTyped = null
-        remember(final, prev, kept = final == typed && !glided)
+        if (!chosen) keepAsTyped = null
+        remember(final, prev, kept = final == typed && !glided && (fix == null || chosen))
         resetWord()
     }
 
@@ -645,7 +650,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private fun commitWord() {
         if (word.isEmpty()) return
         currentInputConnection?.finishComposingText()
-        remember(word.toString(), wordPrev, kept = !glided)
+        val typed = word.toString()
+        val fix = if (glided) null else ac?.suggest(typed, wordPrev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction
+        remember(typed, wordPrev, kept = !glided && (fix == null || typed == keepAsTyped))
         resetWord()
         phantomSpace = false
     }
@@ -661,11 +668,24 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
      * The word was used. [kept]: typed by the user and left as typed, so a word the list doesn't know is
      * learned once it has been kept [KeyboardLearn.TIMES] times.
      */
+    /**
+     * Records a finished word in the typing history. [kept]: typed as it stands on purpose, or nothing better was
+     * near. A typo that autocorrect would have fixed (in an address box, or with autocorrect off) isn't [kept]
+     * and isn't recorded, so it never turns into a "word of yours" that is no longer corrected, nor gets
+     * learned into the dictionary that syncs.
+     */
     private fun remember(w: String, prev: String?, kept: Boolean) {
         if (!personal) return
         val h = history ?: return
-        h.used(w, prev)
         val list = words ?: return
+        if (w.contains(' ')) {
+            // A split ("of the"): each word in turn.
+            var p = prev
+            for (part in w.split(' ').filter { it.isNotEmpty() }) { h.used(part, p); p = part }
+            return
+        }
+        if (!kept && list.probOf(w) < 0) return
+        h.used(w, prev)
         if (kept && KeyboardLearn.worth(w, list) && h.count(w) >= KeyboardLearn.TIMES) learn(w)
     }
 
@@ -746,6 +766,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             val typed = word.toString()
             val prev = wordPrev
             ic.commitText("$s ", 1)
+            // Tapping what was typed on the bar is choosing it: it counts towards learning it.
+            if (s == typed) keepAsTyped = typed
             remember(s, prev, kept = s == typed)
             resetWord()
         } else {
@@ -773,6 +795,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (paste.isNotEmpty()) {
             k.chips = true
             k.chipThumb = image?.thumb
+            k.chipImageLabel = if (image?.screenshot == false) "Image" else "Screenshot"
             k.suggestions = paste.map { it.first }
             chipActions = paste.map { it.second }
             k.boldSlot = -1
@@ -1112,7 +1135,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private var dismissedCode: String? = null
 
     /** A picture to offer: a screenshot just taken, or a picture just copied, with its thumbnail. */
-    private class Picture(val uri: Uri, val time: Long, val mime: String, val thumb: Bitmap?)
+    private class Picture(val uri: Uri, val time: Long, val mime: String, val thumb: Bitmap?, val screenshot: Boolean)
     private var image: Picture? = null
     private var dismissedImage: Uri? = null
 
@@ -1141,14 +1164,25 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     }
 
     private val imagesChanged = object : android.database.ContentObserver(main) {
-        override fun onChange(selfChange: Boolean) { if (shown) findScreenshot() }
+        override fun onChange(selfChange: Boolean) {
+            if (!shown) return
+            findScreenshot()
+            // Some phones save the file a moment after they announce it, so look once more shortly after.
+            main.removeCallbacks(lookAgain)
+            main.postDelayed(lookAgain, 1500)
+        }
     }
+    private val lookAgain = Runnable { if (shown) findScreenshot() }
 
     private fun canSeePhotos() = checkSelfPermission(
         if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
     ) == PackageManager.PERMISSION_GRANTED
 
-    /** Looks for a screenshot taken in the last couple of minutes (off the main thread; it reads the photo library). */
+    /**
+     * Looks for a screenshot taken in the last few minutes (off the main thread; it reads the photo library).
+     * Phones keep screenshots in different places ("Pictures/Screenshots", "DCIM/Screenshots", a "Screenshots"
+     * album, files named "Screenshot_…"), so any of those marks it as one.
+     */
     private fun findScreenshot() {
         if (!prefs.kbScreenshots || !canSeePhotos()) return
         val app = applicationContext
@@ -1156,26 +1190,34 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         Thread {
             val found = runCatching {
                 val cols = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.MIME_TYPE,
+                    MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
                     if (android.os.Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA)
                 app.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cols,
                     "${MediaStore.Images.Media.DATE_ADDED} >= ?", arrayOf(since.toString()),
                     "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { c ->
                     var hit: Picture? = null
                     while (hit == null && c.moveToNext()) {
-                        if (!c.getString(3).orEmpty().contains("screenshot", ignoreCase = true)) continue
+                        val where = (3..5).joinToString(" ") { c.getString(it).orEmpty() }
+                        if (!isScreenshot(where)) continue
                         val uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0))
-                        hit = Picture(uri, c.getLong(1) * 1000, c.getString(2) ?: "image/png", thumbnail(app, uri))
+                        hit = Picture(uri, c.getLong(1) * 1000, c.getString(2) ?: "image/png", thumbnail(app, uri), screenshot = true)
                     }
                     hit
                 }
             }.getOrNull() ?: return@Thread
             main.post {
-                if (image?.uri == found.uri) return@post
+                val had = image
+                // The same screenshot again: only taken if this time its little picture could be read.
+                if (had?.uri == found.uri && (had.thumb != null || found.thumb == null)) return@post
                 image = found
                 if (shown && word.isEmpty() && !busy() && notice == null && emojiMode == EmojiMode.OFF) showStrip()
             }
         }.start()
     }
+
+    private fun isScreenshot(where: String) =
+        where.contains("screenshot", ignoreCase = true) || where.contains("screen_shot", ignoreCase = true) ||
+            where.contains("screen shot", ignoreCase = true) || where.contains("screencap", ignoreCase = true)
 
     /** A copied picture (from [captureClip]): offered like a screenshot. */
     private fun pictureCopied(uri: Uri, mime: String, time: Long) {
@@ -1183,18 +1225,27 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         Thread {
             val thumb = thumbnail(app, uri)
             main.post {
-                image = Picture(uri, time, mime, thumb)
+                image = Picture(uri, time, mime, thumb, screenshot = false)
                 if (shown && word.isEmpty() && !busy() && notice == null && emojiMode == EmojiMode.OFF) showStrip()
             }
         }.start()
     }
 
-    private fun thumbnail(ctx: Context, uri: Uri): Bitmap? = runCatching {
-        if (android.os.Build.VERSION.SDK_INT >= 29) ctx.contentResolver.loadThumbnail(uri, android.util.Size(240, 240), null)
-        else ctx.contentResolver.openInputStream(uri)?.use {
-            android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 })
+    /** A small copy of the picture for the bar: Android's ready-made thumbnail, or else the picture read small. */
+    private fun thumbnail(ctx: Context, uri: Uri): Bitmap? {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            runCatching { ctx.contentResolver.loadThumbnail(uri, android.util.Size(160, 160), null) }.getOrNull()?.let { return it }
         }
-    }.getOrNull()
+        return runCatching {
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 160) sample *= 2
+            ctx.contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+            }
+        }.getOrNull()
+    }
 
     /**
      * Puts the picture into the text box the way Gboard does, for apps that take pictures from the keyboard
@@ -1204,18 +1255,32 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val ic = currentInputConnection ?: return
         val ei = currentInputEditorInfo
         val takes = ei?.contentMimeTypes?.any { ClipDescription.compareMimeTypes(pic.mime, it) } == true
-        if (!takes) { notice("This app doesn't take pictures from the keyboard", 3000); return }
         val app = applicationContext
         Thread {
             val shared = runCatching { KeyboardImages.share(app, pic.uri, pic.mime) }.getOrNull()
             main.post {
-                if (shared == null) { notice("Couldn't paste that picture", 3000); return@post }
-                val info = android.view.inputmethod.InputContentInfo(shared, ClipDescription("Picture", arrayOf(pic.mime)))
-                val ok = currentInputConnection?.commitContent(info, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null) == true
-                if (!ok) notice("This app didn't take the picture", 3000)
+                if (shared == null) { notice("Couldn't read that picture", 3000); return@post }
+                val ok = takes && run {
+                    val info = android.view.inputmethod.InputContentInfo(shared, ClipDescription("Picture", arrayOf(pic.mime)))
+                    currentInputConnection?.commitContent(info, InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION, null) == true
+                }
+                // The app doesn't take pictures from keyboards: it's put on the clipboard instead, so the app's
+                // own Paste (press and hold in the box) can still use it.
+                if (!ok) notice(if (copyPicture(shared)) "Picture copied. Press and hold the box, then Paste" else "This app doesn't take pictures from the keyboard", 4000)
             }
         }.start()
     }
+
+    /** Puts a picture the keyboard shares on the clipboard (not offered back on the bar: it's already there). */
+    private fun copyPicture(shared: Uri): Boolean = runCatching {
+        val cm = getSystemService(ClipboardManager::class.java) ?: return false
+        val clip = android.content.ClipData.newUri(contentResolver, "Picture", shared)
+        // Android lets the app that pastes it open this one picture (the provider grants per picture).
+        ignoreNextPicture = shared
+        cm.setPrimaryClip(clip)
+        true
+    }.getOrDefault(false)
+    private var ignoreNextPicture: Uri? = null
 
     // ------------------------------------------------------------------ clipboard
 
@@ -1245,6 +1310,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val mime = d?.let { desc -> (0 until desc.mimeTypeCount).map { desc.getMimeType(it) }.firstOrNull { it.startsWith("image/") } }
         if (uri != null && mime != null) {
             val time = d.timestamp.takeIf { it > 0 } ?: System.currentTimeMillis()
+            if (uri == ignoreNextPicture) return
             if (image?.uri != uri && p.kbClipSuggest) pictureCopied(uri, mime, time)
             return
         }

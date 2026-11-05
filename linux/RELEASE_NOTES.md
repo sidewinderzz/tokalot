@@ -1,5 +1,20 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.19.0
+
+- Voice notes have a speed wheel. Click the speed button under a note and scroll or drag the wheel to any speed from 0.5× to 4×. Scrolling over the button works too, and right-clicking it goes back to 1×.
+- Auto speed speeds a voice note up where the person talks slowly and eases off where they talk fast, aiming for the pace you pick (180 to 350 words a minute). Changing speed restarts ffplay or mpv here, so Auto changes it between words, every few seconds at most.
+- Settings has a search box above the page list. Type what you're after in everyday words ("dark", "offline", "speed") and click a result to jump to it.
+- A new Notes page in Settings holds the voice notes beta and the defaults every note starts with. A note's ⋯ menu can still change Skip silence and Skip ums for just that note.
+- API keys now sit on the Speech & AI page, and Recordings & usage is called Storage & stats.
+- A Copy button next to Summary and Timeline copies a note's whole text in one click.
+
+## New in 0.18.0
+
+- Voice messages shared to Tokalot on your phone now show on Home with your dictations (click one to open it, with Summary and Timeline), instead of on the Notes page. Move to Notes files one there; Move to Home sends it back.
+- Any dictation on Home can be saved to Notes from its ⋯ menu.
+- Notes is now a tidy list of names: each note shows its title (or its first line) with the time, and one small line for voice length and tags. With AI cleanup on, untitled notes get a title in the background.
+
 ## New in 0.17.0
 
 - Reminders and checklists made on your phone's voice notes now pass through sync untouched, so they reach your other phones. They don't show here yet.

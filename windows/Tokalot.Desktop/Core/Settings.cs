@@ -101,8 +101,12 @@ public sealed class Settings
     public bool NoteSkipUms { get; set; } = true;
     /** How long a note's summary is, 1 (one line) to 5 (everything). */
     public int NoteSummaryLevel { get; set; } = 3;
-    /** Voice note playback speed: 1, 1.25, 1.5 or 2. */
+    /** Voice note playback speed, 0.5 to 4 (the speed wheel). */
     public double NoteSpeed { get; set; } = 1;
+    /** Auto speed: voice notes speed up where the talking is slow, aiming for NoteTargetWpm. */
+    public bool NoteAutoSpeed { get; set; }
+    /** The pace Auto speed aims for, in words a minute. */
+    public int NoteTargetWpm { get; set; } = NoteMedia.DefaultWpm;
     /** The "Click any word to play from there" hint on a voice note was closed or used. This PC only: not synced. */
     public bool NoteWordHintSeen { get; set; }
 

@@ -95,6 +95,21 @@
             </intent-filter>
         </activity>
 
+        <!-- Read aloud (beta): "Listen in Tokalot" in the share sheet, for links, text, PDFs and Word files. -->
+        <activity-alias
+            android:name=".ListenShare"
+            android:targetActivity=".ShareActivity"
+            android:exported="true"
+            android:label="Listen in Tokalot">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+            </intent-filter>
+        </activity-alias>
+
         <!-- After Tokalot updates itself: checks the mic button's service came back (see ServiceGuard). -->
         <receiver
             android:name=".ServiceGuard$UpdateReceiver"

@@ -14,7 +14,7 @@ class KeyboardTest {
     companion object {
         /** Loaded once: it's the same file the keyboard reads (the tests run in the app folder). */
         val words: KeyboardWords by lazy {
-            GZIPInputStream(File("src/main/assets/keyboard/en_US.txt.gz").inputStream()).bufferedReader().use { KeyboardWords.load(it) }
+            GZIPInputStream(File("src/main/assets/keyboard/en_US.txt.gz").inputStream()).bufferedReader().use { KeyboardWords.load(it, File("src/main/assets/keyboard/en_US_extra.txt").bufferedReader()) }
         }
     }
 
@@ -52,6 +52,35 @@ class KeyboardTest {
         assertNull(fixed("STOP"))
     }
 
+    @Test fun runTogetherWordsAreSplit() {
+        assertEquals("of the", fixed("ofthe"))
+        assertEquals("in the", fixed("inthe"))
+        assertEquals("going to", fixed("goingto"))
+        // B, N, V, C and M sit above the space bar: a thumb meant for space lands on them.
+        assertEquals("the dog", fixed("thebdog"))
+        assertEquals("a lot", fixed("alot"))
+        // An ordinary typo is still a typo, not two words.
+        assertEquals("because", fixed("becuase"))
+        assertEquals("hello", fixed("helo"))
+    }
+
+    @Test fun namesAndAbbreviationsDontBeatCommonWords() {
+        assertEquals("and", fixed("nad"))
+        assertEquals("much", fixed("mich"))
+        assertEquals("names", fixed("mames"))
+        // A name is still right when nothing ordinary is close.
+        assertEquals("Kubota", fixed("kubota"))
+    }
+
+    @Test fun textingAndFarmWords() {
+        for (w in listOf("ur", "prolly", "omw", "tonite", "yea", "auger", "nozzle")) assertNull(w, fixed(w))
+        assertEquals("definitely", fixed("definatly"))
+        assertEquals("nozzle", fixed("nozzel"))
+        assertEquals("auger", fixed("augar"))
+        assertEquals("sprayer", fixed("sprayr"))
+        assertEquals("separate", fixed("seperate"))
+    }
+
     @Test fun contextHelps() {
         assertEquals("going", fixed("goin", prev = "I'm"))
     }
@@ -82,7 +111,7 @@ class KeyboardTest {
     }
 
     @Test fun userWordsBecomeKnown() {
-        val w = GZIPInputStream(File("src/main/assets/keyboard/en_US.txt.gz").inputStream()).bufferedReader().use { KeyboardWords.load(it) }
+        val w = GZIPInputStream(File("src/main/assets/keyboard/en_US.txt.gz").inputStream()).bufferedReader().use { KeyboardWords.load(it, File("src/main/assets/keyboard/en_US_extra.txt").bufferedReader()) }
         w.addUserWords(listOf("Shelbyz"))
         assertNull(Autocorrect(w).suggest("Shelbyz", null).correction)
         assertEquals("Shelbyz", Autocorrect(w).suggest("shelbyz", null).correction)
@@ -256,5 +285,13 @@ class KeyboardTest {
         assertNull(CodeFinder.find("Your order total is $1234.56, code-free shipping"))
         assertNull(CodeFinder.find("Your code expires in 2026"))
         assertNull(CodeFinder.find(null))
+        // Emails, as their notification shows them (sender, subject, the start of the email).
+        assertEquals("482913", CodeFinder.find("Microsoft account team Your single-use code Your single-use code is: 482913 If you didn't request a code, ignore this email."))
+        assertEquals("731942", CodeFinder.find("GitHub [GitHub] Please verify your device A sign in attempt requires further verification. Verification code: 731942"))
+        assertEquals("559201", CodeFinder.find("Amazon Sign-in attempt To finish signing in, enter the code below. 559201 This code will expire in 10 minutes."))
+        // An account or order number near a sign-in word is not a code.
+        assertNull(CodeFinder.find("Your statement is ready. Account ending 4821. Log in to view."))
+        assertNull(CodeFinder.find("Order # 5532 shipped. Sign in to track it."))
+        assertEquals("660412", CodeFinder.find("Card ending in 4821: your verification code is 660412"))
     }
 }

@@ -96,13 +96,22 @@ public static class NotePlayer
         return null;
     }
 
+    /** ffmpeg's tempo filter, chained above 2× because older ffmpeg builds stop there (4× is atempo=2,atempo=2). */
+    private static string Tempo(double speed)
+    {
+        var parts = new List<string>();
+        while (speed > 2.0001) { parts.Add("atempo=2"); speed /= 2; }
+        parts.Add("atempo=" + speed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+        return string.Join(",", parts);
+    }
+
     /** The command that plays [file] from [start] at [speed], and whether it could start part way in at that speed. */
     private static (string Path, string[] Args, bool Seeks)? Command(string file, double start, double speed)
     {
         var at = start.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         var x = speed.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
         if (Find("ffplay") is { } ff)
-            return (ff, new[] { "-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", at, "-af", "atempo=" + x, file }, true);
+            return (ff, new[] { "-nodisp", "-autoexit", "-loglevel", "quiet", "-ss", at, "-af", Tempo(speed), file }, true);
         if (Find("mpv") is { } mpv) return (mpv, new[] { "--no-video", "--really-quiet", "--start=" + at, "--speed=" + x, file }, true);
         return Fallback(file, speed);
     }

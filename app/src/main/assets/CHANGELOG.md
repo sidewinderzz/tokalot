@@ -6,6 +6,38 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.55 · 2026-11-05
+- Voice notes have a speed wheel. Press the speed button under a note and drag up or down: it stretches into a wheel, from 0.5× to 4× in steps of 0.1, and shrinks back when you let go. A quick flick goes further. Tap the button for Auto speed and 1×.
+- Auto speed (on the same wheel) speeds a voice note up where the person talks slowly or draws words out, and eases off where they talk fast. Pick the pace it aims for, from 180 to 350 words a minute. It never plays slower than 1×.
+- Settings has a search box. Type what you're after in everyday words ("dark", "offline", "speed", "um") and tap a result to jump straight to it.
+- A new Notes page in Settings holds the voice notes beta and the defaults every note starts with: Skip silence, Skip ums, speed, Auto speed and summary length. A note's ⋮ menu can still change Skip silence and Skip ums for just that note.
+- API keys now sit on the Speech & AI page, and Recordings & usage is called Storage & stats.
+- A Copy button next to Summary and Timeline copies a note's whole text in one tap.
+- Read aloud (beta): share a web link, PDF, Word file or text to "Listen in Tokalot" and it becomes a note you can listen to, in the same player with the speed wheel, tap a word and the Timeline. Menus, ads and related stories are left out of web pages; the article itself is never reworded. It picks up where you left off.
+- Read aloud uses Gemini's free voice when you have a Gemini key (pick the voice in Settings › Notes), and the phone's own voice otherwise. A new Privacy switch, Cloud voice for read aloud, keeps it on the phone. Scanned PDFs with no text in them can't be read yet.
+
+## 1.54 · 2026-11-03
+- Autocorrect now works in far more apps. Many chat apps and web pages mark their text box "no suggestions", and the keyboard was quietly turning autocorrect off there. It now fixes words everywhere except web and email addresses (and passwords), like Gboard.
+- Two words run together are split: "ofthe" becomes "of the", and "thebdog" becomes "the dog" when your thumb hits B, N, V, C or M instead of the space bar. "alot" becomes "a lot".
+- A name or abbreviation no longer wins over an ordinary word: "mich" becomes "much", not "Mich", and "nad" becomes "and", not "NAD". A name is still fixed when nothing ordinary is close ("kubota" to "Kubota").
+- Common misspellings are fixed ("definatly", "seperate", "nozzel", "augar", "sprayr"), and one vowel typed for another counts as a small slip.
+- Texting words are left alone: ur, prolly, omw, tonite, yea, ya, idk and more. Farm and shop words like auger, nozzle, sprayer, header, heifer and welder rank higher.
+- A typo autocorrect would have fixed is no longer remembered as one of your words. Before, a typo left alone twice (in an address box, say) stopped being corrected and could get learned into your dictionary.
+
+## 1.53 · 2026-11-03
+- The keyboard's keys look softly raised instead of flat: a light top edge, a gentle shade down each key and a soft shadow under it, and a key sinks flat while you press it. Classic and Tinted have it. Prefer the old look? Pick Flat in the keyboard's menu or Settings › Keyboard.
+- New screenshots show up on the bar more dependably. Tokalot now recognises screenshots wherever the phone saves them (Pictures, DCIM, a Screenshots album, files named Screenshot), looks again a moment later for phones that save the file late, and keeps offering it for 5 minutes instead of 2.
+- The screenshot's button on the bar is always the same size: a tiny copy of the picture, whole and in its own shape, with "Screenshot" beside it ("Image" for a picture you copied).
+- In an app that doesn't take pictures from keyboards, tapping the screenshot copies it instead, so you can press and hold the text box and Paste.
+- Sign-in codes: a code in an email is offered too, when the email's notification shows it (Gmail, Outlook and other mail apps show the start of the email). Older messages in a conversation, and account or order numbers, are no longer mistaken for a new code.
+
+## 1.52 · 2026-11-03
+- Voice messages and text you share to Tokalot now land on Home with your dictations instead of on the Notes page, since you often share them just to read or listen. Tap one to open it big, with the player, Summary and Timeline as before.
+- Move to Notes (on Home, or in the ⋮ menu of an opened one) files a shared message in Notes when you want to keep it. Move to Home sends it back.
+- Any dictation on Home can be saved to Notes from its ⋮ menu. The dictation stays on Home too.
+- Notes is now a tidy list of names: each note shows its title (or its first line) with the time, and one small line for voice length, reminders and tags. With AI cleanup on, untitled notes get a title in the background.
+- Where each shared message lives (Home or Notes) syncs to your computers.
+
 ## 1.51 · 2026-11-03
 - Reminders and checklists on voice notes (beta). With the mic button, start with "Remind me at 7:30 to lock the shop" or "Make a list for the trip: chargers, cooler, dog food, at 6 load the dogs". Lines with a time ring then; the rest just wait to be ticked. "Remind me" only counts when you say a time, so a text that starts "Remind me what time…" still goes to your friend, and the bubble lets you type it there instead.
 - With the Voice note tile there's nothing to remember: just talk. When AI cleanup is on, the AI also spots a reminder or a list in what you said and sets it up.

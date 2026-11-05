@@ -69,7 +69,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         const val SLOT_MESSAGE = -3
         const val SLOT_CANCEL = -4
         private const val TOOL = -10
-        /** A chip that pastes a picture: drawn as [chipThumb] instead of text. */
+        /** A chip that pastes a picture: drawn as a tiny [chipThumb] and [chipImageLabel], always the same width. */
         const val IMAGE_CHIP = "\u0001image"
         /** A backspace slide that reached the keyboard's left edge: everything in the text box. */
         const val DELETE_ALL = Int.MAX_VALUE
@@ -110,6 +110,9 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     /** The picture an [IMAGE_CHIP] shows. */
     var chipThumb: android.graphics.Bitmap? = null
         set(v) { field = v; invalidate() }
+    /** The word beside the picture on an [IMAGE_CHIP]: "Screenshot", or "Image" for a copied picture. */
+    var chipImageLabel = "Screenshot"
+        set(v) { field = v; invalidate() }
     /** The toolbar's buttons in the user's order (see [KeyboardToolbar]). */
     var toolbar: List<String> = KeyboardToolbar.DEFAULT
         set(v) { if (field != v) { field = v; invalidate() } }
@@ -128,7 +131,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     var keyPopups = true
 
     var theme = KeyboardTheme.light(Accents.DEFAULT)
-        set(v) { field = v; invalidate() }
+        set(v) { field = v; shades.clear(); invalidate() }
 
     // ------------------------------------------------------------------ sizes
 
@@ -193,7 +196,13 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 
     override fun onDraw(canvas: Canvas) {
         val t = theme
-        canvas.drawColor(t.background)
+        if (t.depth) {
+            // A faint light from above: the background is a touch lighter at the top.
+            fill.color = 0xFF000000.toInt() // opaque, so the shade is drawn at full strength
+            fill.shader = shade(t.background, height.toFloat(), lift = if (t.dark) 0.035f else 0.30f, sink = 0f)
+            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), fill)
+            fill.shader = null
+        } else canvas.drawColor(t.background)
         drawStrip(canvas)
         val radius = dp(6f)
         for (k in page.keys) {
@@ -208,15 +217,61 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 else -> if (pressed) t.keyPressed else t.key
             }
             rect.set(pageX(k.x), pageY(k.y), pageX(k.x + k.w), pageY(k.y + k.h))
-            fill.color = t.shadow
-            canvas.drawRoundRect(rect.left, rect.top + dp(1f), rect.right, rect.bottom + dp(1f), radius, radius, fill)
-            fill.color = bg
-            canvas.drawRoundRect(rect, radius, radius, fill)
+            if (t.depth) drawRaised(canvas, rect, radius, bg, pressed)
+            else {
+                fill.color = t.shadow
+                canvas.drawRoundRect(rect.left, rect.top + dp(1f), rect.right, rect.bottom + dp(1f), radius, radius, fill)
+                fill.color = bg
+                canvas.drawRoundRect(rect, radius, radius, fill)
+            }
             drawLabel(canvas, k, if (k.code == KeyCode.ENTER) t.onAccent else t.text)
         }
         drawTrail(canvas)
         drawPreview(canvas)
         drawMenu(canvas)
+    }
+
+    /** Top-to-bottom shades, one per colour and height, so a frame makes no new ones. */
+    private val shades = HashMap<Long, android.graphics.Shader>()
+
+    /**
+     * [c] a little lighter at the top ([lift]: how far toward white) and a little darker at the bottom ([sink]:
+     * how far toward black), over [h] pixels from y = 0.
+     */
+    private fun shade(c: Int, h: Float, lift: Float, sink: Float): android.graphics.Shader =
+        shades.getOrPut((c.toLong() shl 32) or ((h.toInt().toLong() and 0x7FFFFFFFL) shl 1) or (if (sink == 0f) 1L else 0L)) {
+            android.graphics.LinearGradient(0f, 0f, 0f, h,
+                KeyboardTheme.mix(0xFFFFFFFF.toInt(), c, lift), KeyboardTheme.mix(0xFF000000.toInt(), c, sink),
+                android.graphics.Shader.TileMode.CLAMP)
+        }
+
+    /**
+     * A softly raised key: a soft shadow under it, a thin light edge along the top, and a gentle shade from
+     * top to bottom. Pressed, it sits flat and a hair lower, as if pushed in.
+     */
+    private fun drawRaised(canvas: Canvas, r: RectF, radius: Float, color: Int, pressed: Boolean) {
+        val t = theme
+        if (pressed) {
+            fill.color = color
+            canvas.drawRoundRect(r.left, r.top + dp(1f), r.right, r.bottom + dp(1f), radius, radius, fill)
+            return
+        }
+        // Two layers of shadow: a faint wide one and a tighter one, so the edge is soft instead of a hard line.
+        fill.color = (t.shadow and 0x00FFFFFF) or (((t.shadow ushr 24) / 2) shl 24)
+        canvas.drawRoundRect(r.left - dp(0.5f), r.top + dp(0.5f), r.right + dp(0.5f), r.bottom + dp(2f), radius + dp(0.5f), radius + dp(0.5f), fill)
+        fill.color = t.shadow
+        canvas.drawRoundRect(r.left, r.top + dp(1f), r.right, r.bottom + dp(1.2f), radius, radius, fill)
+        // The light top edge: the key's top, lighter, showing as a hairline above the key's face.
+        fill.color = KeyboardTheme.mix(0xFFFFFFFF.toInt(), color, if (t.dark) 0.16f else 0.6f)
+        canvas.drawRoundRect(r, radius, radius, fill)
+        // The face, shaded top to bottom.
+        val h = r.height() - dp(0.8f)
+        canvas.save()
+        canvas.translate(r.left, r.top + dp(0.8f))
+        fill.shader = shade(color, h, lift = if (t.dark) 0.06f else 0.12f, sink = if (t.dark) 0.10f else 0.045f)
+        canvas.drawRoundRect(0f, 0f, r.width(), h, radius, radius, fill)
+        fill.shader = null
+        canvas.restore()
     }
 
     private fun drawLabel(canvas: Canvas, k: Key, color: Int) {
@@ -291,9 +346,17 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         when {
             message != null -> out += Part(from, to, SLOT_MESSAGE)
             chips -> {
-                // Copied things share the room between them.
-                val each = (to - from) / suggestions.size
-                suggestions.indices.forEach { out += Part(from + it * each, from + (it + 1) * each, it) }
+                // A picture's chip is always the same width; copied things and codes share the rest.
+                val fixed = minOf(dp(124f), (to - from) / 2)
+                val pictures = suggestions.count { it == IMAGE_CHIP }
+                val others = suggestions.size - pictures
+                val each = if (others > 0) (to - from - pictures * fixed) / others else 0f
+                var x = from
+                suggestions.forEachIndexed { i, s ->
+                    val w = if (s == IMAGE_CHIP) fixed else each
+                    out += Part(x, x + w, i)
+                    x += w
+                }
             }
             else -> {
                 val each = (to - from) / 3
@@ -346,24 +409,8 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                         rect.set(p.left + dp(3f), cy - dp(15f), p.right - dp(3f), cy + dp(15f))
                         fill.color = if (t.borderless) t.keyPressed else t.key
                         canvas.drawRoundRect(rect, dp(15f), dp(15f), fill)
-                        val thumb = chipThumb
-                        if (word == IMAGE_CHIP && thumb != null) {
-                            // A tiny picture of it, cropped to fit the pill.
-                            val h = rect.height() - dp(6f)
-                            val w = minOf(rect.width() - dp(12f), h * 1.6f)
-                            val src = android.graphics.Rect(0, 0, thumb.width, thumb.height)
-                            val want = w / h
-                            if (thumb.width.toFloat() / thumb.height > want) {
-                                val cw = (thumb.height * want).toInt(); src.left = (thumb.width - cw) / 2; src.right = src.left + cw
-                            } else {
-                                val ch = (thumb.width / want).toInt(); src.top = (thumb.height - ch) / 2; src.bottom = src.top + ch
-                            }
-                            val dst = RectF(mid - w / 2, cy - h / 2, mid + w / 2, cy + h / 2)
-                            canvas.save()
-                            val clipPath = android.graphics.Path().apply { addRoundRect(dst, dp(6f), dp(6f), android.graphics.Path.Direction.CW) }
-                            canvas.clipPath(clipPath)
-                            canvas.drawBitmap(thumb, src, dst, null)
-                            canvas.restore()
+                        if (word == IMAGE_CHIP) {
+                            drawPictureChip(canvas, rect, cy, baseline())
                             continue
                         }
                         drawIcon(canvas, R.drawable.ic_kb_clipboard, rect.left + dp(14f), cy, dp(14f), t.accentText)
@@ -425,6 +472,45 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
             canvas.drawRoundRect(bx - 3f * unit, cy - bh / 2, bx + 3f * unit, cy + bh / 2, 3f * unit, 3f * unit, fill)
         }
         if (active || moving) postInvalidateOnAnimation()
+    }
+
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val thumbPath = android.graphics.Path()
+
+    /**
+     * A picture to paste: a tiny copy of it, whole (shrunk to fit a small square, keeping its shape, so a
+     * screenshot is a narrow upright sliver), and "Screenshot" or "Image" beside it, centred in the chip.
+     */
+    private fun drawPictureChip(canvas: Canvas, chip: RectF, cy: Float, baseline: Float) {
+        val t = theme
+        val box = dp(20f)
+        val gap = dp(7f)
+        text.color = t.text
+        text.typeface = Typeface.DEFAULT
+        text.textSize = dp(14f)
+        val label = ellipsize(chipImageLabel, chip.width() - box - gap - dp(20f))
+        val textW = text.measureText(label)
+        val left = chip.centerX() - (box + gap + textW) / 2
+        val thumb = chipThumb
+        val dst = RectF()
+        if (thumb != null && thumb.width > 0 && thumb.height > 0) {
+            val scale = minOf(box / thumb.width, box / thumb.height)
+            val w = thumb.width * scale
+            val h = thumb.height * scale
+            dst.set(left + (box - w) / 2, cy - h / 2, left + (box + w) / 2, cy + h / 2)
+            canvas.save()
+            thumbPath.reset()
+            thumbPath.addRoundRect(dst, dp(2.5f), dp(2.5f), android.graphics.Path.Direction.CW)
+            canvas.clipPath(thumbPath)
+            canvas.drawBitmap(thumb, null, dst, bitmapPaint)
+            canvas.restore()
+        } else {
+            // No preview yet (still being read): a small picture-shaped frame in its place.
+            dst.set(left + box * 0.25f, cy - box / 2, left + box * 0.75f, cy + box / 2)
+            fill.color = t.hint
+            canvas.drawRoundRect(dst, dp(2.5f), dp(2.5f), fill)
+        }
+        canvas.drawText(label, left + box + gap + textW / 2, baseline, text)
     }
 
     private fun ellipsize(s: String, maxW: Float): String {
@@ -775,32 +861,36 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
 }
 
 /**
- * The keyboard's colours. [style]: "classic" (Gboard-like greys), "tinted" (keys tinted with the accent),
- * "borderless" (no key shapes, only the letters) or "contrast" (pure black or pure white). The accent goes
- * on enter, the mic, the swipe trail and the picked suggestion.
+ * The keyboard's colours. [style]: "classic" (grey keys, softly raised), "flat" (the same greys, flat),
+ * "tinted" (keys tinted with the accent), "borderless" (no key shapes, only the letters) or "contrast" (pure
+ * black or pure white). The accent goes on enter, the mic, the swipe trail and the picked suggestion.
+ * [depth]: keys are drawn softly raised (a light top edge, a gentle shade down the key and a soft shadow),
+ * and sink flat while pressed.
  */
 class KeyboardTheme(
     val background: Int, val key: Int, val functionKey: Int, val keyPressed: Int, val text: Int, val hint: Int,
     val accent: Int, val onAccent: Int, val accentText: Int, val preview: Int, val divider: Int, val shadow: Int,
-    val dark: Boolean, val borderless: Boolean = false,
+    val dark: Boolean, val borderless: Boolean = false, val depth: Boolean = false,
 ) {
     companion object {
         const val CLASSIC = "classic"
+        const val FLAT = "flat"
         const val TINTED = "tinted"
         const val BORDERLESS = "borderless"
         const val CONTRAST = "contrast"
-        val STYLES = listOf(CLASSIC, TINTED, BORDERLESS, CONTRAST)
+        val STYLES = listOf(CLASSIC, FLAT, TINTED, BORDERLESS, CONTRAST)
 
         fun light(accent: Int) = make(dark = false, style = CLASSIC, accent = accent)
         fun dark(accent: Int) = make(dark = true, style = CLASSIC, accent = accent)
 
         fun make(dark: Boolean, style: String, accent: Int): KeyboardTheme {
             val accentText = darkerFor(accent, light = !dark)
-            fun t(bg: Long, key: Long, fn: Long, pressed: Long, text: Long, hint: Long, preview: Long, divider: Long, borderless: Boolean = false) =
+            fun t(bg: Long, key: Long, fn: Long, pressed: Long, text: Long, hint: Long, preview: Long, divider: Long,
+                  borderless: Boolean = false, depth: Boolean = false) =
                 KeyboardTheme(
                     bg.toInt(), key.toInt(), fn.toInt(), pressed.toInt(), text.toInt(), hint.toInt(),
                     accent, onColor(accent), accentText, preview.toInt(), divider.toInt(),
-                    if (dark) 0x33000000 else 0x22000000, dark, borderless,
+                    if (dark) 0x40000000 else if (depth) 0x26000000 else 0x22000000, dark, borderless, depth,
                 )
             return when (style) {
                 TINTED -> {
@@ -815,15 +905,18 @@ class KeyboardTheme(
                         accent, onColor(accent), accentText,
                         if (dark) 0xFF4A4A50.toInt() else 0xFFFFFFFF.toInt(),
                         mix(accent, base, 0.4f),
-                        if (dark) 0x33000000 else 0x22000000, dark,
+                        if (dark) 0x40000000 else 0x26000000, dark, depth = true,
                     )
                 }
                 CONTRAST -> if (dark) t(0xFF000000, 0xFF1A1A1A, 0xFF0D0D0D, 0xFF333333, 0xFFFFFFFF, 0xFFA0A0A0, 0xFF2A2A2A, 0xFF333333)
                     else t(0xFFFFFFFF, 0xFFF1F3F4, 0xFFDADCE0, 0xFFBDC1C6, 0xFF000000, 0xFF5F6368, 0xFFFFFFFF, 0xFFDADCE0)
                 BORDERLESS -> if (dark) t(0xFF1F1F21, 0xFF1F1F21, 0xFF1F1F21, 0xFF3C3C40, 0xFFE8EAED, 0xFF9AA0A6, 0xFF4A4A50, 0xFF4A4A50, borderless = true)
                     else t(0xFFF1F3F4, 0xFFF1F3F4, 0xFFF1F3F4, 0xFFD5D8DC, 0xFF202124, 0xFF80868B, 0xFFFFFFFF, 0xFFC4C7CC, borderless = true)
-                else -> if (dark) t(0xFF1F1F21, 0xFF3C3C40, 0xFF2C2C30, 0xFF55555B, 0xFFE8EAED, 0xFF9AA0A6, 0xFF4A4A50, 0xFF4A4A50)
-                    else t(0xFFE8EAED, 0xFFFFFFFF, 0xFFCDD1D6, 0xFFBDC1C6, 0xFF202124, 0xFF80868B, 0xFFFFFFFF, 0xFFC4C7CC)
+                else -> {
+                    val depth = style != FLAT
+                    if (dark) t(0xFF1F1F21, 0xFF3C3C40, 0xFF2C2C30, 0xFF55555B, 0xFFE8EAED, 0xFF9AA0A6, 0xFF4A4A50, 0xFF4A4A50, depth = depth)
+                    else t(0xFFE8EAED, 0xFFFFFFFF, 0xFFCDD1D6, 0xFFBDC1C6, 0xFF202124, 0xFF80868B, 0xFFFFFFFF, 0xFFC4C7CC, depth = depth)
+                }
             }
         }
 

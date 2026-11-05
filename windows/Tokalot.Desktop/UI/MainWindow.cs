@@ -183,11 +183,11 @@ public sealed class MainWindow : Window
         historyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(120), DispatcherPriority.Background, (_, _) =>
         {
             historyTimer!.Stop();
-            if (CurrentPage == Page.Home) FillHistory();
+            if (CurrentPage == Page.Home && openNoteId == null) FillHistory();
         }, Dispatcher);
         historyTimer.Stop();
         onHistory = () => Dispatcher.BeginInvoke(() => { historyTimer.Stop(); historyTimer.Start(); });
-        onPlayer = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Home) FillHistory(); });
+        onPlayer = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Home && openNoteId == null) FillHistory(); });
         History.Changed += onHistory;
         Player.Changed += onPlayer;
         Closed += (_, _) => { History.Changed -= onHistory; Player.Changed -= onPlayer; Player.Stop(false); historyTimer.Stop(); SaveNow(); };
@@ -207,7 +207,7 @@ public sealed class MainWindow : Window
         });
         Sync.Finished += onSync;
         Closed += (_, _) => Sync.Finished -= onSync;
-        onNoteImport = () => Dispatcher.BeginInvoke(() => { if (CurrentPage == Page.Notes) Render(); });
+        onNoteImport = () => Dispatcher.BeginInvoke(() => { if (CurrentPage is Page.Notes or Page.Home) Render(); });
         NoteImport.Changed += onNoteImport;
         Closed += (_, _) => NoteImport.Changed -= onNoteImport;
         PreviewKeyDown += (_, e) =>
@@ -219,7 +219,7 @@ public sealed class MainWindow : Window
                 search.Focus();
             }
             else if (e.Key == Key.Escape && (editing != null || editingNew)) { e.Handled = true; editing = null; editingNew = false; Render(); }
-            else if (e.Key == Key.Escape && CurrentPage == Page.Notes && openNoteId != null) { e.Handled = true; CloseNote(); }
+            else if (e.Key == Key.Escape && openNoteId != null) { e.Handled = true; CloseNote(); }
             else if (e.Key == Key.Escape && CurrentPage == Page.Home && search.Text.Length > 0) { e.Handled = true; search.Text = ""; }
         };
         SizeChanged += (_, _) => { if (IsLoaded && IsWide != wideLayout) Render(); };
@@ -357,7 +357,7 @@ public sealed class MainWindow : Window
     {
         if (!S.WelcomeDone && WelcomeDue()) { S.WelcomeDone = true; S.Save(); } // clicked away from the welcome: it's skipped
         if (openNoteId != null) { NotePlayer.Stop(false); openNoteId = null; } // the sidebar's Notes goes back to the list too
-        if (p != Page.Notes) CommitDelete();
+        if (p != Page.Notes && p != Page.Home) CommitDelete();
         if (p != CurrentPage) scroller.ScrollToTop();
         CurrentPage = p;
         Render();
@@ -384,7 +384,7 @@ public sealed class MainWindow : Window
             case Page.Stats: BuildStats(col); break;
         }
         wideLayout = IsWide;
-        scroller.Content = wideLayout && !welcome && CurrentPage != Page.Settings && !(CurrentPage == Page.Notes && openNoteId != null) ? TwoColumns(col) : StripMarkers(col);
+        scroller.Content = wideLayout && !welcome && CurrentPage != Page.Settings && openNoteId == null ? TwoColumns(col) : StripMarkers(col);
         scroller.UpdateLayout();
         scroller.ScrollToVerticalOffset(offset);
         NoteChip();
@@ -530,6 +530,8 @@ public sealed class MainWindow : Window
 
     private void BuildHome(StackPanel col)
     {
+        // Something shared in, opened from the list: its page, like a note's.
+        if (openNoteId is { } open) { BuildNote(col, open); return; }
         var app = App.Current;
         if (app.UpdateVersion != null)
         {
@@ -626,10 +628,16 @@ public sealed class MainWindow : Window
         if (box == null) return;
         box.Children.Clear();
         var q = search.Text.Trim();
-        var all = History.All();
-        var list = q.Length == 0 ? all : all.Where(e =>
-            e.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Raw.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-            e.AppLabel.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        // Dictations, and notes kept on Home (things shared in on the phone), newest first.
+        var shared = Notes.All().Where(n => n.Home && n.Id != pendingDelete)
+            .Select(n => new HomeItem(n.Time, null, n, NoteImport.Get(n.Id)));
+        var all = History.All().Select(e => new HomeItem(e.Time, e, null, null)).Concat(shared)
+            .OrderByDescending(i => i.Time).ToList();
+        var list = q.Length == 0 ? all : all.Where(i => i.Entry is { } e
+            ? e.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || e.Raw.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+              e.AppLabel.Contains(q, StringComparison.OrdinalIgnoreCase)
+            : i.Note!.Text.Contains(q, StringComparison.OrdinalIgnoreCase) || (i.Info?.Title ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+              (i.Info?.Source ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
         if (list.Count == 0)
         {
             box.Children.Add(Spaced(Ui.Heading(q.Length == 0 ? "Today" : "No matches", 30), 0, 24, 0, 12));
@@ -651,7 +659,7 @@ public sealed class MainWindow : Window
                 lastDay = day;
             }
             else group!.Children.Add(Ui.Divider());
-            group!.Children.Add(EntryView(e));
+            group!.Children.Add(e.Entry != null ? EntryView(e.Entry) : SharedView(e.Note!, e.Info));
         }
         if (list.Count > historyLimit)
         {
@@ -734,6 +742,85 @@ public sealed class MainWindow : Window
             AudioStore.Delete(e.Id);
         };
         menu.Items.Add(copyOrig);
+        if (!e.Pending)
+        {
+            // Saved to Notes it's a note of its own there (same id, so this one knows), and the dictation stays here.
+            var inNotes = Notes.Has(e.Id);
+            var save = new MenuItem { Header = inNotes ? "Open in Notes" : "Save to Notes" };
+            save.Click += (_, _) => SaveToNotes(e);
+            menu.Items.Add(save);
+        }
+        menu.Items.Add(del);
+        more.ContextMenu = menu;
+        box.Children.Add(Spread(row, more));
+        return box;
+    }
+
+    /** One thing in Home's list: a dictation, or a note kept on Home (shared in on the phone) with what's known about it. */
+    private sealed record HomeItem(long Time, Entry? Entry, Note? Note, NoteImport.Info? Info);
+
+    /** Files a dictation as a note too, under its own id and time (or opens that note when it's already there). */
+    private void SaveToNotes(Entry e)
+    {
+        if (!Notes.Has(e.Id))
+        {
+            try { Notes.Add(e.Text, e.Id, e.Time); } catch { Toast("Couldn't save the note"); return; }
+            if (!S.NotesBeta) { S.NotesBeta = true; S.Save(); }
+            Toast("Saved to Notes");
+            RenderNav();
+            return;
+        }
+        if (!S.NotesBeta) { S.NotesBeta = true; S.Save(); }
+        CurrentPage = Page.Notes;
+        OpenNote(e.Id);
+    }
+
+    /** Files a note kept on Home on the Notes page. */
+    private void MoveToNotes(long id)
+    {
+        try { Notes.SetHome(id, false); } catch { Toast("Couldn't move it"); return; }
+        if (!S.NotesBeta) { S.NotesBeta = true; S.Save(); }
+        Toast("Moved to Notes");
+        Render();
+    }
+
+    /**
+     * Something shared into Tokalot on the phone (a WhatsApp voice message, say), kept on Home with the dictations: its
+     * title, the start of its text and where it came from. Clicking it opens its page (Summary, Timeline, the player when
+     * the recording is on this computer); Move to Notes files it on the Notes page.
+     */
+    private UIElement SharedView(Note n, NoteImport.Info? info)
+    {
+        var box = new StackPanel { Margin = new Thickness(22, 18, 22, 16) };
+        if (info?.Title is { } title)
+        {
+            var head = Ui.Text(title, 16.5, bold: true);
+            head.TextTrimming = TextTrimming.CharacterEllipsis;
+            box.Children.Add(Spaced(head, 0, 0, 0, 4));
+        }
+        var t = Ui.Text(n.Text.Trim(), 16.5);
+        t.MaxHeight = 16.5 * 1.4 * 6;
+        t.TextTrimming = TextTrimming.CharacterEllipsis;
+        t.Cursor = Cursors.Hand;
+        t.Focusable = false;
+        t.MouseLeftButtonUp += (_, _) => OpenNote(n.Id);
+        box.Children.Add(t);
+        var voice = info?.Audio != null || info?.Duration > 0;
+        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString("MMM d, h:mm tt", CultureInfo.InvariantCulture);
+        meta += " · " + (voice ? "Shared voice message" : "Shared");
+        if (info?.Source != null) meta += " from " + info.Source;
+        if (info?.Duration > 0) meta += " · " + NoteMedia.Clock(info!.Duration);
+        box.Children.Add(Spaced(Ui.Text(meta, 13.5, C.Sub), 0, 8, 0, 12));
+        var open = Ui.Button("Open", () => OpenNote(n.Id), filled: true);
+        var move = Ui.Button("Move to Notes", () => MoveToNotes(n.Id));
+        var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(n.Text); Toast("Copied"); }, icon: "copy");
+        var row = Ui.Row(open, move, copy);
+        foreach (FrameworkElement a in row.Children) a.Margin = new Thickness(0, 0, 8, 0);
+        var menu = new ContextMenu();
+        Border more = null!;
+        more = Ui.Button("", () => { menu.PlacementTarget = more; menu.IsOpen = true; }, icon: "more");
+        var del = new MenuItem { Header = "Delete" };
+        del.Click += (_, _) => DeleteNote(n.Id);
         menu.Items.Add(del);
         more.ContextMenu = menu;
         box.Children.Add(Spread(row, more));
@@ -997,7 +1084,8 @@ public sealed class MainWindow : Window
                 Spaced(Ui.Text(status, 13.5, running ? C.Sub : C.Amber), 0, 2, 0, actions.Count > 0 ? 10 : 0),
                 Ui.Row(actions.ToArray())), 20), 0, 0, 0, 16));
         }
-        var notes = Notes.All().Where(n => n.Id != pendingDelete).ToList();
+        // Notes kept on Home (shared in on the phone) aren't filed here.
+        var notes = Notes.All().Where(n => !n.Home && n.Id != pendingDelete).ToList();
         if (notes.Count == 0)
         {
             col.Children.Add(Ui.Card(Ui.Text("No notes yet. Press Ctrl+Shift+Win, or New voice note in the tray menu, and talk.", 16, C.Sub), 24));
@@ -1270,55 +1358,64 @@ public sealed class MainWindow : Window
      * A note in the list: its title and first line (or, while searching, the bit that matched, words marked), its tags,
      * and when it was made ([withDate]: the day too, when the list isn't split into days). Clicking it opens the note.
      */
+    /**
+     * One note in the list: its name as the heading (its title, or its first line when it has none) with the time at the
+     * end, and one quiet line under it (voice note and length, where it came from, tags). While searching, the bit that
+     * matched shows under the name too.
+     */
     private UIElement NoteRow(NoteFind.Item n, NoteImport.Info? info, List<string> words, bool withDate)
     {
         var voice = info?.Audio != null;
         var snip = words.Count > 0 ? NoteFind.Snippet(n.Text, words) : null;
-        // With a title: the title in bold, then the text's first line in grey. Without: the first lines of the text.
-        FrameworkElement preview;
-        if (n.Title is { } title)
+        var name = Marked(NoteName(n.Title, n.Text), 16, null, n.Title != null, words);
+        name.TextWrapping = TextWrapping.NoWrap; name.TextTrimming = TextTrimming.CharacterEllipsis;
+        var time = Ui.Text(DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString(withDate ? "MMM d" : "h:mm tt", CultureInfo.InvariantCulture), 13, C.Sub);
+        time.Margin = new Thickness(12, 0, 0, 0);
+        time.VerticalAlignment = VerticalAlignment.Center;
+        var stack = Ui.Stack(Spread(name, time));
+        if (snip != null)
         {
-            var head = Marked(title, 16.5, null, true, words);
-            var first = Marked(snip ?? n.Text.Trim().Split('\n')[0].Trim(), 14.5, C.Sub, false, words);
-            head.TextWrapping = TextWrapping.NoWrap; head.TextTrimming = TextTrimming.CharacterEllipsis;
-            if (snip == null) { first.TextWrapping = TextWrapping.NoWrap; first.TextTrimming = TextTrimming.CharacterEllipsis; }
-            preview = Ui.Stack(head, Spaced(first, 0, 2, 0, 0));
+            var found = Marked(snip, 14, C.Sub, false, words);
+            found.MaxHeight = 14 * 1.4 * 2;
+            found.TextTrimming = TextTrimming.CharacterEllipsis;
+            stack.Children.Add(Spaced(found, 0, 2, 0, 0));
         }
-        else
+        var parts = new List<string>();
+        if (voice) parts.Add("voice note" + (info!.Duration > 0 ? " " + NoteMedia.Clock(info.Duration) : ""));
+        if (info?.Source != null) parts.Add("from " + info.Source);
+        if (n.Tags.Count > 0) parts.Add(string.Join(", ", n.Tags));
+        if (parts.Count > 0)
         {
-            var text = Marked(snip ?? System.Text.RegularExpressions.Regex.Replace(n.Text.Trim(), @"\s+", " "), 16.5, null, false, words);
-            text.MaxHeight = 16.5 * 1.4 * 2;
-            text.TextTrimming = TextTrimming.CharacterEllipsis;
-            preview = text;
+            var metaRow = Ui.Row();
+            if (voice) metaRow.Children.Add(Spaced(Icons.Get("play", 13, C.Sub), 0, 0, 4, 0));
+            var meta = Ui.Text(string.Join(" · ", parts), 13, C.Sub);
+            meta.TextTrimming = TextTrimming.CharacterEllipsis;
+            metaRow.Children.Add(meta);
+            stack.Children.Add(Spaced(metaRow, 0, 3, 0, 0));
         }
-        var meta = DateTimeOffset.FromUnixTimeMilliseconds(n.Time).LocalDateTime.ToString(withDate ? "MMM d, h:mm tt" : "h:mm tt", CultureInfo.InvariantCulture);
-        if (voice)
-        {
-            meta += " · voice note";
-            if (info!.Duration > 0) meta += " · " + NoteMedia.Clock(info.Duration);
-            if (info.Source != null) meta += " · from " + info.Source;
-        }
-        var metaRow = Ui.Row();
-        if (voice) metaRow.Children.Add(Spaced(Icons.Get("play", 14, C.Sub), 0, 0, 4, 0));
-        metaRow.Children.Add(Ui.Text(meta, 13.5, C.Sub));
-        var stack = Ui.Stack(preview);
-        if (n.Tags.Count > 0)
-        {
-            var tagRow = new WrapPanel { Margin = new Thickness(0, 6, 0, -6) };
-            foreach (var t in n.Tags) tagRow.Children.Add(TagChip(t));
-            stack.Children.Add(tagRow);
-        }
-        stack.Children.Add(Spaced(metaRow, 0, 6, 0, 0));
         var row = new Border
         {
-            Padding = new Thickness(16, 12, 16, 12), Margin = new Thickness(6), CornerRadius = new CornerRadius(22),
+            Padding = new Thickness(16, 10, 16, 10), Margin = new Thickness(6, 3, 6, 3), CornerRadius = new CornerRadius(18),
             Background = Brushes.Transparent, Cursor = Cursors.Hand, Child = stack,
         };
         row.MouseEnter += (_, _) => row.Background = C.Hover;
         row.MouseLeave += (_, _) => row.Background = Brushes.Transparent;
         var find = notesFilter.Query;
         row.MouseLeftButtonUp += (_, _) => OpenNote(n.Id, find);
-        return Ui.Keys(row, () => OpenNote(n.Id, find), n.Title ?? "Open note");
+        // Untitled notes get a title from the AI in the background, a few at a time, so the list reads as names. Only with
+        // AI cleanup on (the notes' words already go to it); each note is asked once per window.
+        if (n.Title == null && info?.TitleOff != true && n.Text.Trim().Length >= 40 && S.Cleanup != "OFF" && listTitling < 3 && titleTried.Add(n.Id))
+            ListTitle(n.Id, n.Text);
+        return Ui.Keys(row, () => OpenNote(n.Id, find), NoteName(n.Title, n.Text));
+    }
+
+    /** A note's name in a list: its title, or else its first line (cut at 80 characters). */
+    private static string NoteName(string? title, string text)
+    {
+        if (!string.IsNullOrWhiteSpace(title)) return title;
+        var first = text.Trim().Split('\n')[0].Trim();
+        if (first.Length > 80) first = first[..79].TrimEnd() + "…";
+        return first.Length > 0 ? first : "Empty note";
     }
 
     // ---------- one note ----------
@@ -1378,7 +1475,7 @@ public sealed class MainWindow : Window
      */
     private void BuildNote(StackPanel col, long id)
     {
-        var back = Ui.Button("Notes", CloseNote, icon: "back");
+        var back = Ui.Button(CurrentPage == Page.Home ? "Home" : "Notes", CloseNote, icon: "back");
         var note = Notes.All().FirstOrDefault(x => x.Id == id && x.Id != pendingDelete);
         if (note == null)
         {
@@ -1419,10 +1516,11 @@ public sealed class MainWindow : Window
         more = Ui.Button("", () => { menu.PlacementTarget = more; menu.IsOpen = true; }, icon: "more");
         if (voice)
         {
-            var silence = new MenuItem { Header = "Skip silence", IsCheckable = true, IsChecked = S.NoteSkipSilence };
-            silence.Click += (_, _) => { S.NoteSkipSilence = !S.NoteSkipSilence; S.Save(); NoteRecut(); };
-            var ums = new MenuItem { Header = "Skip ums", IsCheckable = true, IsChecked = S.NoteSkipUms };
-            ums.Click += (_, _) => { S.NoteSkipUms = !S.NoteSkipUms; S.Save(); NoteRecut(); };
+            // Only this note changes; the default for every note is in Settings › Notes.
+            var silence = new MenuItem { Header = "Skip silence (this note)", IsCheckable = true, IsChecked = NoteSkipSilence(id) };
+            silence.Click += (_, _) => NoteSetForThis(id, "skipSilence", !NoteSkipSilence(id), S.NoteSkipSilence);
+            var ums = new MenuItem { Header = "Skip ums (this note)", IsCheckable = true, IsChecked = NoteSkipUms(id) };
+            ums.Click += (_, _) => NoteSetForThis(id, "skipUms", !NoteSkipUms(id), S.NoteSkipUms);
             menu.Items.Add(silence);
             menu.Items.Add(ums);
         }
@@ -1438,6 +1536,18 @@ public sealed class MainWindow : Window
             Render();
         };
         menu.Items.Add(rename);
+        // Shared in to read or play back, it sits on Home; Move to Notes files it, and any note can go back.
+        {
+            var move = new MenuItem { Header = note.Home ? "Move to Notes" : "Move to Home" };
+            move.Click += (_, _) =>
+            {
+                if (note.Home) { MoveToNotes(id); return; } // also turns Notes on, so it has somewhere to show
+                try { Notes.SetHome(id, true); } catch { Toast("Couldn't move it"); return; }
+                Toast("Moved to Home");
+                Render();
+            };
+            menu.Items.Add(move);
+        }
         var copy = new MenuItem { Header = "Copy text" };
         copy.Click += (_, _) => { _ = TextInjector.Copy(note.Text); Toast("Copied"); };
         menu.Items.Add(copy);
@@ -1477,6 +1587,10 @@ public sealed class MainWindow : Window
             timeline.Margin = new Thickness(8, 0, 0, 0);
             buttons.Children.Add(timeline);
         }
+        // The whole text in one click (a summary has its own copy button on its panel).
+        var copyPill = NotePill("⧉", "Copy", false, () => { _ = TextInjector.Copy(note.Text); Toast("Copied"); });
+        copyPill.Margin = new Thickness(8, 0, 0, 0);
+        buttons.Children.Add(copyPill);
         col.Children.Add(Spaced(buttons, 0, 0, 0, 14));
 
         noteBusy.TryGetValue(id, out var busy);
@@ -1537,9 +1651,21 @@ public sealed class MainWindow : Window
         if (voice) { playerHost.Child = NotePlayerBar(); playerHost.Visibility = Visibility.Visible; }
     }
 
+    /** Titles being made for the list right now. */
+    private int listTitling;
+
+    private async void ListTitle(long id, string text)
+    {
+        listTitling++;
+        string? made = null;
+        try { made = await NoteImport.MakeTitle(S, id, text); } catch { }
+        finally { listTitling--; }
+        if (made != null && CurrentPage == Page.Notes && openNoteId == null) Render();
+    }
+
     private async void MakeTitle(Note n)
     {
-        if (await NoteImport.MakeTitle(S, n.Id, n.Text) != null && CurrentPage == Page.Notes) Render();
+        if (await NoteImport.MakeTitle(S, n.Id, n.Text) != null && CurrentPage is Page.Notes or Page.Home) Render();
     }
 
     /** The word hint goes for good once a word is clicked or it's closed. */
@@ -1716,12 +1842,36 @@ public sealed class MainWindow : Window
 
     /** What playback jumps over: stretches with no voice and "um"s, as switched on in the ⋮ menu. */
     private void NoteRecut() =>
-        noteCuts = NoteMedia.Merge((S.NoteSkipSilence ? noteSilence ?? new List<NoteMedia.Cut>() : new List<NoteMedia.Cut>())
-            .Concat(S.NoteSkipUms ? NoteMedia.FillerCuts(noteWords) : new List<NoteMedia.Cut>()));
+        noteCuts = NoteMedia.Merge((openNoteId is { } on && NoteSkipSilence(on) ? noteSilence ?? new List<NoteMedia.Cut>() : new List<NoteMedia.Cut>())
+            .Concat(openNoteId is { } ou && NoteSkipUms(ou) ? NoteMedia.FillerCuts(noteWords) : new List<NoteMedia.Cut>()));
 
-    private static string SpeedLabel(double v) => v.ToString("0.##", CultureInfo.InvariantCulture) + "×";
+    /** A note's Skip silence / Skip ums: its own choice from the ⋮ menu, else the default in Settings › Notes. */
+    private bool NoteSkipSilence(long id) => NoteImport.Get(id)?.SkipSilence ?? S.NoteSkipSilence;
+    private bool NoteSkipUms(long id) => NoteImport.Get(id)?.SkipUms ?? S.NoteSkipUms;
 
-    /** Play, a position bar with the time gone and the time left under its ends, and the speed. */
+    /** The ⋮ menu changes only this note; picking the same as the default goes back to following it. */
+    private void NoteSetForThis(long id, string key, bool on, bool def)
+    {
+        NoteImport.Update(id, o => { if (on == def) o.Remove(key); else o[key] = on; });
+        NoteRecut();
+    }
+
+    /** The speed playing now: Auto's, or the one picked on the wheel. */
+    private double NoteSpeedNow => S.NoteAutoSpeed ? noteAutoNow : S.NoteSpeed;
+    private string NoteSpeedText => (S.NoteAutoSpeed ? "Auto " : "") + NoteMedia.SpeedLabel(NoteSpeedNow);
+    private double noteAutoNow = 1;
+    private DateTime noteAutoAt;
+    private bool noteSpeedOpen;
+    private TextBlock? noteSpeedLabel;
+
+    /** Changes take effect at once here: Windows changes the speed without restarting the sound. */
+    private static readonly bool SmoothSpeed = true;
+
+    /**
+     * Play, a position bar with the time gone and the time left under its ends, and the speed. The speed button
+     * opens the speed wheel under the bar; turning the mouse wheel over the button changes the speed too, and
+     * right-clicking it goes back to 1×.
+     */
     private UIElement NotePlayerBar()
     {
         var playing = NotePlayer.Playing && NotePlayer.File == noteFile;
@@ -1747,14 +1897,16 @@ public sealed class MainWindow : Window
         var middle = Ui.Stack(slider, times);
         middle.Margin = new Thickness(14, 0, 14, 0);
         middle.VerticalAlignment = VerticalAlignment.Center;
-        var speed = Ui.Button(SpeedLabel(S.NoteSpeed), () =>
+        var speed = Ui.Button(NoteSpeedText, () => { noteSpeedOpen = !noteSpeedOpen; playerHost.Child = NotePlayerBar(); });
+        noteSpeedLabel = (speed.Child as Panel)?.Children.OfType<TextBlock>().FirstOrDefault();
+        System.Windows.Automation.AutomationProperties.SetName(speed, "Playback speed");
+        speed.ToolTip = "Click for the speed wheel. Scroll to change it, right-click for 1×.";
+        speed.MouseWheel += (_, e) =>
         {
-            var i = Array.FindIndex(Sync.NoteSpeeds, v => Math.Abs(v - S.NoteSpeed) < 0.001);
-            S.NoteSpeed = Sync.NoteSpeeds[(i + 1) % Sync.NoteSpeeds.Length];
-            S.Save();
-            NotePlayer.SetSpeed(S.NoteSpeed);
-            playerHost.Child = NotePlayerBar();
-        });
+            e.Handled = true;
+            NotePickSpeed(NoteMedia.NearestWheel(S.NoteSpeed) + (e.Delta > 0 ? 0.1 : -0.1));
+        };
+        speed.MouseRightButtonUp += (_, e) => { e.Handled = true; S.NoteAutoSpeed = false; NotePickSpeed(1); };
         var g = new Grid { Margin = new Thickness(24, 10, 24, 12) };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -1763,7 +1915,148 @@ public sealed class MainWindow : Window
         Grid.SetColumn(middle, 1); g.Children.Add(middle);
         Grid.SetColumn(speed, 2); g.Children.Add(speed);
         NoteShow(slider.Value);
-        return new Border { Background = C.Card, BorderBrush = C.Line, BorderThickness = new Thickness(0, 1, 0, 0), Child = g };
+        var all = Ui.Stack(g);
+        if (noteSpeedOpen) all.Children.Add(NoteSpeedDrawer());
+        return new Border { Background = C.Card, BorderBrush = C.Line, BorderThickness = new Thickness(0, 1, 0, 0), Child = all };
+    }
+
+    /** Picking a speed yourself (wheel, scroll, right-click) turns Auto off. */
+    private void NotePickSpeed(double v)
+    {
+        v = Math.Clamp(Math.Round(v * 10) / 10, NoteMedia.MinSpeed, NoteMedia.MaxSpeed);
+        var autoWasOn = S.NoteAutoSpeed;
+        S.NoteSpeed = v;
+        S.NoteAutoSpeed = false;
+        S.Save();
+        NotePlayer.SetSpeed(v);
+        if (autoWasOn || noteSpeedOpen) playerHost.Child = NotePlayerBar();
+        else if (noteSpeedLabel != null) noteSpeedLabel.Text = NoteSpeedText;
+    }
+
+    /** Under the bar: the speed wheel, Auto speed, and the pace Auto aims for. */
+    private UIElement NoteSpeedDrawer()
+    {
+        var wheel = SpeedWheel(S.NoteSpeed, NotePickSpeed);
+        var auto = Ui.SettingRow("Auto speed", "Speeds up where the talking is slow, never below 1×", Ui.Switch(S.NoteAutoSpeed, on =>
+        {
+            S.NoteAutoSpeed = on;
+            S.Save();
+            noteAutoNow = Math.Max(1, S.NoteSpeed);
+            noteAutoAt = default;
+            if (!on) NotePlayer.SetSpeed(S.NoteSpeed);
+            playerHost.Child = NotePlayerBar();
+        }));
+        auto.Margin = new Thickness(0, 0, 0, 4);
+        var side = Ui.Stack(auto);
+        if (S.NoteAutoSpeed)
+        {
+            var menu = new ContextMenu();
+            foreach (var w in NoteMedia.TargetWpm)
+            {
+                var item = new MenuItem { Header = $"{w} words a minute", IsCheckable = true, IsChecked = w == S.NoteTargetWpm };
+                item.Click += (_, _) => { S.NoteTargetWpm = w; S.Save(); playerHost.Child = NotePlayerBar(); };
+                menu.Items.Add(item);
+            }
+            Border pace = null!;
+            pace = Ui.Button($"Aim for {S.NoteTargetWpm} words a minute ▾", () => { menu.PlacementTarget = pace; menu.IsOpen = true; });
+            side.Children.Add(pace);
+        }
+        else side.Children.Add(Ui.Text("Scroll or drag the wheel to pick a speed, 0.5× to 4×.", 13, C.Sub));
+        side.Margin = new Thickness(20, 0, 0, 0);
+        side.VerticalAlignment = VerticalAlignment.Center;
+        var g = new Grid { Margin = new Thickness(24, 0, 24, 14) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.Children.Add(wheel);
+        Grid.SetColumn(side, 1); g.Children.Add(side);
+        return g;
+    }
+
+    /**
+     * A scroll wheel of speeds, faster at the top: the mouse wheel, a drag, the arrow keys or a click on a speed
+     * above or below moves it one 0.1× step at a time.
+     */
+    private static Border SpeedWheel(double value, Action<double> picked)
+    {
+        var speeds = NoteMedia.WheelSpeeds;
+        var i = Array.IndexOf(speeds, NoteMedia.NearestWheel(value));
+        const double rowH = 24;
+        var rows = new StackPanel();
+        var box = new Border
+        {
+            Background = C.Bg, BorderBrush = C.Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(4), Width = 92, Child = rows, Focusable = true, Cursor = Cursors.SizeNS,
+        };
+        void Paint()
+        {
+            rows.Children.Clear();
+            for (var k = 2; k >= -2; k--)
+            {
+                var j = i + k;
+                rows.Children.Add(new TextBlock
+                {
+                    Text = j >= 0 && j < speeds.Length ? NoteMedia.SpeedLabel(speeds[j]) : "", Height = rowH,
+                    FontSize = k == 0 ? 17 : 13, FontWeight = k == 0 ? FontWeights.SemiBold : FontWeights.Normal,
+                    Foreground = k == 0 ? C.Text : C.Sub, Opacity = k == 0 ? 1 : Math.Abs(k) == 1 ? 0.85 : 0.5,
+                    HorizontalAlignment = HorizontalAlignment.Center, FontFamily = C.Sans,
+                    Background = k == 0 ? C.Pill : null, Padding = new Thickness(10, 1, 10, 1),
+                });
+            }
+            System.Windows.Automation.AutomationProperties.SetName(box, "Speed " + NoteMedia.SpeedLabel(speeds[i]));
+        }
+        void Move(int d)
+        {
+            var n = Math.Clamp(i + d, 0, speeds.Length - 1);
+            if (n == i) return;
+            i = n;
+            Paint();
+            picked(speeds[i]);
+        }
+        Paint();
+        box.MouseWheel += (_, e) => { e.Handled = true; Move(e.Delta > 0 ? 1 : -1); };
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Up) { e.Handled = true; Move(1); }
+            else if (e.Key == Key.Down) { e.Handled = true; Move(-1); }
+        };
+        double? downY = null;
+        var dragged = false;
+        box.MouseLeftButtonDown += (_, e) => { downY = e.GetPosition(box).Y; dragged = false; box.CaptureMouse(); box.Focus(); e.Handled = true; };
+        box.MouseMove += (_, e) =>
+        {
+            if (downY is not { } y0 || e.LeftButton != MouseButtonState.Pressed) return;
+            var steps = (int)((y0 - e.GetPosition(box).Y) / rowH);
+            if (steps == 0) return;
+            dragged = true;
+            Move(steps);
+            downY = y0 - steps * rowH;
+        };
+        box.MouseLeftButtonUp += (_, e) =>
+        {
+            box.ReleaseMouseCapture();
+            if (!dragged && downY is { } y) Move(2 - (int)Math.Clamp((y - 4) / rowH, 0, 4)); // a click on a speed above or below
+            downY = null;
+            e.Handled = true;
+        };
+        return box;
+    }
+
+    /** Auto speed, about twice a second while playing: glide toward the speed that suits the talking at [at]. */
+    private void NoteAutoStep(double at)
+    {
+        if (!S.NoteAutoSpeed) return;
+        var now = DateTime.Now;
+        if ((now - noteAutoAt).TotalSeconds < (SmoothSpeed ? 0.5 : 2.5)) return;
+        var dt = noteAutoAt == default ? 1 : (now - noteAutoAt).TotalSeconds;
+        var want = NoteMedia.AutoSpeed(NoteMedia.PaceAt(noteWords, at), S.NoteTargetWpm);
+        var next = NoteMedia.Glide(noteAutoNow, want, dt);
+        if (Math.Abs(next - noteAutoNow) < (SmoothSpeed ? 0.01 : 0.1)) { noteAutoAt = now; return; }
+        // Where changing speed restarts the sound, it waits for a gap between words.
+        if (!SmoothSpeed && NoteMedia.WordAt(noteWords, at) >= 0) return;
+        noteAutoAt = now;
+        noteAutoNow = next;
+        NotePlayer.SetSpeed(next);
+        if (noteSpeedLabel != null) noteSpeedLabel.Text = NoteSpeedText;
     }
 
     /** Where Play starts when nothing is loaded yet: the start, or wherever the bar was dragged. */
@@ -1779,7 +2072,8 @@ public sealed class MainWindow : Window
     private void NotePlay(double from)
     {
         if (noteFile == null) return;
-        NotePlayer.Play(noteFile, from, S.NoteSpeed);
+        if (S.NoteAutoSpeed && !NotePlayer.Playing) { noteAutoNow = Math.Max(1, noteAutoNow); noteAutoAt = default; }
+        NotePlayer.Play(noteFile, from, NoteSpeedNow);
     }
 
     private void NotePlayerChanged() => Dispatcher.BeginInvoke(() =>
@@ -1809,6 +2103,7 @@ public sealed class MainWindow : Window
             at = to;
         }
         NoteShow(at);
+        NoteAutoStep(at);
     }
 
     private void NoteShow(double at)
@@ -2041,19 +2336,27 @@ public sealed class MainWindow : Window
 
     // ---------- Settings ----------
 
-    private const string SetupCategory = "Setup", PrivacyPage = "Privacy", SpeechCategory = "Speech & AI", KeysPage = "API keys";
+    private const string SetupCategory = "Setup", PrivacyPage = "Privacy", SpeechCategory = "Speech & AI", KeysPage = "API keys",
+        NotesPage = "Notes", StoragePage = "Storage & stats";
+
+    /** Pages that were folded into another; opening one opens where its settings are now. */
+    private static readonly Dictionary<string, string> MovedPages = new() { [KeysPage] = SpeechCategory, ["Recordings & usage"] = StoragePage };
+
+    /** What's typed in the Settings search box, and a setting picked from its results to scroll to and flash. */
+    private string settingsQuery = "";
+    private string? settingsFind;
 
     /** Settings pages, in order, each with its sections in the order shown on it. Same pages as the Android app, less what only a phone has. */
     private static readonly (string Name, string[] Sections)[] Pages =
     {
         (SetupCategory, new[] { "Setup" }),
         (PrivacyPage, new[] { "Privacy" }),
-        (SpeechCategory, new[] { "Speech to text", "Offline model", "AI cleanup", "Speed" }),
-        (KeysPage, new[] { "API keys" }),
+        (SpeechCategory, new[] { "Speech to text", "Offline model", "AI cleanup", "Speed", "API keys" }),
+        (NotesPage, new[] { "Notes" }),
         ("Recording", new[] { "Recording", "Microphone", "Recording indicator" }),
         ("Appearance", new[] { "Appearance" }),
         ("Sync & backup", new[] { "Sync", "Backup" }),
-        ("Recordings & usage", new[] { "Recordings", "Usage" }),
+        (StoragePage, new[] { "Recordings", "Usage" }),
         ("AI assistants", new[] { "AI assistants" }),
         ("About", new[] { "About" }),
     };
@@ -2077,7 +2380,7 @@ public sealed class MainWindow : Window
     /** Opens Settings on one page, for links that send the user there to fix something. */
     internal void OpenSettingsAt(string page)
     {
-        settingsPage = page;
+        settingsPage = MovedPages.TryGetValue(page, out var moved) ? moved : page;
         scroller.ScrollToTop();
         Go(Page.Settings);
     }
@@ -2122,8 +2425,38 @@ public sealed class MainWindow : Window
             }
         }
 
-        var list = new StackPanel();
-        foreach (var (name, _) in shown) list.Children.Add(PageItem(name, name == settingsPage));
+        var pageList = new StackPanel();
+        var rows = SettingRows(shown, sections);
+        void FillList()
+        {
+            pageList.Children.Clear();
+            if (settingsQuery.Trim().Length == 0)
+            {
+                foreach (var (name, _) in shown) pageList.Children.Add(PageItem(name, name == settingsPage));
+                return;
+            }
+            var hits = SettingsSearch.Find(settingsQuery, rows);
+            if (hits.Count == 0)
+            {
+                var none = Ui.Text($"Nothing matches \"{settingsQuery.Trim()}\". Try another word, like dark, offline or speed.", 13.5, C.Sub);
+                none.TextWrapping = TextWrapping.Wrap;
+                none.Margin = new Thickness(14, 8, 8, 0);
+                pageList.Children.Add(none);
+            }
+            foreach (var h in hits) pageList.Children.Add(SearchHit(h));
+        }
+        var search = new TextBox { Text = settingsQuery, FontSize = 14.5, Padding = new Thickness(10, 7, 10, 7), Margin = new Thickness(0, 0, 0, 10) };
+        System.Windows.Automation.AutomationProperties.SetName(search, "Search settings");
+        var hint = Ui.Text("Search settings", 14.5, C.Sub);
+        hint.IsHitTestVisible = false;
+        hint.Margin = new Thickness(13, 8, 0, 0);
+        hint.Visibility = settingsQuery.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        search.TextChanged += (_, _) => { settingsQuery = search.Text; hint.Visibility = search.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; FillList(); };
+        var searchBox = new Grid();
+        searchBox.Children.Add(search);
+        searchBox.Children.Add(hint);
+        FillList();
+        var list = Ui.Stack(searchBox, pageList);
         var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
@@ -2132,6 +2465,65 @@ public sealed class MainWindow : Window
         Grid.SetColumn(body, 2);
         grid.Children.Add(body);
         col.Children.Add(grid);
+        if (settingsFind is { } want)
+        {
+            settingsFind = null;
+            Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+            {
+                if (TextBlocks(body).FirstOrDefault(t => t.Text == want) is not { } hit) return;
+                // The row: the nearest Grid or Border around the title (a SettingRow is a Grid, a LinkRow a Border).
+                FrameworkElement row = hit;
+                while (row.Parent is FrameworkElement p) { row = p; if (row is Grid or Border) break; }
+                row.BringIntoView();
+                var flash = new SolidColorBrush(Color.FromArgb(0x55, 0x6E, 0xA8, 0xFE));
+                if (row is Panel panel) panel.Background = flash; else if (row is Border b) b.Background = flash; else return;
+                flash.BeginAnimation(SolidColorBrush.OpacityProperty, new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(1600)) { BeginTime = TimeSpan.FromMilliseconds(300) });
+            });
+        }
+    }
+
+    private static IEnumerable<TextBlock> TextBlocks(object e)
+    {
+        switch (e)
+        {
+            case TextBlock t: yield return t; break;
+            case Panel p: foreach (var c in p.Children) foreach (var t in TextBlocks(c)) yield return t; break;
+            case Decorator d when d.Child != null: foreach (var t in TextBlocks(d.Child)) yield return t; break;
+            case ContentControl cc when cc.Content != null: foreach (var t in TextBlocks(cc.Content)) yield return t; break;
+        }
+    }
+
+    /** Every setting on every page, for the search box: the titles on its rows, with the line under each. */
+    private static List<SettingsSearch.Row> SettingRows(List<(string Name, string[] Sections)> shown, Dictionary<string, List<UIElement>> sections)
+    {
+        var rows = new List<SettingsSearch.Row>();
+        foreach (var (page, titles) in shown)
+            foreach (var section in titles)
+            {
+                if (!sections.TryGetValue(section, out var part)) continue;
+                foreach (var e in part.Skip(1))
+                    foreach (var t in TextBlocks(e))
+                    {
+                        var title = t.Text.Trim();
+                        if (Math.Abs(t.FontSize - 15) > 0.6 || title.Length is 0 or > 60 || char.IsDigit(title[0]) || title == page) continue;
+                        var sub = (t.Parent as Panel)?.Children.OfType<TextBlock>().FirstOrDefault(x => x != t)?.Text ?? "";
+                        rows.Add(new SettingsSearch.Row(title, sub, page, titles.Length > 1 && section != page ? $"{page} › {section}" : page));
+                    }
+            }
+        return rows.GroupBy(r => (r.Title, r.Page)).Select(g => g.First()).ToList();
+    }
+
+    /** A search result in the list on the left: the setting and where it is. Click it to go there. */
+    private FrameworkElement SearchHit(SettingsSearch.Hit h)
+    {
+        var texts = Ui.Stack(Ui.Text(h.Title, 15, C.Text), Ui.Text(h.Where + (h.Note != null ? " · " + h.Note : ""), 12.5, C.Sub));
+        ((TextBlock)texts.Children[1]).TextWrapping = TextWrapping.Wrap;
+        var b = new Border { Child = texts, CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 8, 14, 8), Margin = new Thickness(0, 0, 0, 4), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        b.MouseEnter += (_, _) => b.Background = C.Hover;
+        b.MouseLeave += (_, _) => b.Background = Brushes.Transparent;
+        void Open() { settingsQuery = ""; settingsPage = h.Page; settingsFind = h.Title; scroller.ScrollToTop(); Render(); }
+        b.MouseLeftButtonUp += (_, _) => Open();
+        return Ui.Keys(b, Open, $"{h.Title}, {h.Where}");
     }
 
     /** One page in the list on the left: its name and what it's set to. Click it (or Enter) to open it. */
@@ -2161,17 +2553,35 @@ public sealed class MainWindow : Window
         {
             SetupCategory => SetupComplete ? ("All set", false) : ("Add a key or the offline model", true),
             PrivacyPage => (Privacy.Current(S) is { } l ? Privacy.Label(l) : "Custom", false),
-            SpeechCategory => ($"{(S.Stt == "LOCAL" ? "On this computer" : S.SttOption.Label)} · cleanup {(S.Cleanup == "OFF" ? "off" : S.CleanupOption.Label)}", false),
-            KeysPage => Catalog.Services.Where(v => S.Key(v.Id).Length > 0).Select(v => v.Name).ToList() is { Count: > 0 } have
-                ? (string.Join(", ", have), false) : ("None added yet", S.Stt != "LOCAL"),
+            SpeechCategory => Catalog.Services.Count(v => S.Key(v.Id).Length > 0) is var keys
+                ? ($"{(S.Stt == "LOCAL" ? "On this computer" : S.SttOption.Label)} · cleanup {(S.Cleanup == "OFF" ? "off" : S.CleanupOption.Label)} · {(keys == 0 ? "no API keys yet" : keys == 1 ? "1 key" : $"{keys} keys")}",
+                    keys == 0 && S.Stt != "LOCAL") : ("", false),
+            NotesPage => (!S.NotesBeta ? "Off" : string.Join(" · ", new[] { S.NoteAutoSpeed ? "Auto speed" : NoteMedia.SpeedLabel(S.NoteSpeed),
+                S.NoteSkipSilence ? "skip silence" : null, S.NoteSkipUms ? "skip ums" : null }.Where(x => x != null)), false),
             "Recording" => ($"Auto-stop {OnOff(S.AutoStop)} · {(S.PreferHeadset ? "headset mic" : S.MicDevice.Length > 0 ? S.MicDevice : "default mic")}", false),
             "Appearance" => (S.Theme switch { "light" => "Light", "dark" => "Dark", _ => "Match Windows" }, false),
             "Sync & backup" => (S.SyncFile.Length == 0 ? "Sync off" : "Sync on", false),
-            "Recordings & usage" => (S.AudioKeepDays switch { 0 => "Audio not saved", int.MaxValue => "Audio kept forever", var d => $"Audio kept {d} days" }, false),
+            StoragePage => (S.AudioKeepDays switch { 0 => "Audio not saved", int.MaxValue => "Audio kept forever", var d => $"Audio kept {d} days" }, false),
             "AI assistants" => ($"Read my notes: {OnOff(S.NotesMcp)}", false),
             "About" => ("Tokalot " + Updater.CurrentVersion, false),
             _ => ("", false),
         };
+    }
+
+    /** A button showing the current choice; clicking it lists the choices, ticked one first. */
+    private static Border MenuButton(string label, string[] items, int selected, Action<int> pick)
+    {
+        var menu = new ContextMenu();
+        for (var i = 0; i < items.Length; i++)
+        {
+            var at = i;
+            var item = new MenuItem { Header = items[i], IsCheckable = true, IsChecked = i == selected };
+            item.Click += (_, _) => pick(at);
+            menu.Items.Add(item);
+        }
+        Border b = null!;
+        b = Ui.Button(label + " ▾", () => { menu.PlacementTarget = b; menu.IsOpen = true; });
+        return b;
     }
 
     // ---------- Privacy ----------
@@ -2397,6 +2807,34 @@ public sealed class MainWindow : Window
         col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Show when idle", "A slim bar stays on the edge between dictations. Click it to dictate, drag it to move it. Hidden while an app is full screen.",
             Ui.Switch(S.ShowIdleIndicator, v => { S.ShowIdleIndicator = v; S.Save(); App.Current.Controller?.RefreshIndicator(); }))), 0, 12, 0, 0));
 
+        // --- Notes: the voice notes beta, and the defaults every note starts with (a note's ⋮ menu can change them)
+        Section(col, NotesPage);
+        var notesRows = new List<UIElement>
+        {
+            Ui.SettingRow("Voice notes (beta)", "A Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. Each dictation is saved as its own note and copied to the clipboard, and recordings you add are transcribed into notes you can summarize. Note text goes in sync when it's set up.",
+                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); })),
+        };
+        if (S.NotesBeta)
+        {
+            notesRows.Add(Ui.SettingRow("Skip silence", "Jump over pauses with no talking. A note's ⋮ menu can change it for that note.",
+                Ui.Switch(S.NoteSkipSilence, v => { S.NoteSkipSilence = v; S.Save(); })));
+            notesRows.Add(Ui.SettingRow("Skip ums", "Jump over um, uh and the like. A note's ⋮ menu can change it for that note.",
+                Ui.Switch(S.NoteSkipUms, v => { S.NoteSkipUms = v; S.Save(); })));
+            notesRows.Add(Ui.SettingRow("Playback speed", "Also the speed button under a voice note.",
+                MenuButton(NoteMedia.SpeedLabel(S.NoteSpeed), NoteMedia.WheelSpeeds.Select(NoteMedia.SpeedLabel).ToArray(),
+                    Array.IndexOf(NoteMedia.WheelSpeeds, NoteMedia.NearestWheel(S.NoteSpeed)), i => { S.NoteSpeed = NoteMedia.WheelSpeeds[i]; S.Save(); Render(); })));
+            notesRows.Add(Ui.SettingRow("Auto speed", "Speeds up where the talking is slow or drawn out and eases off where it's fast, aiming for the pace below. Never slower than 1×.",
+                Ui.Switch(S.NoteAutoSpeed, v => { S.NoteAutoSpeed = v; S.Save(); Render(); })));
+            if (S.NoteAutoSpeed)
+                notesRows.Add(Ui.SettingRow("Auto speed aims for", "Words a minute.",
+                    MenuButton($"{S.NoteTargetWpm} words a minute", NoteMedia.TargetWpm.Select(w => $"{w} words a minute").ToArray(),
+                        Array.IndexOf(NoteMedia.TargetWpm, S.NoteTargetWpm), i => { S.NoteTargetWpm = NoteMedia.TargetWpm[i]; S.Save(); Render(); })));
+            notesRows.Add(Ui.SettingRow("Summary length", "How long a note's summary starts out. Also on a note's Summary card.",
+                MenuButton(NoteMedia.LevelNames[S.NoteSummaryLevel - 1], NoteMedia.LevelNames.ToArray(), S.NoteSummaryLevel - 1,
+                    i => { S.NoteSummaryLevel = i + 1; S.Save(); Render(); })));
+        }
+        col.Children.Add(Ui.List(notesRows.ToArray()));
+
         // --- Recording
         Section(col, "Recording");
         col.Children.Add(Ui.List(
@@ -2411,9 +2849,7 @@ public sealed class MainWindow : Window
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); Render(); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
-                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); })),
-            Ui.SettingRow("Voice notes (beta)", "A Notes page, a tray item and Ctrl+Shift+Win to dictate a note without a text box. Each dictation is saved as its own note and copied to the clipboard, and recordings you add are transcribed into notes you can summarize. Note text goes in sync when it's set up.",
-                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); }))));
+                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); }))));
         if (S.Sounds)
         {
             col.Children.Add(Spaced(Ui.Text("Sound style (click one to hear it)", 14, C.Sub), 4, 16, 0, 8));

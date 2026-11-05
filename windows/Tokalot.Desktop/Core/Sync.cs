@@ -28,7 +28,7 @@ public static class Sync
      * snippets, styles, instructions, notes, word counts. 2: settings, clean-up counts, dictation history. 3: note tags.
      * Raise it whenever something new goes in the file, on every platform at once (SyncFormat.LEVEL on Android).
      */
-    public const int Level = 4; // 4: note reminders and checklists ("plan")
+    public const int Level = 5; // 4: note reminders and checklists ("plan"). 5: notes kept on Home ("home")
 
     /** The synced part of the settings. Styles holds only the categories the user set themselves. */
     public sealed record Data(List<string> Words, List<Snippet> Snippets, Dictionary<string, string> Styles, string Instructions)
@@ -72,7 +72,9 @@ public static class Sync
      */
     // Plan: the note's reminder and checklist (made on the phone) as one JSON object in a string, "" for none, null when
     // the side doesn't know plans. The desktop apps carry it as it is, so it reaches the other phones; they don't show it yet.
-    public sealed record SyncNote(long Id, long Time, string Text, string? Title = null, string? Tags = null, string? Plan = null);
+    // Home: true when the note sits on Home with the dictations (shared in to read or play back) instead of on the Notes
+    // page; null when the side doesn't know (a file from before level 5), so it never moves one.
+    public sealed record SyncNote(long Id, long Time, string Text, string? Title = null, string? Tags = null, string? Plan = null, bool? Home = null);
 
     /** A note's "plan" as the file has it, in one form to compare: an object's JSON, "" for none, null when it isn't there. */
     private static string? PlanOf(JsonNode? n) => n switch
@@ -93,6 +95,7 @@ public static class Sync
             if (n.Plan.Length > 0) try { plan = JsonNode.Parse(n.Plan) as JsonObject; } catch (JsonException) { }
             o["plan"] = plan ?? JsonValue.Create("");
         }
+        if (n.Home != null) o["home"] = n.Home.Value;
         return o;
     }
 
@@ -269,11 +272,8 @@ public static class Sync
         "stt", "cleanup", "sttModels", "cleanupModels", "autoStop", "quickSkip", "liveStt", "weakSignal", "autoLanguage",
         "polish", "sounds", "soundSet", "theme", "accent", "learnWords", "learnedWords", "dismissedWords", "notesBeta",
         "indicatorStyle", "showIdleIndicator", "appOverrides", "noteSkipSilence", "noteSkipUms", "noteSummaryLevel", "noteSpeed",
-        "shellCommands", "shellCue",
+        "noteAutoSpeed", "noteTargetWpm", "shellCommands", "shellCue",
     };
-
-    /** The playback speeds a voice note offers, in the order the speed button steps through them. */
-    public static readonly double[] NoteSpeeds = { 1, 1.25, 1.5, 2 };
 
     private static readonly string[] Themes = { "system", "light", "dark" };
     private static readonly string[] IndicatorStyles = { "ripple", "half", "bars", "edge", "disc" };
@@ -335,7 +335,8 @@ public static class Sync
                 case "soundSet": return str != null && Tones.Valid(str) == str;
                 case "indicatorStyle": return IndicatorStyles.Contains(str);
                 case "noteSummaryLevel": return n is JsonValue lv && lv.TryGetValue<double>(out var l) && l == Math.Floor(l) && l is >= 1 and <= 5;
-                case "noteSpeed": return n is JsonValue sv && sv.TryGetValue<double>(out var sp) && NoteSpeeds.Any(x => Math.Abs(x - sp) < 0.001);
+                case "noteSpeed": return n is JsonValue sv && sv.TryGetValue<double>(out var sp) && sp is >= NoteMedia.MinSpeed and <= NoteMedia.MaxSpeed;
+                case "noteTargetWpm": return n is JsonValue wv && wv.TryGetValue<double>(out var w) && w == Math.Floor(w) && w is >= 100 and <= 500;
                 case "appOverrides":
                     return n is JsonObject obj && obj.All(kv => kv.Value is JsonValue v && v.GetValueKind() == JsonValueKind.String &&
                         Catalog.Categories.Any(c => c.Id == v.GetValue<string>()));
@@ -379,7 +380,7 @@ public static class Sync
             if (here != null && there != null)
             {
                 var title = here.Title != b?.Title ? here.Title ?? there.Title : there.Title ?? here.Title;
-                output.Add((b != null && here.Text == b.Text ? there : here) with { Title = title, Tags = MergeTags(here.Tags, there.Tags, b?.Tags), Plan = MergePlan(here.Plan, there.Plan, b?.Plan) });
+                output.Add((b != null && here.Text == b.Text ? there : here) with { Title = title, Tags = MergeTags(here.Tags, there.Tags, b?.Tags), Plan = MergePlan(here.Plan, there.Plan, b?.Plan), Home = MergeHome(here.Home, there.Home, b?.Home) });
             }
             else if (b == null) output.Add((here ?? there)!); // else: deleted on one side
         }
@@ -396,6 +397,18 @@ public static class Sync
         if (there == null) return here;
         if (here == null) return there;
         if (was == null) return there.Length == 0 ? here : there;
+        return here != was ? here : there;
+    }
+
+    /**
+     * Whether a note sits on Home, like the phone (SyncMerge.home): moved here since the last sync wins; a side that
+     * doesn't know never moves one; with none in the basis (the first sync after updating), Home wins.
+     */
+    private static bool? MergeHome(bool? here, bool? there, bool? was)
+    {
+        if (there == null) return here;
+        if (here == null) return there;
+        if (was == null) return here.Value || there.Value;
         return here != was ? here : there;
     }
 
@@ -479,7 +492,8 @@ public static class Sync
             {
                 var id = Num(o["id"])!.Value;
                 var tags = o["tags"] is JsonArray ta ? Notes.TagLine(Notes.CleanTags(ta.OfType<JsonValue>().Where(v => v.GetValueKind() == JsonValueKind.String).Select(v => v.ToString()))) : null;
-                return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString(), o["title"] is JsonValue t ? t.ToString() : null, tags, PlanOf(o["plan"]));
+                return new SyncNote(id, Num(o["time"]) ?? id, o["text"]!.ToString(), o["title"] is JsonValue t ? t.ToString() : null, tags, PlanOf(o["plan"]),
+                    o["home"] is JsonValue h && h.GetValueKind() is JsonValueKind.True or JsonValueKind.False ? h.GetValue<bool>() : null);
             })
             .ToList();
         SortedDictionary<string, string>? settings = null;
