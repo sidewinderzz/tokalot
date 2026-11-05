@@ -6,6 +6,13 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.55 · 2026-11-05
+- Voice notes have a speed wheel. Tap the speed button under a note and flick the wheel to any speed from 0.5× to 4×, in steps of 0.1. Hold the button to go back to 1×.
+- Auto speed (on the same wheel) speeds a voice note up where the person talks slowly or draws words out, and eases off where they talk fast. Pick the pace it aims for, from 180 to 350 words a minute. It never plays slower than 1×.
+- Settings has a search box. Type what you're after in everyday words ("dark", "offline", "speed", "um") and tap a result to jump straight to it.
+- A new Notes page in Settings holds the voice notes beta and the defaults every note starts with: Skip silence, Skip ums, speed, Auto speed and summary length. A note's ⋮ menu can still change Skip silence and Skip ums for just that note.
+- API keys now sit on the Speech & AI page, and Recordings & usage is called Storage & stats.
+
 ## 1.52 · 2026-11-03
 - Voice messages and text you share to Tokalot now land on Home with your dictations instead of on the Notes page, since you often share them just to read or listen. Tap one to open it big, with the player, Summary and Timeline as before.
 - Move to Notes (on Home, or in the ⋮ menu of an opened one) files a shared message in Notes when you want to keep it. Move to Home sends it back.

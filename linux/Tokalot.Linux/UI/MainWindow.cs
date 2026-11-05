@@ -1662,10 +1662,11 @@ public sealed partial class MainWindow : Window
         menu.Items.Add(rename);
         if (voice)
         {
-            var silence = new MenuItem { Header = "Skip silence", ToggleType = MenuItemToggleType.CheckBox, IsChecked = S.NoteSkipSilence };
-            silence.Click += (_, _) => { S.NoteSkipSilence = !S.NoteSkipSilence; S.Save(); NoteRecut(); };
-            var ums = new MenuItem { Header = "Skip ums", ToggleType = MenuItemToggleType.CheckBox, IsChecked = S.NoteSkipUms };
-            ums.Click += (_, _) => { S.NoteSkipUms = !S.NoteSkipUms; S.Save(); NoteRecut(); };
+            // Only this note changes; the default for every note is in Settings › Notes.
+            var silence = new MenuItem { Header = "Skip silence (this note)", ToggleType = MenuItemToggleType.CheckBox, IsChecked = NoteSkipSilence(id) };
+            silence.Click += (_, _) => NoteSetForThis(id, "skipSilence", !NoteSkipSilence(id), S.NoteSkipSilence);
+            var ums = new MenuItem { Header = "Skip ums (this note)", ToggleType = MenuItemToggleType.CheckBox, IsChecked = NoteSkipUms(id) };
+            ums.Click += (_, _) => NoteSetForThis(id, "skipUms", !NoteSkipUms(id), S.NoteSkipUms);
             menu.Items.Add(silence);
             menu.Items.Add(ums);
         }
@@ -1922,12 +1923,35 @@ public sealed partial class MainWindow : Window
 
     /** What playback jumps over: stretches with no voice and "um"s, as switched on in the ⋮ menu. */
     private void NoteRecut() =>
-        noteCuts = NoteMedia.Merge((S.NoteSkipSilence ? noteSilence ?? new List<NoteMedia.Cut>() : new List<NoteMedia.Cut>())
-            .Concat(S.NoteSkipUms ? NoteMedia.FillerCuts(noteWords) : new List<NoteMedia.Cut>()));
+        noteCuts = NoteMedia.Merge((openNoteId is { } on && NoteSkipSilence(on) ? noteSilence ?? new List<NoteMedia.Cut>() : new List<NoteMedia.Cut>())
+            .Concat(openNoteId is { } ou && NoteSkipUms(ou) ? NoteMedia.FillerCuts(noteWords) : new List<NoteMedia.Cut>()));
 
-    private static string SpeedLabel(double v) => v.ToString("0.##", CultureInfo.InvariantCulture) + "×";
+    /** A note's Skip silence / Skip ums: its own choice from the ⋮ menu, else the default in Settings › Notes. */
+    private bool NoteSkipSilence(long id) => NoteImport.Get(id)?.SkipSilence ?? S.NoteSkipSilence;
+    private bool NoteSkipUms(long id) => NoteImport.Get(id)?.SkipUms ?? S.NoteSkipUms;
 
-    /** Play, a position bar with the time gone and left under its ends, and the speed. */
+    /** The ⋮ menu changes only this note; picking the same as the default goes back to following it. */
+    private void NoteSetForThis(long id, string key, bool on, bool def)
+    {
+        NoteImport.Update(id, o => { if (on == def) o.Remove(key); else o[key] = on; });
+        NoteRecut();
+    }
+
+    /** The speed playing now: Auto's, or the one picked on the wheel. */
+    private double NoteSpeedNow => S.NoteAutoSpeed ? noteAutoNow : S.NoteSpeed;
+    private string NoteSpeedText => (S.NoteAutoSpeed ? "Auto " : "") + NoteMedia.SpeedLabel(NoteSpeedNow);
+    private double noteAutoNow = 1;
+    private DateTime noteAutoAt;
+    private bool noteSpeedOpen;
+    private TextBlock? noteSpeedLabel;
+
+    /** Changing speed restarts ffplay or mpv here, so Auto changes it less often and only between words. */
+    private static readonly bool SmoothSpeed = false;
+
+    /**
+     * Play, a position bar with the time gone and left under its ends, and the speed. The speed button opens the
+     * speed wheel under the bar; scrolling over the button changes the speed too, and right-clicking it goes back to 1×.
+     */
     private Control NotePlayerBar()
     {
         var playing = NotePlayer.Playing && NotePlayer.File == noteFile;
@@ -1953,14 +1977,22 @@ public sealed partial class MainWindow : Window
         var middle = Ui.Stack(slider, times);
         middle.Margin = new Thickness(14, 0, 14, 0);
         middle.VerticalAlignment = VerticalAlignment.Center;
-        var speed = Ui.Button(SpeedLabel(S.NoteSpeed), () =>
+        var speed = Ui.Button(NoteSpeedText, () => { noteSpeedOpen = !noteSpeedOpen; playerHost.Child = NotePlayerBar(); });
+        noteSpeedLabel = (speed.Child as Panel)?.Children.OfType<TextBlock>().FirstOrDefault();
+        Avalonia.Automation.AutomationProperties.SetName(speed, "Playback speed");
+        ToolTip.SetTip(speed, "Click for the speed wheel. Scroll to change it, right-click for 1×.");
+        speed.PointerWheelChanged += (_, e) =>
         {
-            var i = Array.FindIndex(Sync.NoteSpeeds, v => Math.Abs(v - S.NoteSpeed) < 0.001);
-            S.NoteSpeed = Sync.NoteSpeeds[(i + 1) % Sync.NoteSpeeds.Length];
-            S.Save();
-            NotePlayer.SetSpeed(S.NoteSpeed);
-            playerHost.Child = NotePlayerBar();
-        });
+            e.Handled = true;
+            NotePickSpeed(NoteMedia.NearestWheel(S.NoteSpeed) + (e.Delta.Y > 0 ? 0.1 : -0.1));
+        };
+        speed.PointerReleased += (_, e) =>
+        {
+            if (e.InitialPressMouseButton != MouseButton.Right) return;
+            e.Handled = true;
+            S.NoteAutoSpeed = false;
+            NotePickSpeed(1);
+        };
         var g = new Grid();
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -1969,10 +2001,144 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(middle, 1); g.Children.Add(middle);
         Grid.SetColumn(speed, 2); g.Children.Add(speed);
         var bar = Ui.Stack(g);
+        if (noteSpeedOpen) bar.Children.Add(NoteSpeedDrawer());
         // Without ffplay or mpv the recording only plays from the start (pw-play, paplay or afplay).
-        if (!noteCanSeek) bar.Children.Add(Spaced(Ui.Text("Install ffmpeg to jump to words and skip silence.", 12.5, C.Sub), 0, 6, 0, 0));
+        if (!noteCanSeek) bar.Children.Add(Spaced(Ui.Text("Install ffmpeg to jump to words, skip silence and change the speed.", 12.5, C.Sub), 0, 6, 0, 0));
         NoteShow(slider.Value);
         return new Border { Background = C.Card, BorderBrush = C.Line, BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(24, 10, 24, 10), Child = bar };
+    }
+
+    /** Picking a speed yourself (wheel, scroll, right-click) turns Auto off. */
+    private void NotePickSpeed(double v)
+    {
+        v = Math.Clamp(Math.Round(v * 10) / 10, NoteMedia.MinSpeed, NoteMedia.MaxSpeed);
+        var autoWasOn = S.NoteAutoSpeed;
+        S.NoteSpeed = v;
+        S.NoteAutoSpeed = false;
+        S.Save();
+        NotePlayer.SetSpeed(v);
+        if (autoWasOn || noteSpeedOpen) playerHost.Child = NotePlayerBar();
+        else if (noteSpeedLabel != null) noteSpeedLabel.Text = NoteSpeedText;
+    }
+
+    /** Under the bar: the speed wheel, Auto speed, and the pace Auto aims for. */
+    private Control NoteSpeedDrawer()
+    {
+        var wheel = SpeedWheel(S.NoteSpeed, NotePickSpeed);
+        var auto = Ui.SettingRow("Auto speed", "Speeds up where the talking is slow, never below 1×", Ui.Switch(S.NoteAutoSpeed, on =>
+        {
+            S.NoteAutoSpeed = on;
+            S.Save();
+            noteAutoNow = Math.Max(1, S.NoteSpeed);
+            noteAutoAt = default;
+            if (!on) NotePlayer.SetSpeed(S.NoteSpeed);
+            playerHost.Child = NotePlayerBar();
+        }));
+        auto.Margin = new Thickness(0, 0, 0, 4);
+        var side = Ui.Stack(auto);
+        if (S.NoteAutoSpeed)
+            side.Children.Add(MenuButton($"Aim for {S.NoteTargetWpm} words a minute", NoteMedia.TargetWpm.Select(w => $"{w} words a minute").ToArray(),
+                Array.IndexOf(NoteMedia.TargetWpm, S.NoteTargetWpm), i => { S.NoteTargetWpm = NoteMedia.TargetWpm[i]; S.Save(); playerHost.Child = NotePlayerBar(); }));
+        else side.Children.Add(Ui.Text("Scroll or drag the wheel to pick a speed, 0.5× to 4×.", 13, C.Sub));
+        side.Margin = new Thickness(20, 0, 0, 0);
+        side.VerticalAlignment = VerticalAlignment.Center;
+        var g = new Grid { Margin = new Thickness(0, 8, 0, 4) };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.Children.Add(wheel);
+        Grid.SetColumn(side, 1); g.Children.Add(side);
+        return g;
+    }
+
+    /**
+     * A scroll wheel of speeds, faster at the top: the mouse wheel, a drag, the arrow keys or a click on a speed
+     * above or below moves it one 0.1× step at a time.
+     */
+    private static Border SpeedWheel(double value, Action<double> picked)
+    {
+        var speeds = NoteMedia.WheelSpeeds;
+        var i = Array.IndexOf(speeds, NoteMedia.NearestWheel(value));
+        const double rowH = 24;
+        var rows = new StackPanel();
+        var box = new Border
+        {
+            Background = C.Bg, BorderBrush = C.Line, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(4), Width = 92, Child = rows, Focusable = true, Cursor = new Cursor(StandardCursorType.SizeNorthSouth),
+        };
+        void Paint()
+        {
+            rows.Children.Clear();
+            for (var k = 2; k >= -2; k--)
+            {
+                var j = i + k;
+                var t = new TextBlock
+                {
+                    Text = j >= 0 && j < speeds.Length ? NoteMedia.SpeedLabel(speeds[j]) : "", Height = rowH,
+                    FontSize = k == 0 ? 17 : 13, FontWeight = k == 0 ? FontWeight.SemiBold : FontWeight.Normal,
+                    Foreground = k == 0 ? C.Text : C.Sub, Opacity = k == 0 ? 1 : Math.Abs(k) == 1 ? 0.85 : 0.5,
+                    HorizontalAlignment = HorizontalAlignment.Center, FontFamily = C.Sans, TextAlignment = TextAlignment.Center,
+                };
+                rows.Children.Add(k == 0 ? new Border { Background = C.Pill, CornerRadius = new CornerRadius(6), Child = t } : t);
+            }
+            Avalonia.Automation.AutomationProperties.SetName(box, "Speed " + NoteMedia.SpeedLabel(speeds[i]));
+        }
+        void Move(int d)
+        {
+            var n = Math.Clamp(i + d, 0, speeds.Length - 1);
+            if (n == i) return;
+            i = n;
+            Paint();
+            picked(speeds[i]);
+        }
+        Paint();
+        box.PointerWheelChanged += (_, e) => { e.Handled = true; Move(e.Delta.Y > 0 ? 1 : -1); };
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Up) { e.Handled = true; Move(1); }
+            else if (e.Key == Key.Down) { e.Handled = true; Move(-1); }
+        };
+        double? downY = null;
+        var dragged = false;
+        box.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(box).Properties.IsLeftButtonPressed) return;
+            downY = e.GetPosition(box).Y; dragged = false; e.Pointer.Capture(box); box.Focus(); e.Handled = true;
+        };
+        box.PointerMoved += (_, e) =>
+        {
+            if (downY is not { } y0) return;
+            var steps = (int)((y0 - e.GetPosition(box).Y) / rowH);
+            if (steps == 0) return;
+            dragged = true;
+            Move(steps);
+            downY = y0 - steps * rowH;
+        };
+        box.PointerReleased += (_, e) =>
+        {
+            e.Pointer.Capture(null);
+            if (!dragged && downY is { } y) Move(2 - (int)Math.Clamp((y - 4) / rowH, 0, 4)); // a click on a speed above or below
+            downY = null;
+            e.Handled = true;
+        };
+        return box;
+    }
+
+    /** Auto speed while playing: step toward the speed that suits the talking at [at]. */
+    private void NoteAutoStep(double at)
+    {
+        if (!S.NoteAutoSpeed) return;
+        var now = DateTime.Now;
+        if ((now - noteAutoAt).TotalSeconds < (SmoothSpeed ? 0.5 : 2.5)) return;
+        var dt = noteAutoAt == default ? 1 : (now - noteAutoAt).TotalSeconds;
+        var want = NoteMedia.AutoSpeed(NoteMedia.PaceAt(noteWords, at), S.NoteTargetWpm);
+        var next = NoteMedia.Glide(noteAutoNow, want, dt);
+        if (Math.Abs(next - noteAutoNow) < (SmoothSpeed ? 0.01 : 0.1)) { noteAutoAt = now; return; }
+        // Changing speed restarts the sound here, so it waits for a gap between words.
+        if (!SmoothSpeed && NoteMedia.WordAt(noteWords, at) >= 0) return;
+        noteAutoAt = now;
+        noteAutoNow = next;
+        NotePlayer.SetSpeed(next);
+        if (noteSpeedLabel != null) noteSpeedLabel.Text = NoteSpeedText;
     }
 
     /** Where Play starts when nothing is loaded yet: the start, or wherever the bar was dragged. */
@@ -1990,7 +2156,8 @@ public sealed partial class MainWindow : Window
         if (noteFile == null) return;
         noteFollow = true;
         noteScrollTo = null;
-        NotePlayer.Play(noteFile, from, S.NoteSpeed);
+        if (S.NoteAutoSpeed && !NotePlayer.Playing) { noteAutoNow = Math.Max(1, noteAutoNow); noteAutoAt = default; }
+        NotePlayer.Play(noteFile, from, NoteSpeedNow);
     }
 
     private void NotePlayerChanged() => Dispatcher.UIThread.Post(() =>
@@ -2014,6 +2181,7 @@ public sealed partial class MainWindow : Window
             at = to;
         }
         NoteShow(at);
+        if (noteCanSeek) NoteAutoStep(at);
         // Glides a third of the way to where the page should be on each tick.
         if (noteScrollTo is { } y)
         {
@@ -2246,19 +2414,27 @@ public sealed partial class MainWindow : Window
 
     // ---------- Settings ----------
 
-    private const string SetupPage = "Setup", PrivacyPage = "Privacy", SpeechPage = "Speech & AI", KeysPage = "API keys";
+    private const string SetupPage = "Setup", PrivacyPage = "Privacy", SpeechPage = "Speech & AI", KeysPage = "API keys",
+        NotesPage = "Notes", StoragePage = "Storage & stats";
+
+    /** Pages that were folded into another; opening one opens where its settings are now. */
+    private static readonly Dictionary<string, string> MovedPages = new() { [KeysPage] = SpeechPage, ["Recordings & usage"] = StoragePage };
+
+    /** What's typed in the Settings search box, and a setting picked from its results to scroll to and flash. */
+    private string settingsQuery = "";
+    private string? settingsFind;
 
     /** Settings pages, in order, each with its sections in the order shown on it. Same pages as the Windows app. */
     private static readonly (string Name, string[] Sections)[] Pages =
     {
         (SetupPage, new[] { "Setup" }),
         (PrivacyPage, new[] { "Privacy" }),
-        (SpeechPage, new[] { "Speech to text", "Offline model", "AI cleanup", "Speed" }),
-        (KeysPage, new[] { "API keys" }),
+        (SpeechPage, new[] { "Speech to text", "Offline model", "AI cleanup", "Speed", "API keys" }),
+        (NotesPage, new[] { "Notes" }),
         ("Recording", new[] { "Recording", "Microphone", "Recording indicator" }),
         ("Appearance", new[] { "Appearance" }),
         ("Sync & backup", new[] { "Sync", "Backup" }),
-        ("Recordings & usage", new[] { "Recordings", "Usage" }),
+        (StoragePage, new[] { "Recordings", "Usage" }),
         ("AI assistants", new[] { "AI assistants" }),
         ("About", new[] { "About" }),
     };
@@ -2280,7 +2456,7 @@ public sealed partial class MainWindow : Window
     /** Opens Settings on one page, for links that send the user there to fix something. */
     internal void OpenSettingsAt(string page)
     {
-        settingsPage = page;
+        settingsPage = MovedPages.TryGetValue(page, out var moved) ? moved : page;
         scroller.Offset = default;
         Go(Page.Settings);
     }
@@ -2325,8 +2501,32 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        var list = new StackPanel();
-        foreach (var (name, _) in shown) list.Children.Add(PageItem(name, name == settingsPage));
+        var pageList = new StackPanel();
+        var rows = SettingRows(shown, sections);
+        void FillList()
+        {
+            pageList.Children.Clear();
+            if (settingsQuery.Trim().Length == 0)
+            {
+                foreach (var (name, _) in shown) pageList.Children.Add(PageItem(name, name == settingsPage));
+                return;
+            }
+            var hits = SettingsSearch.Find(settingsQuery, rows);
+            if (hits.Count == 0)
+            {
+                var none = Ui.Text($"Nothing matches \"{settingsQuery.Trim()}\". Try another word, like dark, offline or speed.", 13.5, C.Sub);
+                none.TextWrapping = TextWrapping.Wrap;
+                none.Margin = new Thickness(14, 8, 8, 0);
+                pageList.Children.Add(none);
+            }
+            foreach (var h in hits) pageList.Children.Add(SearchHit(h));
+        }
+        var (searchBox, search) = Ui.Field(settingsQuery, "Search settings");
+        Avalonia.Automation.AutomationProperties.SetName(search, "Search settings");
+        search.TextChanged += (_, _) => { settingsQuery = search.Text ?? ""; FillList(); };
+        searchBox.Margin = new Thickness(0, 0, 0, 10);
+        FillList();
+        var list = Ui.Stack(searchBox, pageList);
         var grid = new Grid { Margin = new Thickness(0, 4, 0, 0) };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(250) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
@@ -2335,6 +2535,84 @@ public sealed partial class MainWindow : Window
         Grid.SetColumn(body, 2);
         grid.Children.Add(body);
         col.Children.Add(grid);
+        if (settingsFind is { } want)
+        {
+            settingsFind = null;
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (TextBlocks(body).FirstOrDefault(t => t.Text == want) is not { } hit) return;
+                // The row: the nearest Grid or Border around the title (a SettingRow is a Grid, a LinkRow a Border).
+                Control row = hit;
+                while (row.Parent is Control p) { row = p; if (row is Grid or Border) break; }
+                row.BringIntoView();
+                var flash = new SolidColorBrush(Color.FromArgb(0x55, 0x6E, 0xA8, 0xFE));
+                void Set(IBrush? b) { if (row is Panel panel) panel.Background = b; else if (row is Border bo) bo.Background = b; }
+                Set(flash);
+                DispatcherTimer.RunOnce(() => Set(null), TimeSpan.FromMilliseconds(1600));
+            }, DispatcherPriority.Background);
+        }
+    }
+
+    private static IEnumerable<TextBlock> TextBlocks(object? e)
+    {
+        switch (e)
+        {
+            case TextBlock t: yield return t; break;
+            case Panel p: foreach (var c in p.Children) foreach (var t in TextBlocks(c)) yield return t; break;
+            case Decorator d when d.Child != null: foreach (var t in TextBlocks(d.Child)) yield return t; break;
+            case ContentControl cc when cc.Content != null: foreach (var t in TextBlocks(cc.Content)) yield return t; break;
+        }
+    }
+
+    /** Every setting on every page, for the search box: the titles on its rows, with the line under each. */
+    private static List<SettingsSearch.Row> SettingRows(List<(string Name, string[] Sections)> shown, Dictionary<string, List<Control>> sections)
+    {
+        var rows = new List<SettingsSearch.Row>();
+        foreach (var (page, titles) in shown)
+            foreach (var section in titles)
+            {
+                if (!sections.TryGetValue(section, out var part)) continue;
+                foreach (var e in part.Skip(1))
+                    foreach (var t in TextBlocks(e))
+                    {
+                        var title = (t.Text ?? "").Trim();
+                        if (Math.Abs(t.FontSize - 15) > 0.6 || title.Length is 0 or > 60 || char.IsDigit(title[0]) || title == page) continue;
+                        var sub = (t.Parent as Panel)?.Children.OfType<TextBlock>().FirstOrDefault(x => x != t)?.Text ?? "";
+                        rows.Add(new SettingsSearch.Row(title, sub, page, titles.Length > 1 && section != page ? $"{page} › {section}" : page));
+                    }
+            }
+        return rows.GroupBy(r => (r.Title, r.Page)).Select(g => g.First()).ToList();
+    }
+
+    /** A search result in the list on the left: the setting and where it is. Click it to go there. */
+    private Control SearchHit(SettingsSearch.Hit h)
+    {
+        var where = Ui.Text(h.Where + (h.Note != null ? " · " + h.Note : ""), 12.5, C.Sub);
+        where.TextWrapping = TextWrapping.Wrap;
+        var texts = Ui.Stack(Ui.Text(h.Title, 15, C.Text), where);
+        var b = new Border { Child = texts, CornerRadius = new CornerRadius(12), Padding = new Thickness(14, 8, 14, 8), Margin = new Thickness(0, 0, 0, 4), Background = Brushes.Transparent, Cursor = Cursors.Hand };
+        b.OnEnter(() => b.Background = C.Hover);
+        b.OnLeave(() => b.Background = Brushes.Transparent);
+        void Open() { settingsQuery = ""; settingsPage = h.Page; settingsFind = h.Title; scroller.Offset = default; Render(); }
+        b.OnClick(Open);
+        return Ui.Keys(b, Open, $"{h.Title}, {h.Where}");
+    }
+
+    /** A button showing the current choice; clicking it lists the choices, ticked one first. */
+    private static Border MenuButton(string label, string[] items, int selected, Action<int> pick)
+    {
+        var menu = Ui.Menu();
+        for (var i = 0; i < items.Length; i++)
+        {
+            var at = i;
+            var item = new MenuItem { Header = items[i], ToggleType = MenuItemToggleType.CheckBox, IsChecked = i == selected };
+            item.Click += (_, _) => pick(at);
+            menu.Items.Add(item);
+        }
+        Border b = null!;
+        b = Ui.Button(label + " ▾", () => menu.Open(b));
+        b.ContextMenu = menu;
+        return b;
     }
 
     /** One page in the list on the left: its name and what it's set to. Click it (or Enter) to open it. */
@@ -2384,13 +2662,15 @@ public sealed partial class MainWindow : Window
         {
             SetupPage => SetupComplete ? ("All set", false) : ("Add a key or the offline model", true),
             PrivacyPage => (Privacy.Current(S) is { } l ? Privacy.Label(l) : "Custom", false),
-            SpeechPage => ($"{(S.Stt == "LOCAL" ? "On this computer" : S.SttOption.Label)} · cleanup {(S.Cleanup == "OFF" ? "off" : S.CleanupOption.Label)}", false),
-            KeysPage => Catalog.Services.Where(v => S.Key(v.Id).Length > 0).Select(v => v.Name).ToList() is { Count: > 0 } have
-                ? (string.Join(", ", have), false) : ("None added yet", S.Stt != "LOCAL"),
+            SpeechPage => Catalog.Services.Count(v => S.Key(v.Id).Length > 0) is var keys
+                ? ($"{(S.Stt == "LOCAL" ? "On this computer" : S.SttOption.Label)} · cleanup {(S.Cleanup == "OFF" ? "off" : S.CleanupOption.Label)} · {(keys == 0 ? "no API keys yet" : keys == 1 ? "1 key" : $"{keys} keys")}",
+                    keys == 0 && S.Stt != "LOCAL") : ("", false),
+            NotesPage => (!S.NotesBeta ? "Off" : string.Join(" · ", new[] { S.NoteAutoSpeed ? "Auto speed" : NoteMedia.SpeedLabel(S.NoteSpeed),
+                S.NoteSkipSilence ? "skip silence" : null, S.NoteSkipUms ? "skip ums" : null }.Where(x => x != null)), false),
             "Recording" => ($"Auto-stop {OnOff(S.AutoStop)} · {(S.PreferHeadset ? "headset mic" : S.MicDevice.Length > 0 ? MicName(S.MicDevice) : "default mic")}", false),
             "Appearance" => (S.Theme switch { "light" => "Light", "dark" => "Dark", _ => "Match the system" }, false),
             "Sync & backup" => (S.SyncFile.Length == 0 ? "Sync off" : "Sync on", false),
-            "Recordings & usage" => (S.AudioKeepDays switch { 0 => "Audio not saved", int.MaxValue => "Audio kept forever", var d => $"Audio kept {d} days" }, false),
+            StoragePage => (S.AudioKeepDays switch { 0 => "Audio not saved", int.MaxValue => "Audio kept forever", var d => $"Audio kept {d} days" }, false),
             "AI assistants" => ($"Read my notes: {OnOff(S.NotesMcp)}", false),
             "About" => ("Tokalot " + Updater.CurrentVersion, false),
             _ => ("", false),
@@ -2625,6 +2905,34 @@ public sealed partial class MainWindow : Window
         col.Children.Add(Spaced(Ui.List(Ui.SettingRow("Show when idle", "A slim bar stays on the edge between dictations. Click it to dictate, drag it to move it. Hidden while an app is full screen.",
             Ui.Switch(S.ShowIdleIndicator, v => { S.ShowIdleIndicator = v; S.Save(); App.Current.Controller?.RefreshIndicator(); }))), 0, 12, 0, 0));
 
+        // --- Notes: the voice notes beta, and the defaults every note starts with (a note's ⋮ menu can change them)
+        Section(col, NotesPage);
+        var notesRows = new List<Control>
+        {
+            Ui.SettingRow("Voice notes (beta)", "A Notes page with the voice notes from your other devices (when sync is set up), and recordings you add here, like a WhatsApp voice message, transcribed into notes you can summarize.",
+                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); })),
+        };
+        if (S.NotesBeta)
+        {
+            notesRows.Add(Ui.SettingRow("Skip silence", "Jump over pauses with no talking. A note's ⋮ menu can change it for that note.",
+                Ui.Switch(S.NoteSkipSilence, v => { S.NoteSkipSilence = v; S.Save(); })));
+            notesRows.Add(Ui.SettingRow("Skip ums", "Jump over um, uh and the like. A note's ⋮ menu can change it for that note.",
+                Ui.Switch(S.NoteSkipUms, v => { S.NoteSkipUms = v; S.Save(); })));
+            notesRows.Add(Ui.SettingRow("Playback speed", "Also the speed button under a voice note.",
+                MenuButton(NoteMedia.SpeedLabel(S.NoteSpeed), NoteMedia.WheelSpeeds.Select(NoteMedia.SpeedLabel).ToArray(),
+                    Array.IndexOf(NoteMedia.WheelSpeeds, NoteMedia.NearestWheel(S.NoteSpeed)), i => { S.NoteSpeed = NoteMedia.WheelSpeeds[i]; S.Save(); Render(); })));
+            notesRows.Add(Ui.SettingRow("Auto speed", "Speeds up where the talking is slow or drawn out and eases off where it's fast, aiming for the pace below. Never slower than 1×.",
+                Ui.Switch(S.NoteAutoSpeed, v => { S.NoteAutoSpeed = v; S.Save(); Render(); })));
+            if (S.NoteAutoSpeed)
+                notesRows.Add(Ui.SettingRow("Auto speed aims for", "Words a minute.",
+                    MenuButton($"{S.NoteTargetWpm} words a minute", NoteMedia.TargetWpm.Select(w => $"{w} words a minute").ToArray(),
+                        Array.IndexOf(NoteMedia.TargetWpm, S.NoteTargetWpm), i => { S.NoteTargetWpm = NoteMedia.TargetWpm[i]; S.Save(); Render(); })));
+            notesRows.Add(Ui.SettingRow("Summary length", "How long a note's summary starts out. Also on a note's Summary card.",
+                MenuButton(NoteMedia.LevelNames[S.NoteSummaryLevel - 1], NoteMedia.LevelNames.ToArray(), S.NoteSummaryLevel - 1,
+                    i => { S.NoteSummaryLevel = i + 1; S.Save(); Render(); })));
+        }
+        col.Children.Add(Ui.List(notesRows.ToArray()));
+
         // --- Recording
         Section(col, "Recording");
         col.Children.Add(Ui.List(
@@ -2639,9 +2947,7 @@ public sealed partial class MainWindow : Window
             Ui.SettingRow("Sounds", "A soft tone when recording starts, stops, finishes or fails.",
                 Ui.Switch(S.Sounds, v => { S.Sounds = v; S.Save(); if (v) Sounds.Play(Sounds.Kind.Done); Render(); })),
             Ui.SettingRow("Detect language automatically", "Off keeps it English-only, which is most accurate for English. The offline backup is English-only either way.",
-                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); })),
-            Ui.SettingRow("Voice notes (beta)", "A Notes page with the voice notes from your other devices (when sync is set up), and recordings you add here, like a WhatsApp voice message, transcribed into notes you can summarize.",
-                Ui.Switch(S.NotesBeta, v => { S.NotesBeta = v; S.Save(); Render(); }))));
+                Ui.Switch(S.AutoLanguage, v => { S.AutoLanguage = v; S.Save(); }))));
         if (S.Sounds)
         {
             col.Children.Add(Spaced(Ui.Text("Sound style (click one to hear it)", 14, C.Sub), 4, 16, 0, 8));

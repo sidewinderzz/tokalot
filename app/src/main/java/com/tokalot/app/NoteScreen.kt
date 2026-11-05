@@ -169,11 +169,11 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
             if (!planCard.hasReminder()) items += "Add reminder" to { planCard.addReminder(more) }
             if (!planCard.hasList()) items += "Add a checklist" to { planCard.addChecklist() }
             if (voice) {
-                items += "Skip silence: ${if (prefs.noteSkipSilence) "on" else "off"}" to {
-                    prefs.noteSkipSilence = !prefs.noteSkipSilence; recut()
+                items += "Skip silence: ${if (skipSilence()) "on" else "off"}" to {
+                    setForThisNote("skipSilence", !skipSilence(), prefs.noteSkipSilence)
                 }
-                items += "Skip ums: ${if (prefs.noteSkipUms) "on" else "off"}" to {
-                    prefs.noteSkipUms = !prefs.noteSkipUms; recut()
+                items += "Skip ums: ${if (skipUms()) "on" else "off"}" to {
+                    setForThisNote("skipUms", !skipUms(), prefs.noteSkipUms)
                 }
             }
             // Shared in to read or play back, it sits on Home; Move to Notes files it, and any note can go back.
@@ -377,9 +377,23 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     }
 
     /** What playback jumps over: stretches with no voice (heard in the recording itself) and "um"s, as switched on. */
+    /** This note's Skip silence / Skip ums: its own choice from the ⋮ menu, else the default in Settings › Notes. */
+    private fun skipSilence() = NoteImport.info(a, id)?.skipSilence ?: a.prefs.noteSkipSilence
+    private fun skipUms() = NoteImport.info(a, id)?.skipUms ?: a.prefs.noteSkipUms
+
+    /** The ⋮ menu changes only this note; choosing the same as the default goes back to following it. */
+    private fun setForThisNote(key: String, on: Boolean, default: Boolean) {
+        NoteImport.update(a, id) { if (on == default) it.remove(key) else it.put(key, on) }
+        recut()
+        if (!a.prefs.noteOverrideHintSeen) {
+            a.prefs.noteOverrideHintSeen = true
+            a.toast("Changed for this note. The default for new notes is in Settings › Notes.")
+        }
+    }
+
     private fun recut() {
-        cuts = NoteMedia.merge((if (a.prefs.noteSkipSilence) silenceCuts else emptyList()) +
-            (if (a.prefs.noteSkipUms) NoteMedia.fillerCuts(words) else emptyList()))
+        cuts = NoteMedia.merge((if (skipSilence()) silenceCuts else emptyList()) +
+            (if (skipUms()) NoteMedia.fillerCuts(words) else emptyList()))
     }
 
     // ---------- following the lit word ----------
@@ -421,14 +435,26 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
 
     // ---------- the player ----------
 
-    private val speeds = NOTE_SPEEDS
     private var speedLabelView: TextView? = null
+    private var speedDrawer: LinearLayout? = null
+    /** The speed Auto is playing at right now, and when it last moved. */
+    private var autoNow = 1f
+    private var autoAt = 0L
 
-    private fun speed() = a.prefs.noteSpeed
+    private fun speed() = if (a.prefs.noteAutoSpeed) autoNow else a.prefs.noteSpeed
 
-    private fun speedLabel() = speed().let { if (it == it.toInt().toFloat()) "${it.toInt()}×" else "$it×" }
+    private fun speedLabel() = (if (a.prefs.noteAutoSpeed) "Auto " else "") + NoteMedia.speedLabel(speed())
 
-    /** The slim bar under the note: play, the position with the time gone and left under it, and the speed. */
+    private fun showSpeed() {
+        speedLabelView?.text = speedLabel()
+        speedLabelView?.parent?.let { (it as View).contentDescription = "Playback speed ${speedLabel()}. Change" }
+        applySpeed()
+    }
+
+    /**
+     * The slim bar under the note: play, the position with the time gone and left under it, and the speed. The
+     * speed button opens the speed wheel under it; holding it goes back to 1×.
+     */
     private fun playerBar(file: java.io.File): View = with(a) {
         playButton = iconButton(R.drawable.ic_play, "Play", 26) { toggle(file) }
         elapsed = text("0:00", 12f, C.SUB).apply { fontFeatureSettings = "tnum" }
@@ -443,12 +469,24 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                 override fun onStopTrackingTouch(s: SeekBar) {}
             })
         }
+        val drawer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(dp(12), dp(4), dp(16), dp(10))
+        }
+        speedDrawer = drawer
         val speedPill = pill(speedLabel(), desc = "Playback speed") {
-            val now = speeds.indices.firstOrNull { Math.abs(speeds[it] - speed()) < 0.001f } ?: 0
-            val next = speeds[(now + 1) % speeds.size]
-            a.prefs.noteSpeed = next
-            speedLabelView?.text = speedLabel()
-            applySpeed()
+            if (drawer.visibility == View.VISIBLE) drawer.visibility = View.GONE
+            else { fillSpeedDrawer(drawer); drawer.visibility = View.VISIBLE }
+        }.apply {
+            setOnLongClickListener {
+                prefs.noteAutoSpeed = false
+                prefs.noteSpeed = 1f
+                showSpeed()
+                if (drawer.visibility == View.VISIBLE) fillSpeedDrawer(drawer)
+                toast("Back to 1×")
+                true
+            }
         }
         speedLabelView = speedPill.getChildAt(0) as? TextView
         // The times sit under the ends of the bar's track, so the bar gets the whole width.
@@ -460,17 +498,91 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
             }, lp())
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
-        row(playButton!!, middle, spacer(wDp = 6), speedPill).apply {
+        val bar = row(playButton!!, middle, spacer(wDp = 6), speedPill).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(C.CARD)
             setPadding(dp(12), dp(6), dp(16), dp(6))
+        }
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(C.CARD)
+            addView(bar, lp())
+            addView(drawer, lp())
         }
     }
 
+    /**
+     * Under the player: a wheel to flick to any speed from 0.5× to 4×, Auto speed, and the pace Auto aims for.
+     * Turning the wheel is choosing a speed yourself, so it turns Auto off.
+     */
+    private fun fillSpeedDrawer(drawer: LinearLayout): Unit = with(a) {
+        drawer.removeAllViews()
+        val speeds = NoteMedia.WHEEL_SPEEDS
+        val wheel = android.widget.NumberPicker(this).apply {
+            minValue = 0
+            maxValue = speeds.size - 1
+            displayedValues = speeds.map { NoteMedia.speedLabel(it) }.toTypedArray()
+            wrapSelectorWheel = false
+            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS // a wheel, not a box to type in
+            value = speeds.indices.minByOrNull { Math.abs(speeds[it] - prefs.noteSpeed) } ?: 5
+            if (android.os.Build.VERSION.SDK_INT >= 29) { textColor = C.TEXT; textSize = dpf(18) }
+            contentDescription = "Speed"
+            setOnValueChangedListener { _, _, i ->
+                prefs.noteSpeed = speeds[i]
+                if (prefs.noteAutoSpeed) { prefs.noteAutoSpeed = false; fillSpeedDrawer(drawer) }
+                showSpeed()
+            }
+        }
+        val auto = prefs.noteAutoSpeed
+        val side = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(16) }
+            addView(row(pill(if (auto) "Auto speed: on" else "Auto speed: off", filled = auto) {
+                prefs.noteAutoSpeed = !prefs.noteAutoSpeed
+                autoNow = prefs.noteSpeed.coerceAtLeast(1f)
+                autoAt = 0L
+                showSpeed()
+                fillSpeedDrawer(drawer)
+            }))
+            if (auto) {
+                val wpm = prefs.noteTargetWpm
+                addView(row(pill("Aim for $wpm words a minute ▾") {
+                    val names = NoteMedia.TARGET_WPM.map { paceName(it) }
+                    choose("Auto speed aims for", names, NoteMedia.TARGET_WPM.indexOf(wpm).coerceAtLeast(0)) { i ->
+                        prefs.noteTargetWpm = NoteMedia.TARGET_WPM[i]
+                        fillSpeedDrawer(drawer)
+                    }
+                }))
+                addView(text("Speeds up where the talking is slow and eases off where it's fast. Never slower than 1×.", 13f, C.SUB), lp().margins(this, t = 4))
+            } else addView(text("Flick the wheel to pick a speed. Hold the speed button to go back to 1×.", 13f, C.SUB), lp().margins(this, t = 4))
+        }
+        drawer.addView(row(wheel, side).apply { gravity = Gravity.CENTER_VERTICAL }, lp())
+    }
+
+    private fun paceName(wpm: Int) = when {
+        wpm <= 180 -> "$wpm words a minute (relaxed)"
+        wpm <= 230 -> "$wpm words a minute (normal)"
+        wpm <= 300 -> "$wpm words a minute (quick)"
+        else -> "$wpm words a minute (skimming)"
+    }
+
     /** Only while playing: setting a speed on a paused player starts it. */
+    private var applied = 0f
     private fun applySpeed() {
         val p = player ?: return
-        if (p.isPlaying) runCatching { p.playbackParams = p.playbackParams.setSpeed(speed()) }
+        val s = speed()
+        if (p.isPlaying) runCatching { p.playbackParams = p.playbackParams.setSpeed(s); applied = s }
+    }
+
+    /** Auto speed: about twice a second, glide toward the speed that suits the talking at [now]. */
+    private fun autoStep(now: Double) {
+        if (!a.prefs.noteAutoSpeed) return
+        val t = System.currentTimeMillis()
+        if (t - autoAt < 500) return
+        val dt = if (autoAt == 0L) 1.0 else (t - autoAt) / 1000.0
+        autoAt = t
+        val want = NoteMedia.autoSpeed(NoteMedia.paceAt(words, now), a.prefs.noteTargetWpm)
+        val next = NoteMedia.glide(autoNow, want, dt)
+        if (next != autoNow || applied != next) { autoNow = next; showSpeed() }
     }
 
     /** The transcript with every word tappable. The tap jumps there and plays. */
@@ -550,6 +662,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
             p.seekTo((to * 1000).toLong(), MediaPlayer.SEEK_CLOSEST)
         }
         show(p.currentPosition)
+        autoStep(p.currentPosition / 1000.0)
         updateChip()
         main.postDelayed({ tick() }, 50)
     }

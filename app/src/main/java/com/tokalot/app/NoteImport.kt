@@ -49,6 +49,9 @@ object NoteImport {
         val segments: List<NoteMedia.Segment> get() = o.optJSONArray("segments")?.let { a ->
             List(a.length()) { a.getJSONArray(it).let { s -> NoteMedia.Segment(s.getDouble(0), s.getDouble(1), s.getString(2)) } }
         } ?: emptyList()
+        /** This note's own Skip silence / Skip ums from its ⋮ menu, or null to follow Settings › Notes. */
+        val skipSilence: Boolean? get() = if (o.has("skipSilence")) o.optBoolean("skipSilence") else null
+        val skipUms: Boolean? get() = if (o.has("skipUms")) o.optBoolean("skipUms") else null
         /** The note's short title, made by the AI or typed in Rename. */
         val title: String? get() = o.optString("title").trim().takeIf { it.isNotEmpty() }
         /** Rename saved an empty title: this note is left without one and isn't titled again. */
