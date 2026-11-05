@@ -511,8 +511,9 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     }
 
     /**
-     * Shelby's "Stretch": pressing the speed button grows it tall in place into a wheel with the speed lit in the
-     * middle; dragging up goes faster, down slower, and letting go shrinks it back. About 6 dp a step, and a quick
+     * Shelby's "Stretch": pressing the speed button grows it upward into a wheel, with the speed lit right on
+     * the button and faster speeds stacked above it (the button sits at the bottom of the screen, so the wheel never
+     * grows down past it); dragging up goes faster, down slower, and letting go shrinks it back. About 6 dp a step, and a quick
      * flick goes up to twice as far, so 0.5× to 4× fits in one thumb reach. A tap without a drag is a click.
      */
     @android.annotation.SuppressLint("ClickableViewAccessibility")
@@ -540,16 +541,20 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                     idx = i0
                     v.parent?.requestDisallowInterceptTouchEvent(true)
                     val w = StretchWheel(this, labels, dpf(30), C.TEXT, C.SUB, C.visible(prefs.accent), dpf(18), dpf(14)).apply { exact = i0.toFloat(); on = i0 }
-                    val width = maxOf(v.width + dp(8), dp(70)); val height = dp(238)
                     val loc = IntArray(2); v.getLocationOnScreen(loc)
+                    val width = maxOf(v.width + dp(8), dp(70))
+                    // Bottom edge at the button's bottom; as tall as fits above it, below the status bar.
+                    val room = loc[1] + v.height - dp(32)
+                    val height = minOf(dp(260), room).coerceAtLeast(v.height + dp(60))
+                    w.anchor = height - v.height / 2f
                     val pw = android.widget.PopupWindow(w, width, height, false).apply {
                         isTouchable = false
                         isClippingEnabled = false
                         elevation = dpf(10)
                         setBackgroundDrawable(android.graphics.drawable.GradientDrawable().apply { cornerRadius = dpf(24); setColor(C.CARD) })
                     }
-                    runCatching { pw.showAtLocation(v.rootView, Gravity.NO_GRAVITY, loc[0] + v.width / 2 - width / 2, loc[1] + v.height / 2 - height / 2) }
-                    w.pivotY = height / 2f
+                    runCatching { pw.showAtLocation(v.rootView, Gravity.NO_GRAVITY, loc[0] + v.width / 2 - width / 2, loc[1] + v.height - height) }
+                    w.pivotY = w.anchor
                     w.scaleY = v.height.toFloat() / height
                     w.animate().scaleY(1f).setDuration(200).setInterpolator(android.view.animation.OvershootInterpolator(1.1f)).start()
                     v.alpha = 0f
@@ -959,27 +964,31 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
 }
 
 
-/** The tall wheel the speed button stretches into: every speed in a column, faster below, the current one lit. */
+/** The tall wheel the speed button stretches into: every speed in a column, faster above, the current one lit at [anchor]
+ *  (the button's middle, near the bottom). */
 private class StretchWheel(
     ctx: android.content.Context, private val labels: List<String>, private val row: Float,
     private val text: Int, private val sub: Int, private val accent: Int, private val big: Float, private val small: Float,
 ) : View(ctx) {
     var exact = 0f
     var on = 0
+    /** Where the lit speed sits, from the top; the middle when not set. */
+    var anchor = -1f
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textAlign = android.graphics.Paint.Align.CENTER }
     private val band = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
     override fun onDraw(c: android.graphics.Canvas) {
-        val cy = height / 2f
+        val cy = if (anchor >= 0f) anchor else height / 2f
         band.color = (accent and 0x00FFFFFF) or 0x48000000
         val inset = row * 0.2f
         c.drawRoundRect(inset, cy - row / 2, width - inset, cy + row / 2, row / 2, row / 2, band)
-        val reach = (cy / row).toInt() + 2
+        val span = maxOf(cy, height - cy)
+        val reach = (span / row).toInt() + 2
         val from = maxOf(0, Math.floor(exact.toDouble()).toInt() - reach)
         val to = minOf(labels.size - 1, Math.ceil(exact.toDouble()).toInt() + reach)
         for (k in from..to) {
-            val y = cy + (k - exact) * row
-            val far = (Math.abs(y - cy) / cy).coerceAtMost(1f)
+            val y = cy - (k - exact) * row // faster is higher up
+            val far = (Math.abs(y - cy) / span).coerceAtMost(1f)
             paint.color = if (k == on) text else sub
             paint.textSize = if (k == on) big else small
             paint.isFakeBoldText = k == on
