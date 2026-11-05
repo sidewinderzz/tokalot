@@ -139,4 +139,20 @@ class LiveTest {
         assertEquals(1, live.pieceCount)
         assertEquals("Hello.", live.finish(take(0, r * 11 + r / 4) + quiet))
     }
+
+    // ---------- a quiet microphone ----------
+
+    @Test fun quietRecordingIsRaised() {
+        val quiet = FloatArray(r * 4) { (sin(it * 0.2) * 0.02).toFloat() }
+        val g = Loudness.gain(quiet)
+        assertTrue("gain $g", g > 4f && g <= Loudness.MAX_GAIN)
+        val raised = Loudness.forSpeech(quiet)
+        assertTrue(raised.max() > 0.1f && raised.max() < 0.99f)
+    }
+
+    @Test fun normalRecordingAndSilenceAreLeftAlone() {
+        val normal = FloatArray(r * 4) { (sin(it * 0.2) * 0.3).toFloat() }
+        assertTrue(Loudness.forSpeech(normal) === normal)
+        assertTrue(Loudness.gain(FloatArray(r * 2)) == 1f)
+    }
 }

@@ -175,6 +175,16 @@ internal static class Shots
         var softText = System.Threading.Tasks.Task.Run(() => soft.Finish(faint, default)).GetAwaiter().GetResult();
         Check("a faint ending the recorder heard is kept: " + softText, softText == "Hello. And the last words.");
 
+        // A quiet microphone: speech peaking near 0.05 is brought up to a normal level, capped at 8x; a normal one is left alone.
+        var quiet = new float[R * 4];
+        for (int i = 0; i < quiet.Length; i++) quiet[i] = (float)(Math.Sin(i * 0.2) * 0.02);
+        var raised = Loudness.ForSpeech(quiet);
+        Check("a quiet recording is raised: " + Loudness.Gain(quiet), Loudness.Gain(quiet) > 4 && raised.Max() < 0.99f && raised.Max() > 0.1f);
+        var normal = new float[R * 4];
+        for (int i = 0; i < normal.Length; i++) normal[i] = (float)(Math.Sin(i * 0.2) * 0.3);
+        Check("a normal recording is left alone", ReferenceEquals(Loudness.ForSpeech(normal), normal));
+        Check("silence is left alone", Loudness.Gain(new float[R * 2]) == 1f);
+
         // A noisy place: the microphone never reads as quiet, so cuts are made at dips, or forced.
         float[] Noisy(int seconds, double dipAt = -1)
         {
