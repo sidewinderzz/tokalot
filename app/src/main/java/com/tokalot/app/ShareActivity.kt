@@ -7,7 +7,7 @@ import android.os.Bundle
 import android.widget.Toast
 
 /**
- * The "Tokalot" entry in Android's share sheet. A shared voice note (or any recording) is copied in and
+ * The "Tokalot" entry in Android's share sheet, and "Listen in Tokalot" (read aloud, see [Listen]). A shared voice note (or any recording) is copied in and
  * transcribed; shared text is saved as it is. Both land on Home with the dictations (Move to Notes files one), and
  * the app opens there. Sharing turns voice notes on if they were off. Shows nothing of its own.
  */
@@ -46,6 +46,11 @@ class ShareActivity : Activity() {
             prefs.notesBeta = true
             runCatching { StartTile.setNoteTile(this, true) }
         }
+        if (i.component?.className?.endsWith(".ListenShare") == true) {
+            val u = uris.firstOrNull()
+            val mime = u?.let { contentResolver.getType(it) } ?: i.type
+            return if (Listen.add(this, u, mime, u?.let { displayName(it) }, text.ifEmpty { null })) 1 else 0
+        }
         val source = sourceName()
         var saved = 0
         for (u in uris) {
@@ -57,6 +62,13 @@ class ShareActivity : Activity() {
         if (text.isNotEmpty() && uris.isEmpty()) { NoteImport.addText(this, text); saved++ }
         return saved
     }
+
+    /** A shared file's name ("Seed guide.pdf"), when the sharing app says. */
+    private fun displayName(u: Uri): String? = runCatching {
+        contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull() ?: u.lastPathSegment?.substringAfterLast('/')
 
     /** The app the share came from, by name ("WhatsApp"), when Android says which; null otherwise. */
     private fun sourceName(): String? {

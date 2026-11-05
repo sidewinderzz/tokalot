@@ -18,6 +18,8 @@ object SettingsSearch {
         "wifi" to listOf("weak signal", "on-device"), "internet" to listOf("weak signal", "on-device"),
         "offline" to listOf("on-device", "weak signal"), "signal" to listOf("weak signal"), "data" to listOf("weak signal", "sync"),
         "local" to listOf("on-device"), "download" to listOf("on-device", "model"),
+        "listen" to listOf("read aloud", "voice"), "tts" to listOf("read aloud", "voice"), "pdf" to listOf("read aloud"),
+        "article" to listOf("read aloud"), "speak" to listOf("read aloud", "voice"),
         "language" to listOf("detect language"), "spanish" to listOf("detect language"),
         "grammar" to listOf("cleanup", "polish"), "ai" to listOf("cleanup", "polish", "api keys"), "fix" to listOf("cleanup", "autocorrect"),
         "key" to listOf("api keys"), "openai" to listOf("api keys"), "groq" to listOf("api keys"), "gemini" to listOf("api keys"),

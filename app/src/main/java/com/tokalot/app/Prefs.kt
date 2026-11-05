@@ -787,6 +787,19 @@ class Prefs(ctx: Context) {
         get() = sp.safeInt("note_wpm", NoteMedia.DEFAULT_WPM).coerceIn(100, 500)
         set(v) = sp.edit().putInt("note_wpm", v).apply()
 
+    /** Read aloud's voice: one of Gemini's voices by name, or [Listen.PHONE_VOICE] for the phone's own. Kept on this phone. */
+    var listenVoice: String
+        get() = sp.safeString("listen_voice", null).orEmpty().let { if (it == Listen.PHONE_VOICE || Listen.VOICES.containsKey(it)) it else Listen.DEFAULT_VOICE }
+        set(v) = sp.edit().putString("listen_voice", v).apply()
+
+    /**
+     * Read aloud may send the text to Gemini for its voice (Privacy). Until it's set it follows AI cleanup, so the
+     * privacy level picked before read aloud came along still matches.
+     */
+    var listenCloudVoice: Boolean
+        get() = if (sp.contains("listen_cloud")) sp.safeBoolean("listen_cloud", true) else cleanup != CleanupChoice.OFF
+        set(v) = sp.edit().putBoolean("listen_cloud", v).apply()
+
     /** Record from a connected Bluetooth headset's mic, falling back to the phone's when none is connected. */
     var headsetMic: Boolean
         get() = sp.safeBoolean("headset_mic", false)

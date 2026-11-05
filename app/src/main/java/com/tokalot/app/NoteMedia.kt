@@ -62,6 +62,14 @@ object NoteMedia {
         }
     }
 
+    /** Words joined with a paragraph break before each word in [breaks] (read aloud keeps the page's paragraphs). */
+    fun text(words: List<Word>, breaks: Set<Int>): String = buildString {
+        words.forEachIndexed { i, w ->
+            if (i > 0) append(if (i in breaks) "\n\n" else " ")
+            append(w.text)
+        }
+    }
+
     /** The index of the word playing at [t], or -1 before the first. */
     fun wordAt(words: List<Word>, t: Double): Int {
         var lo = 0

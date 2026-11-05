@@ -40,6 +40,9 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     private var cuts: List<ClosedFloatingPointRange<Double>> = emptyList()
     private var span: SpannableString? = null
     private var starts = IntArray(0)
+    /** Read aloud: where paragraphs start, and where playing last stopped. Null for a voice note. */
+    private var breaks: Set<Int>? = null
+    private var resumeAt = 0.0
     private var lit = -1
     private var transcript: TextView? = null
     private var playButton: android.widget.ImageView? = null
@@ -68,6 +71,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
         val info = NoteImport.info(this, id)
         val file = NoteImport.audioFile(this, id)
         words = info?.words.orEmpty()
+        breaks = info?.breaks
+        resumeAt = info?.resume ?: 0.0
         duration = info?.duration ?: 0.0
         val voice = file != null && words.isNotEmpty()
         silenceCuts = info?.silence.orEmpty()
@@ -587,7 +592,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
 
     /** The transcript with every word tappable. The tap jumps there and plays. */
     private fun spanned(): SpannableString {
-        val text = NoteMedia.text(words)
+        val text = breaks?.let { NoteMedia.text(words, it) } ?: NoteMedia.text(words)
         val s = SpannableString(text)
         starts = IntArray(words.size)
         var at = 0
@@ -628,7 +633,14 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     }
 
     private fun toggle(file: java.io.File) {
+        val fresh = player == null
         val p = prepare(file) ?: return
+        // Read aloud picks up where it was left, like a book.
+        if (fresh && breaks != null && resumeAt > 3 && resumeAt < duration - 3) {
+            seekingTo = resumeAt
+            p.seekTo((resumeAt * 1000).toLong(), MediaPlayer.SEEK_CLOSEST)
+            a.toast("Picking up where you left off")
+        }
         if (p.isPlaying) pause() else {
             p.start()
             applySpeed()
@@ -667,8 +679,16 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
         main.postDelayed({ tick() }, 50)
     }
 
+    /** Read aloud: remembers where playing stopped (0 once it's played to the end). */
+    private fun saveResume(at: Double) {
+        if (breaks == null || NoteImport.info(a, id) == null) return
+        resumeAt = at
+        NoteImport.update(a, id) { it.put("resume", at) }
+    }
+
     /** Played to the end: back to the start, with nothing lit. */
     private fun stopped() {
+        saveResume(0.0)
         playButton?.setImageResource(R.drawable.ic_play)
         playButton?.contentDescription = "Play"
         show(0)
@@ -699,7 +719,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     private var seekingTo: Double? = null
 
     fun pause() {
-        player?.takeIf { it.isPlaying }?.pause()
+        player?.takeIf { it.isPlaying }?.let { it.pause(); saveResume(it.currentPosition / 1000.0) }
         playButton?.setImageResource(R.drawable.ic_play)
         playButton?.contentDescription = "Play"
         updateChip()
@@ -709,7 +729,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     fun release() {
         released = true
         main.removeCallbacksAndMessages(null)
-        player?.let { runCatching { it.stop() }; it.release() }
+        player?.let { if (it.isPlaying) saveResume(it.currentPosition / 1000.0); runCatching { it.stop() }; it.release() }
         player = null
     }
 

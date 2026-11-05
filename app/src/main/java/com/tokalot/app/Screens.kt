@@ -343,17 +343,20 @@ internal fun MainActivity.waitingCard(waiting: List<NoteImport.Info>): View {
         }
         val going = NoteImport.isRunning(w.id)
         val length = if (w.duration > 0) " · ${NoteMedia.clock(w.duration)}" else ""
-        box.addView(text("Shared voice note$length", 16f, bold = true))
+        val listen = Listen.isListen(w)
+        box.addView(text(if (listen) Listen.label(w) else "Shared voice note$length", 16f, bold = true))
         box.addView(text(when {
-            going -> "Transcribing…"
-            w.status == "failed" -> "Couldn't transcribe it: ${w.error}"
+            going -> if (listen) Listen.step(w) else "Transcribing…"
+            w.status == "failed" -> if (listen) w.error else "Couldn't transcribe it: ${w.error}"
             else -> "Stopped before it finished."
         }, 14f, C.SUB), lp().margins(this, t = 2))
         if (!going) box.addView(row(
             weightSpacer(),
-            pill("Remove") { confirm("Remove this voice note? Its recording is deleted.", "Remove") { NoteImport.deleteMedia(this, w.id); render() } },
+            pill("Remove") {
+                confirm(if (listen) "Remove this? Nothing has been saved from it yet." else "Remove this voice note? Its recording is deleted.", "Remove") { NoteImport.deleteMedia(this, w.id); render() }
+            },
             spacer(wDp = 8),
-            pill("Try again", filled = true) { NoteImport.transcribe(this, w.id) },
+            pill("Try again", filled = true) { if (listen) Listen.run(this, w.id) else NoteImport.transcribe(this, w.id) },
         ), lp().margins(this, t = 6))
         c.addView(box)
     }
@@ -1274,6 +1277,26 @@ class SettingsScreen(private val a: MainActivity) {
                 choose("Summary length", NoteMedia.LEVEL_NAMES, prefs.noteSummaryLevel - 1) { prefs.noteSummaryLevel = it + 1; render() }
             })
             col.addView(pl)
+
+            // Read aloud (beta): what's shared to "Listen in Tokalot".
+            groupLabel(col, "Read aloud (beta)")
+            col.addView(text("Share a web link, PDF, Word file or text to Listen in Tokalot and it becomes a note you can listen to, with the same player.", 14f, C.SUB), lp().margins(this, b = 8, l = 4))
+            val ra = card()
+            val voices = Listen.VOICES.keys.toList()
+            val names = voices.map { "$it (${Listen.VOICES[it]})" } + "The phone's own voice"
+            val now = prefs.listenVoice
+            val hasKey = prefs.key(CleanupChoice.GEMINI.service).isNotEmpty()
+            ra.addView(linkRow("Voice", when {
+                now == Listen.PHONE_VOICE -> "The phone's own voice"
+                !prefs.listenCloudVoice -> "The phone's own voice (Privacy has cloud voice off)"
+                !hasKey -> "The phone's own voice until you add a Gemini key"
+                else -> "Gemini: $now (${Listen.VOICES[now]})"
+            }) {
+                choose("Read aloud voice", names, if (now == Listen.PHONE_VOICE) voices.size else voices.indexOf(now).coerceAtLeast(0)) {
+                    prefs.listenVoice = if (it == voices.size) Listen.PHONE_VOICE else voices[it]; render()
+                }
+            })
+            col.addView(ra)
         }
 
         // --- Speed: quick mode, and the tech bits (model names, timings) behind Advanced

@@ -35,6 +35,12 @@ Licensed under the Apache License, Version 2.0: https://www.apache.org/licenses/
 Changed for Tokalot: ported to plain Kotlin, with word frequency and context in the ranking.
 
 
+PdfBox-Android (reading the text of PDFs for read aloud)
+https://github.com/TomRoush/PdfBox-Android
+Copyright (C) The Apache Software Foundation, and Tom Roush
+Licensed under the Apache License, Version 2.0: https://www.apache.org/licenses/LICENSE-2.0
+
+
 Emoji names and groups: unicode-emoji-json, and keywords: emojilib
 https://github.com/muan/unicode-emoji-json · https://github.com/muan/emojilib
 

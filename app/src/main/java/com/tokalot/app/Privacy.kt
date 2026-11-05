@@ -36,6 +36,8 @@ object Privacy {
             { it.cleanup != CleanupChoice.OFF }) { p, on ->
             if (on) p.cleanup = cloudCleanup(p) else { p.lastCleanup = p.cleanup; p.cleanup = CleanupChoice.OFF }
         },
+        Switch("Cloud voice for read aloud", "Sends what you share to Listen in Tokalot to Gemini, with your key, for a natural voice. Off: the phone's own voice reads it and nothing leaves the phone.", CLOUD,
+            { it.listenCloudVoice }) { p, on -> p.listenCloudVoice = on },
         Switch("Transcribe while I talk", "Sends what you've said so far each time you pause, so long dictations come back quickly.", CLOUD,
             { it.liveStt }) { p, on -> p.liveStt = on },
         Switch("Fit into the sentence", "Uses where the cursor sits (not the text) so a dictation mid-sentence starts in lowercase.", CLOUD,

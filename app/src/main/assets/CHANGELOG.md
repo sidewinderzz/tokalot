@@ -12,6 +12,8 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Settings has a search box. Type what you're after in everyday words ("dark", "offline", "speed", "um") and tap a result to jump straight to it.
 - A new Notes page in Settings holds the voice notes beta and the defaults every note starts with: Skip silence, Skip ums, speed, Auto speed and summary length. A note's ⋮ menu can still change Skip silence and Skip ums for just that note.
 - API keys now sit on the Speech & AI page, and Recordings & usage is called Storage & stats.
+- Read aloud (beta): share a web link, PDF, Word file or text to "Listen in Tokalot" and it becomes a note you can listen to, in the same player with the speed wheel, tap a word and the Timeline. Menus, ads and related stories are left out of web pages; the article itself is never reworded. It picks up where you left off.
+- Read aloud uses Gemini's free voice when you have a Gemini key (pick the voice in Settings › Notes), and the phone's own voice otherwise. A new Privacy switch, Cloud voice for read aloud, keeps it on the phone. Scanned PDFs with no text in them can't be read yet.
 
 ## 1.52 · 2026-11-03
 - Voice messages and text you share to Tokalot now land on Home with your dictations instead of on the Notes page, since you often share them just to read or listen. Tap one to open it big, with the player, Summary and Timeline as before.
