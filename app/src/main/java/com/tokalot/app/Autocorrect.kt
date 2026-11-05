@@ -19,7 +19,9 @@ import kotlin.math.sqrt
  *
  * Autocorrect replaces the word when space or punctuation follows it only if the typing isn't a word at all
  * and something close is, or (rarely) it is a rare word and the context strongly wants a near miss of it
- * ("fir sure"). Names, numbers, web addresses and words in capitals are left alone.
+ * ("fir sure"). Two words run together ("ofthe", or "thebdog" where the thumb hit B instead of space) are
+ * split. Names, numbers, web addresses and words in capitals are left alone, and a name or abbreviation
+ * ("Mich", "NAD") never wins over an ordinary word that is much likelier ("much", "and").
  */
 class Autocorrect(private val words: KeyboardWords, private val history: TypingHistory? = null) {
 
@@ -46,6 +48,13 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
         private const val INS = 1.0f
         private const val DEL = 0.9f
         private const val TRANSPOSE = 0.6f
+        /** How much likelier an ordinary word must be to beat a name with exactly the typed letters. */
+        private const val NAME_EDGE = 3.5f
+        /** What a missed space costs, against a single word; more when a letter was typed in its place. */
+        private const val SPLIT = 2f
+        private const val SPACE_ROW = "cvbnm"
+        private const val VOWELS = "aeiou"
+        private const val VOWEL = 0.65f
 
         /** Most edits a word of this many letters can be corrected by. */
         fun budget(n: Int) = when {
@@ -103,12 +112,11 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
 
         // The typed word's own score, to compare corrections with.
         val typedScore = typedForm?.let { score(it, 0f, prev) }
-        var pickId = -1
-        if (auto && !leave && typed.length >= 1) pickId = choose(typed, typedForm, typedScore, cands.values, prev)
+        val pickForm = if (auto && !leave && typed.length >= 1) choose(typed, typedForm, typedScore, cands.values, prev) else null
 
-        val pickWord = if (pickId >= 0) matchCase(words.form(pickId), typed) else null
+        val pickWord = pickForm?.let { matchCase(it, typed) }
         val others = cands.values.asSequence()
-            .filter { it.id != pickId && !words.offensive(it.id) && words.prob(it.id) > 0 }
+            .filter { words.form(it.id) != pickForm && !words.offensive(it.id) && words.prob(it.id) > 0 }
             .sortedByDescending { it.score }
             .map { matchCase(words.form(it.id), typed) }
             .filter { it != typed && it != pickWord }
@@ -141,8 +149,11 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
     private fun score(id: Int, cost: Float, prev: String?, typed: String = ""): Float {
         val form = words.form(id)
         var s = words.prob(id) / 16f - EDIT * cost
-        // A name offered for something typed in lower case ("Baker" for "baler") needs to be clearly better.
-        if (typed.isNotEmpty() && typed[0].isLowerCase() && form[0].isUpperCase() && !form.equals(typed, ignoreCase = true)) s -= 1.5f
+        // A name offered for something typed in lower case ("Baker" for "baler") needs to be clearly better,
+        // an abbreviation ("UE" for "ur") more so.
+        if (typed.isNotEmpty() && typed[0].isLowerCase() && form[0].isUpperCase() && !form.equals(typed, ignoreCase = true)) {
+            s -= if (form.length > 1 && form.all { !it.isLetter() || it.isUpperCase() }) 3.5f else 1.5f
+        }
         val h = history
         if (h != null) {
             val n = h.count(form)
@@ -165,36 +176,82 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
         return bonus
     }
 
-    /** What autocorrect would put in place of [typed] (an id), or -1 to leave it. */
-    private fun choose(typed: String, typedForm: Int?, typedScore: Float?, cands: Collection<Cand>, prev: String?): Int {
+    /** What autocorrect would put in place of [typed], or null to leave it. */
+    private fun choose(typed: String, typedForm: Int?, typedScore: Float?, cands: Collection<Cand>, prev: String?): String? {
         // A word the user has kept typing is theirs.
-        if ((history?.count(typed) ?: 0) >= 2) return -1
+        if ((history?.count(typed) ?: 0) >= 2) return null
         val lowerTyped = typed.lowercase()
         val sc = words.shortcut(typed)
         if (sc != null && sc.second >= 14) {
-            val target = words.idOf(sc.first)
             val typedProb = typedForm?.let { words.prob(it) } ?: -1
-            if (target >= 0 && (typedForm == null || typedProb < 100 && words.prob(target) > typedProb + 60)) return target
+            // "alot" -> "a lot", "andteh" -> "and the": only ever for something that isn't a word itself.
+            if (sc.first.contains(' ')) { if (typedForm == null) return sc.first }
+            else {
+                val target = words.idOf(sc.first)
+                if (target >= 0 && (typedForm == null || typedProb < 100 && words.prob(target) > typedProb + 60)) return sc.first
+            }
         }
         val whole = cands.filter { it.whole != null && !words.offensive(it.id) && words.prob(it.id) > 0 }
         if (typedForm != null) {
             // Already a word. Only the same word written properly ("i" -> "I", "kubota" -> "Kubota" when only the
             // capitalised one exists is handled below), or a rare word where context strongly wants a near miss.
             val typedProb = words.prob(typedForm)
-            val best = whole.filter { it.id != typedForm && it.whole!! <= 0.65f }.maxByOrNull { it.wholeScore } ?: return -1
+            val best = whole.filter { it.id != typedForm && it.whole!! <= 0.65f }.maxByOrNull { it.wholeScore } ?: return null
             val lead = best.wholeScore - (typedScore ?: 0f)
             val supported = prev != null && context(prev, words.form(best.id)) > context(prev, words.form(typedForm))
-            return if (lead >= 4.5f && (typedProb < 90 || supported && typedProb < 140)) best.id else -1
+            return if (lead >= 4.5f && (typedProb < 90 || supported && typedProb < 140)) words.form(best.id) else null
         }
-        // Not a word as typed. The same letters in another form (don't, I'm, Kubota, café) win outright.
-        val same = whole.filter { it.whole == 0f && KeyboardWords.key(words.form(it.id)) == KeyboardWords.key(typed) }
-        if (same.isNotEmpty()) {
-            val lower = same.firstOrNull { words.form(it.id).lowercase() == lowerTyped }
-            return (lower ?: same.maxByOrNull { it.wholeScore }!!).id
+        // Not a word as typed. The same letters with an apostrophe or accent (don't, I'm, café) win outright.
+        val key = KeyboardWords.key(typed)
+        val same = whole.filter { it.whole == 0f && KeyboardWords.key(words.form(it.id)) == key }
+        val plain = same.filter { val f = words.form(it.id); f[0].isLowerCase() || f.startsWith("I'") || f == "I" || f[0] == typed[0] }
+        if (plain.isNotEmpty()) {
+            val lower = plain.firstOrNull { words.form(it.id).lowercase() == lowerTyped }
+            return words.form((lower ?: plain.maxByOrNull { it.wholeScore }!!).id)
         }
-        if (typed.length < 2) return -1
-        val best = whole.maxByOrNull { it.wholeScore } ?: return -1
-        return if (best.whole!! <= budget(typed.length)) best.id else -1
+        val others = whole.filter { it !in same }
+        val bestOther = others.maxByOrNull { it.wholeScore }?.takeIf { it.whole!! <= budget(typed.length) }
+        // Only a name or abbreviation has these letters ("Kubota", "Mich", "NAD"): it wins unless an ordinary
+        // word close by is far likelier ("much", "and").
+        val name = same.maxByOrNull { it.wholeScore }
+        if (name != null && (bestOther == null || name.wholeScore + NAME_EDGE >= bestOther.wholeScore)) return words.form(name.id)
+        // Two words run together.
+        val split = split(typed, prev)
+        if (split != null && (bestOther == null || split.second > bestOther.wholeScore + 1f)) return split.first
+        if (typed.length < 2) return null
+        return bestOther?.let { words.form(it.id) }
+    }
+
+    /**
+     * [typed] read as two words with the space missed: "ofthe" as "of the", or "thebdog" as "the dog" (B, N, V,
+     * C and M sit just above the space bar, so a thumb meant for space lands on them). Both words must be
+     * common; the result's score is on the same scale as a single word's.
+     */
+    fun split(typed: String, prev: String?): Pair<String, Float>? {
+        if (typed.length < 4 || !typed.all { it.isLetter() }) return null
+        var best: Pair<String, Float>? = null
+        fun consider(a: String, b: String, penalty: Float) {
+            val l = common(a) ?: return
+            val r = common(b) ?: return
+            var s = min(words.probOf(l), words.probOf(r)) / 16f - penalty + context(l, r)
+            if (prev != null) s += 0.5f * context(prev, l)
+            if (best == null || s > best!!.second) best = "$l $r" to s
+        }
+        for (i in 1 until typed.length) {
+            consider(typed.substring(0, i), typed.substring(i), SPLIT)
+            if (i < typed.length - 1 && typed[i].lowercaseChar() in SPACE_ROW) consider(typed.substring(0, i), typed.substring(i + 1), SPLIT + 1f)
+        }
+        return best?.let { (w, s) -> matchCase(w, typed) to s }
+    }
+
+    /** [part] as a word common enough to split off (its usual form: "I" for "i"), or null. */
+    private fun common(part: String): String? {
+        if (part.length == 1 && part[0].lowercaseChar() !in "ai") return null
+        val lower = part.lowercase()
+        val id = words.formsOf(KeyboardWords.key(part)).filter { words.form(it).lowercase() == lower && !words.offensive(it) }
+            .maxByOrNull { words.prob(it) } ?: return null
+        val need = if (part.length <= 2) 170 else 120
+        return if (words.prob(id) >= need) words.form(id) else null
     }
 
     // ------------------------------------------------------------------ the fuzzy match
@@ -247,12 +304,14 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
         fun substitute(i: Int, c: Char): Float {
             val t = k[i]
             if (t == c) return 0f
-            val target = centers[c] ?: return 1f
-            val (x, y) = touch(i) ?: return 1f
+            // One vowel for another is how words get misspelled ("seperate", "wheet").
+            val miss = if (t in VOWELS && c in VOWELS) VOWEL else 1f
+            val target = centers[c] ?: return miss
+            val (x, y) = touch(i) ?: return miss
             val dx = x - target[0]
             val dy = (y - target[1]) * ROW_ASPECT
             val d = sqrt(dx * dx + dy * dy)
-            return if (d <= 0.5f) 0.25f else min(1f, 0.3f + (d - 0.5f) * 0.5f)
+            return if (d <= 0.5f) 0.25f else min(miss, 0.3f + (d - 0.5f) * 0.5f)
         }
 
         /** The typed letter [i] shouldn't be there: cheaper when it repeats the letter before (a double tap). */
