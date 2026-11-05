@@ -319,6 +319,8 @@ object Loudness {
     const val TARGET = 0.1f
     /** Never more than this (18 dB), so a recording of nothing but room noise isn't made into a roar. */
     const val MAX_GAIN = 8f
+    /** The loudest 50 ms stretch is never raised past this RMS. */
+    const val LOUDEST = 0.25f
 
     /** How much forSpeech would raise a by (1 = left alone). */
     fun gain(a: FloatArray): Float {
@@ -333,7 +335,9 @@ object Loudness {
         rms.sort()
         val loud = rms[minOf(n - 1, n * 95 / 100)]
         if (loud <= 0.0005f) return 1f // silence: nothing to bring up
-        val g = minOf(MAX_GAIN, TARGET / loud)
+        // A short command in a long recording: the top 5% can be room noise. Never push the loudest stretch past
+        // LOUDEST, so speech that is already at a normal level is never raised into clipping.
+        val g = minOf(MAX_GAIN, TARGET / loud, LOUDEST / rms[n - 1])
         return if (g < 1.25f) 1f else g // already at a normal level
     }
 

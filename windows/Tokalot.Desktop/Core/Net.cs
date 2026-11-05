@@ -202,6 +202,8 @@ public static class Loudness
     public const float Target = 0.1f;
     /** Never more than this (18 dB), so a recording of nothing but room noise isn't made into a roar. */
     public const float MaxGain = 8f;
+    /** The loudest 50 ms stretch is never raised past this RMS. */
+    public const float Loudest = 0.25f;
 
     /** How much ForSpeech would raise a by (1 = left alone). */
     public static float Gain(float[] a)
@@ -219,7 +221,9 @@ public static class Loudness
         Array.Sort(rms);
         var loud = rms[Math.Min(n - 1, n * 95 / 100)];
         if (loud <= 0.0005f) return 1f; // silence: nothing to bring up
-        var g = Math.Min(MaxGain, Target / loud);
+        // A short command in a long recording: the top 5% can be room noise. Never push the loudest stretch past
+        // Loudest, so speech that is already at a normal level is never raised into clipping.
+        var g = Math.Min(Math.Min(MaxGain, Target / loud), Loudest / rms[n - 1]);
         return g < 1.25f ? 1f : g; // already at a normal level
     }
 

@@ -155,4 +155,9 @@ class LiveTest {
         assertTrue(Loudness.forSpeech(normal) === normal)
         assertTrue(Loudness.gain(FloatArray(r * 2)) == 1f)
     }
+
+    @Test fun shortLoudCommandAfterQuietWaitIsNotRaised() {
+        val late = FloatArray(r * 10) { (sin(it * 0.2) * (if (it >= r * 96 / 10) 0.3 else 0.002)).toFloat() }
+        assertTrue("gain ${Loudness.gain(late)}", Loudness.gain(late) == 1f)
+    }
 }

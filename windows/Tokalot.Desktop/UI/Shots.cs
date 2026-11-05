@@ -184,6 +184,10 @@ internal static class Shots
         for (int i = 0; i < normal.Length; i++) normal[i] = (float)(Math.Sin(i * 0.2) * 0.3);
         Check("a normal recording is left alone", ReferenceEquals(Loudness.ForSpeech(normal), normal));
         Check("silence is left alone", Loudness.Gain(new float[R * 2]) == 1f);
+        // A short normal-level command after a long quiet wait: the wait mustn't decide the gain.
+        var late = new float[R * 10];
+        for (int i = 0; i < late.Length; i++) late[i] = (float)(Math.Sin(i * 0.2) * (i >= R * 96 / 10 ? 0.3 : 0.002));
+        Check("a short loud command after a quiet wait isn't raised: " + Loudness.Gain(late), Loudness.Gain(late) == 1f);
 
         // A noisy place: the microphone never reads as quiet, so cuts are made at dips, or forced.
         float[] Noisy(int seconds, double dipAt = -1)
