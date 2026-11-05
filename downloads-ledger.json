@@ -2711,7 +2711,7 @@
    "release": "desktop"
   },
   "712190409": {
-   "count": 4,
+   "count": 5,
    "name": "Tokalot-v1.56.apk",
    "release": "v1.56"
   },
@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 2,
+   "count": 13,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2776,6 +2776,6 @@
    "release": "android-beta"
   }
  },
- "total": 1261,
- "updated": "2026-11-05T06:48:18Z"
+ "total": 1273,
+ "updated": "2026-11-05T15:28:22Z"
 }
