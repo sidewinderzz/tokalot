@@ -323,6 +323,62 @@ public static class NoteMedia
         return points.OrderBy(p => p.Time).ToList(); // a stable sort, like the Android app's
     }
 
+    // ---------- speed (same as Android's NoteMedia) ----------
+
+    public const double MinSpeed = 0.5, MaxSpeed = 4;
+    /** Auto speed never goes past this, however slow the talking. */
+    public const double AutoMax = 3;
+    /** The speeds the speed wheel offers: 0.5× to 4× in steps of 0.1. */
+    public static readonly double[] WheelSpeeds = Enumerable.Range(5, 36).Select(i => i / 10.0).ToArray();
+    /** The paces Auto speed can aim for, in words a minute. 230 is a quick but easy listen. */
+    public static readonly int[] TargetWpm = { 180, 200, 230, 260, 300, 350 };
+    public const int DefaultWpm = 230;
+
+    /** "1×", "1.5×", "0.8×". */
+    public static string SpeedLabel(double s) => (Math.Round(s * 10) / 10).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "×";
+
+    /** The wheel's speed nearest s. */
+    public static double NearestWheel(double s) => WheelSpeeds.OrderBy(x => Math.Abs(x - s)).First();
+
+    /** Roughly how many syllables a word has (groups of vowels, a silent final e left out). At least 1. */
+    public static int Syllables(string word)
+    {
+        var w = new string(word.ToLowerInvariant().Where(c => c is >= 'a' and <= 'z').ToArray());
+        if (w.Length == 0) return 1;
+        if (w.Length > 2 && w.EndsWith('e') && !w.EndsWith("le")) w = w[..^1];
+        int n = 0; var inVowel = false;
+        foreach (var c in w) { var v = "aeiouy".Contains(c); if (v && !inVowel) n++; inVowel = v; }
+        return Math.Max(1, n);
+    }
+
+    private const double SyllablesPerWord = 1.45;
+
+    /**
+     * How fast the talking is around t, in words a minute, over the window seconds before it, counted in syllables
+     * so long words said slowly count as slow. Only time spent saying words counts. Null with too little talking.
+     */
+    public static double? PaceAt(IReadOnlyList<Word> words, double t, double window = 4)
+    {
+        int syl = 0; double talk = 0;
+        foreach (var w in words)
+        {
+            if (w.End < t - window) continue;
+            if (w.Start > t + 0.3) break;
+            talk += Math.Clamp(w.End - w.Start, 0.05, 2.0);
+            syl += Syllables(w.Text);
+        }
+        if (talk < 1 || syl < 3) return null;
+        return syl / SyllablesPerWord / talk * 60;
+    }
+
+    /** The speed that brings talking at pace up to target words a minute: never below 1×, never past AutoMax. */
+    public static double AutoSpeed(double? pace, int target) =>
+        pace is not > 0 ? 1 : Math.Clamp(target / pace.Value, 1, AutoMax);
+
+    /** One step toward want, dt seconds after the last (about half a second apart), in steps of 0.05×. */
+    public static double Glide(double now, double want, double dt) =>
+        Math.Round((now + (want - now) * Math.Min(1, dt * 1.2)) * 20) / 20;
+
     public static string Clock(double seconds)
     {
         var s = (int)Math.Max(0, seconds);

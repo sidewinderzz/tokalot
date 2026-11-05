@@ -121,4 +121,35 @@ class NoteMediaTest {
         assertNull(NoteMedia.cleanTitle("  \"\" "))
         assertTrue(NoteMedia.titleUser("a".repeat(5000)).contains("<note>\n" + "a".repeat(4000) + "\n</note>"))
     }
+
+    @Test fun syllablesAndPace() {
+        assertEquals(1, NoteMedia.syllables("the"))
+        assertEquals(1, NoteMedia.syllables("tire"))
+        assertEquals(3, NoteMedia.syllables("Saturday"))
+        assertEquals(2, NoteMedia.syllables("knotter,"))
+        assertEquals(1, NoteMedia.syllables("4020"))
+        // Ten one-syllable words in two seconds of talking: 10 / 1.45 words in 2 s = about 207 a minute.
+        val quick = List(10) { Word("go", it * 0.2, it * 0.2 + 0.2) }
+        assertEquals(207.0, NoteMedia.paceAt(quick, 2.0)!!, 1.0)
+        // Too little talking to tell.
+        assertNull(NoteMedia.paceAt(listOf(Word("hey", 0.0, 0.4)), 0.4))
+        // Long gaps between words don't make it count as slow: only the time saying words counts.
+        val gappy = List(10) { Word("go", it * 1.0, it * 1.0 + 0.2) }
+        assertEquals(207.0, NoteMedia.paceAt(gappy, 10.0, window = 10.0)!!, 1.0)
+    }
+
+    @Test fun autoSpeedAndGlide() {
+        assertEquals(2f, NoteMedia.autoSpeed(115.0, 230), 0.001f)
+        assertEquals(1f, NoteMedia.autoSpeed(300.0, 230), 0.001f) // never slows down
+        assertEquals(NoteMedia.AUTO_MAX, NoteMedia.autoSpeed(20.0, 230), 0.001f)
+        assertEquals(1f, NoteMedia.autoSpeed(null, 230), 0.001f)
+        // Half a second toward 2× from 1×: part of the way, on a 0.05 step.
+        val g = NoteMedia.glide(1f, 2f, 0.5)
+        assertTrue(g > 1f && g < 2f)
+        assertEquals(0f, (g * 20) % 1, 0.001f)
+        assertEquals(1.5f, NoteMedia.glide(1.5f, 1.51f, 0.5), 0.001f)
+        assertEquals("1.5×", NoteMedia.speedLabel(1.5f))
+        assertEquals("2×", NoteMedia.speedLabel(2f))
+        assertEquals(36, NoteMedia.WHEEL_SPEEDS.size)
+    }
 }

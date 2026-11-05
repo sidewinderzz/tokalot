@@ -272,11 +272,8 @@ public static class Sync
         "stt", "cleanup", "sttModels", "cleanupModels", "autoStop", "quickSkip", "liveStt", "weakSignal", "autoLanguage",
         "polish", "sounds", "soundSet", "theme", "accent", "learnWords", "learnedWords", "dismissedWords", "notesBeta",
         "indicatorStyle", "showIdleIndicator", "appOverrides", "noteSkipSilence", "noteSkipUms", "noteSummaryLevel", "noteSpeed",
-        "shellCommands", "shellCue",
+        "noteAutoSpeed", "noteTargetWpm", "shellCommands", "shellCue",
     };
-
-    /** The playback speeds a voice note offers, in the order the speed button steps through them. */
-    public static readonly double[] NoteSpeeds = { 1, 1.25, 1.5, 2 };
 
     private static readonly string[] Themes = { "system", "light", "dark" };
     private static readonly string[] IndicatorStyles = { "ripple", "half", "bars", "edge", "disc" };
@@ -338,7 +335,8 @@ public static class Sync
                 case "soundSet": return str != null && Tones.Valid(str) == str;
                 case "indicatorStyle": return IndicatorStyles.Contains(str);
                 case "noteSummaryLevel": return n is JsonValue lv && lv.TryGetValue<double>(out var l) && l == Math.Floor(l) && l is >= 1 and <= 5;
-                case "noteSpeed": return n is JsonValue sv && sv.TryGetValue<double>(out var sp) && NoteSpeeds.Any(x => Math.Abs(x - sp) < 0.001);
+                case "noteSpeed": return n is JsonValue sv && sv.TryGetValue<double>(out var sp) && sp is >= NoteMedia.MinSpeed and <= NoteMedia.MaxSpeed;
+                case "noteTargetWpm": return n is JsonValue wv && wv.TryGetValue<double>(out var w) && w == Math.Floor(w) && w is >= 100 and <= 500;
                 case "appOverrides":
                     return n is JsonObject obj && obj.All(kv => kv.Value is JsonValue v && v.GetValueKind() == JsonValueKind.String &&
                         Catalog.Categories.Any(c => c.Id == v.GetValue<string>()));

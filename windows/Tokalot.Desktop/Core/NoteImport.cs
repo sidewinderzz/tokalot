@@ -38,6 +38,9 @@ public static class NoteImport
         /** The note's short title, made by the AI or by Rename. titleOff: the user cleared it, so don't make another. */
         public string? Title => (string?)O["title"] is { Length: > 0 } t ? t : null;
         public bool TitleOff => (bool?)O["titleOff"] ?? false;
+        /** This note's own Skip silence / Skip ums from its ⋮ menu, or null to follow Settings › Notes. Same keys as Android. */
+        public bool? SkipSilence => (bool?)O["skipSilence"];
+        public bool? SkipUms => (bool?)O["skipUms"];
         public double Duration => (double?)O["duration"] ?? 0;
         public List<NoteMedia.Segment> Segments => (O["segments"] as JsonArray)?.Select(s =>
             new NoteMedia.Segment((double)s![0]!, (double)s[1]!, (string)s[2]!)).ToList() ?? new();

@@ -343,17 +343,20 @@ internal fun MainActivity.waitingCard(waiting: List<NoteImport.Info>): View {
         }
         val going = NoteImport.isRunning(w.id)
         val length = if (w.duration > 0) " · ${NoteMedia.clock(w.duration)}" else ""
-        box.addView(text("Shared voice note$length", 16f, bold = true))
+        val listen = Listen.isListen(w)
+        box.addView(text(if (listen) Listen.label(w) else "Shared voice note$length", 16f, bold = true))
         box.addView(text(when {
-            going -> "Transcribing…"
-            w.status == "failed" -> "Couldn't transcribe it: ${w.error}"
+            going -> if (listen) Listen.step(w) else "Transcribing…"
+            w.status == "failed" -> if (listen) w.error else "Couldn't transcribe it: ${w.error}"
             else -> "Stopped before it finished."
         }, 14f, C.SUB), lp().margins(this, t = 2))
         if (!going) box.addView(row(
             weightSpacer(),
-            pill("Remove") { confirm("Remove this voice note? Its recording is deleted.", "Remove") { NoteImport.deleteMedia(this, w.id); render() } },
+            pill("Remove") {
+                confirm(if (listen) "Remove this? Nothing has been saved from it yet." else "Remove this voice note? Its recording is deleted.", "Remove") { NoteImport.deleteMedia(this, w.id); render() }
+            },
             spacer(wDp = 8),
-            pill("Try again", filled = true) { NoteImport.transcribe(this, w.id) },
+            pill("Try again", filled = true) { if (listen) Listen.run(this, w.id) else NoteImport.transcribe(this, w.id) },
         ), lp().margins(this, t = 6))
         c.addView(box)
     }
@@ -757,6 +760,8 @@ class SettingsScreen(private val a: MainActivity) {
         const val RECORDING = "Recording"
         const val SHORTCUTS = "Shortcuts"
         const val DATA = "Sync & backup"
+        const val NOTES = "Notes"
+        const val STORAGE = "Storage & stats"
         private const val SECTION = "section:"
 
         /**
@@ -767,15 +772,24 @@ class SettingsScreen(private val a: MainActivity) {
             SETUP to listOf("Setup"),
             PRIVACY to listOf("Privacy"),
             KEYBOARD to listOf("Keyboard"),
-            SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "Speed"),
-            KEYS to listOf("API keys"),
+            SPEECH to listOf("Speech to text", "On-device model", "AI cleanup", "Speed", "API keys"),
+            NOTES to listOf("Notes"),
             RECORDING to listOf("Recording", "Microphone"),
             SHORTCUTS to listOf("Shortcuts"),
             "Appearance" to listOf("Appearance"),
             DATA to listOf("Sync", "Backup"),
-            "Recordings & usage" to listOf("Recordings", "Usage"),
+            STORAGE to listOf("Recordings", "Usage"),
             "About" to listOf("About"),
         )
+
+        /** Pages that were folded into another; opening one opens where its settings are now. */
+        private val MOVED = mapOf(KEYS to SPEECH, "Recordings & usage" to STORAGE)
+
+        /** What's typed in the search box on the list of pages. Kept while the app runs. */
+        var query = ""
+
+        /** A setting picked from the search results: its page scrolls to it and flashes it once. */
+        var findRow: String? = null
 
         /** The page open in Settings, or null for the list of pages. Kept while the app runs, like the tab. */
         var page: String? = null
@@ -1173,23 +1187,6 @@ class SettingsScreen(private val a: MainActivity) {
         tiles.addView(linkRow("Clipboard only", if (clip == 0) "No apps" else "$clip ${if (clip == 1) "app" else "apps"}") { clipboardApps() })
         col.addView(tiles)
 
-        groupLabel(col, "Voice notes")
-        val vn = card()
-        vn.addView(switchRow("Voice notes (beta)", "A Notes page and a Voice note tile", prefs.notesBeta,
-            "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Voice messages and text shared to Tokalot from WhatsApp or any app become notes too, which you can play, summarize and index. Notes are in backups, and their text is in sync when it's set up.") { on ->
-            prefs.notesBeta = on
-            StartTile.setNoteTile(this, on)
-            if (!on && prefs.shortcutAction == "note") prefs.shortcutAction = "off"
-            if (on) StartTile.requestAdd(this, NoteTile::class.java, "Voice note", R.drawable.ic_note)
-            render()
-        })
-        if (prefs.notesBeta) {
-            // Start any dictation with one of these and it's saved as a note instead of typed.
-            vn.addView(divider())
-            vn.addView(linkRow("Note phrases", prefs.notePhrases) { notePhrases() })
-        }
-        col.addView(vn)
-
         groupLabel(col, "Volume keys")
         col.addView(text("Holding both volume keys (Android's accessibility shortcut) does:", 14f, C.SUB), lp().margins(this, b = 8, l = 4))
         // The shortcut can only reach the app on Android 11 and newer; before that it switches Tokalot off and on.
@@ -1227,6 +1224,80 @@ class SettingsScreen(private val a: MainActivity) {
             })
         }
         if (actions.isNotEmpty()) col.addView(sc)
+
+        // --- Notes: the voice notes beta, and the defaults every note starts with (each note's ⋮ menu can change them)
+        section(col, "Notes")
+        groupLabel(col, "Voice notes", top = 0)
+        val vn = card()
+        vn.addView(switchRow("Voice notes (beta)", "A Notes page and a Voice note tile", prefs.notesBeta,
+            "Adds a Notes page and a Voice note tile. Each dictation started from it is saved as its own note and copied to the clipboard. Voice messages and text shared to Tokalot from WhatsApp or any app become notes too, which you can play, summarize and index. Notes are in backups, and their text is in sync when it's set up.") { on ->
+            prefs.notesBeta = on
+            StartTile.setNoteTile(this, on)
+            if (!on && prefs.shortcutAction == "note") prefs.shortcutAction = "off"
+            if (on) StartTile.requestAdd(this, NoteTile::class.java, "Voice note", R.drawable.ic_note)
+            render()
+        })
+        if (prefs.notesBeta) {
+            // Start any dictation with one of these and it's saved as a note instead of typed.
+            vn.addView(divider())
+            vn.addView(linkRow("Note phrases", prefs.notePhrases) { notePhrases() })
+        }
+        col.addView(vn)
+
+        if (prefs.notesBeta) {
+            groupLabel(col, "Playing voice notes")
+            col.addView(text("Defaults for every note. A note's ⋮ menu can change Skip silence and Skip ums for just that note.", 14f, C.SUB), lp().margins(this, b = 8, l = 4))
+            val pl = card()
+            pl.addView(switchRow("Skip silence", "Jump over pauses with no talking", prefs.noteSkipSilence) { prefs.noteSkipSilence = it })
+            pl.addView(divider())
+            pl.addView(switchRow("Skip ums", "Jump over um, uh and the like", prefs.noteSkipUms) { prefs.noteSkipUms = it })
+            pl.addView(divider())
+            pl.addView(linkRow("Playback speed", NoteMedia.speedLabel(prefs.noteSpeed)) {
+                val speeds = NoteMedia.WHEEL_SPEEDS
+                choose("Playback speed", speeds.map { NoteMedia.speedLabel(it) }, speeds.indices.minByOrNull { Math.abs(speeds[it] - prefs.noteSpeed) } ?: 5) {
+                    prefs.noteSpeed = speeds[it]; render()
+                }
+            })
+            pl.addView(divider())
+            pl.addView(switchRow("Auto speed", "Speed up where the talking is slow", prefs.noteAutoSpeed,
+                "Tokalot knows when each word in a voice note is said, so it can tell how fast someone talks from moment to moment. Auto speed turns the speed up where they talk slowly or draw words out, and eases off where they talk fast, aiming for the pace below. It never plays slower than 1×.") {
+                prefs.noteAutoSpeed = it; render()
+            })
+            if (prefs.noteAutoSpeed) {
+                pl.addView(divider())
+                pl.addView(linkRow("Auto speed aims for", "${prefs.noteTargetWpm} words a minute") {
+                    val paces = NoteMedia.TARGET_WPM
+                    choose("Auto speed aims for", paces.map { "$it words a minute" }, paces.indexOf(prefs.noteTargetWpm).coerceAtLeast(0)) {
+                        prefs.noteTargetWpm = paces[it]; render()
+                    }
+                })
+            }
+            pl.addView(divider())
+            pl.addView(linkRow("Summary length", NoteMedia.LEVEL_NAMES[prefs.noteSummaryLevel - 1]) {
+                choose("Summary length", NoteMedia.LEVEL_NAMES, prefs.noteSummaryLevel - 1) { prefs.noteSummaryLevel = it + 1; render() }
+            })
+            col.addView(pl)
+
+            // Read aloud (beta): what's shared to "Listen in Tokalot".
+            groupLabel(col, "Read aloud (beta)")
+            col.addView(text("Share a web link, PDF, Word file or text to Listen in Tokalot and it becomes a note you can listen to, with the same player.", 14f, C.SUB), lp().margins(this, b = 8, l = 4))
+            val ra = card()
+            val voices = Listen.VOICES.keys.toList()
+            val names = voices.map { "$it (${Listen.VOICES[it]})" } + "The phone's own voice"
+            val now = prefs.listenVoice
+            val hasKey = prefs.key(CleanupChoice.GEMINI.service).isNotEmpty()
+            ra.addView(linkRow("Voice", when {
+                now == Listen.PHONE_VOICE -> "The phone's own voice"
+                !prefs.listenCloudVoice -> "The phone's own voice (Privacy has cloud voice off)"
+                !hasKey -> "The phone's own voice until you add a Gemini key"
+                else -> "Gemini: $now (${Listen.VOICES[now]})"
+            }) {
+                choose("Read aloud voice", names, if (now == Listen.PHONE_VOICE) voices.size else voices.indexOf(now).coerceAtLeast(0)) {
+                    prefs.listenVoice = if (it == voices.size) Listen.PHONE_VOICE else voices[it]; render()
+                }
+            })
+            col.addView(ra)
+        }
 
         // --- Speed: quick mode, and the tech bits (model names, timings) behind Advanced
         section(col, "Speed")
@@ -1559,14 +1630,48 @@ class SettingsScreen(private val a: MainActivity) {
             current?.add(v)
         }
         col.removeAllViews()
+        page?.let { MOVED[it] }?.let { page = it }
         val open = PAGES.firstOrNull { it.first == page }
         if (open == null) {
             page = null
             col.addView(heading("Settings"), lp().margins(this, t = 8, b = 8))
-            for ((name, titles) in PAGES) {
-                if (titles.none { it in sections }) continue
-                col.addView(pageRow(name), lp().margins(this, t = 10))
+            val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+            val box = field("Search settings", query).apply {
+                setSingleLine()
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                contentDescription = "Search settings"
             }
+            fun fill() {
+                list.removeAllViews()
+                if (query.isBlank()) {
+                    for ((name, titles) in PAGES) {
+                        if (titles.none { it in sections }) continue
+                        list.addView(pageRow(name), lp().margins(this, t = 10))
+                    }
+                    return
+                }
+                val hits = SettingsSearch.find(query, settingRows(sections))
+                if (hits.isEmpty()) list.addView(text("Nothing matches \"${query.trim()}\". Try another word, like dark, offline or speed.", 15f, C.SUB), lp().margins(this, t = 14, l = 4))
+                val c = card()
+                hits.forEachIndexed { i, h ->
+                    if (i > 0) c.addView(divider())
+                    c.addView(linkRow(h.title, h.where + (h.note?.let { " · $it" } ?: "")) {
+                        query = ""
+                        page = h.page
+                        findRow = h.title
+                        render()
+                    })
+                }
+                if (hits.isNotEmpty()) list.addView(c, lp().margins(this, t = 10))
+            }
+            box.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(t: CharSequence?, st: Int, n: Int, c: Int) {}
+                override fun onTextChanged(t: CharSequence?, st: Int, n: Int, c: Int) {}
+                override fun afterTextChanged(e: android.text.Editable?) { query = e?.toString().orEmpty(); fill() }
+            })
+            col.addView(box, lp().margins(this, b = 4))
+            col.addView(list, lp())
+            fill()
             return@with
         }
         val (name, titles) = open
@@ -1583,6 +1688,52 @@ class SettingsScreen(private val a: MainActivity) {
                 col.addView(v)
             }
         }
+        // Picked from the search results: bring that setting into view and flash it once.
+        val want = findRow ?: return@with
+        findRow = null
+        col.post {
+            val hit = textViews(col).firstOrNull { it.text.toString() == want } ?: return@post
+            var target: View = hit
+            while (target.parent is View && target.parent !== col && (target.parent as View).parent !== col) target = target.parent as View
+            val sv = generateSequence(col as View) { it.parent as? View }.filterIsInstance<android.widget.ScrollView>().firstOrNull()
+            var y = 0
+            var v: View = target
+            while (v !== col) { y += v.top; v = v.parent as? View ?: break }
+            sv?.smoothScrollTo(0, (y - dp(80)).coerceAtLeast(0))
+            val flash = android.animation.ValueAnimator.ofArgb((C.visible(prefs.accent) and 0x00FFFFFF) or 0x44000000, 0x00000000).apply {
+                duration = 1600
+                startDelay = 250
+                addUpdateListener { target.foreground = android.graphics.drawable.ColorDrawable(it.animatedValue as Int) }
+            }
+            flash.start()
+        }
+    }
+
+    private fun textViews(v: View): List<TextView> = when (v) {
+        is TextView -> listOf(v)
+        is ViewGroup -> (0 until v.childCount).flatMap { textViews(v.getChildAt(it)) }
+        else -> emptyList()
+    }
+
+    /**
+     * Every setting on every page, for the search box: the titles on its rows (the bigger text), with the line
+     * under each so a search can match that too.
+     */
+    private fun settingRows(sections: Map<String, List<View>>): List<SettingsSearch.Row> {
+        val out = mutableListOf<SettingsSearch.Row>()
+        for ((pageName, titles) in PAGES) for (section in titles) {
+            val views = sections[section] ?: continue
+            for (v in views.drop(1)) for (tv in textViews(v)) {
+                val t = tv.text.toString().trim()
+                val sizeSp = tv.textSize / tv.resources.displayMetrics.scaledDensity
+                if (t.isEmpty() || t.length > 60 || sizeSp < 16.5f || tv is android.widget.EditText) continue
+                if (t.first().isDigit() || t == pageName) continue
+                val sub = (tv.parent as? LinearLayout)?.let { p -> (0 until p.childCount).map { p.getChildAt(it) }
+                    .filterIsInstance<TextView>().firstOrNull { it !== tv }?.text?.toString() }
+                out += SettingsSearch.Row(t, sub.orEmpty(), pageName, if (titles.size > 1 && section != pageName) "$pageName › $section" else pageName)
+            }
+        }
+        return out.distinctBy { it.title to it.page }
     }
 
     /** A row on a card that opens something: its name, an optional line under it, and a chevron. */
@@ -1635,16 +1786,22 @@ class SettingsScreen(private val a: MainActivity) {
             }
             PRIVACY -> (Privacy.current(prefs)?.label ?: "Custom") to false
             KEYBOARD -> (if (!TokalotKeyboard.isEnabled(this)) "Off" else "On · swipe ${yes(prefs.kbSwipe)} · autocorrect ${yes(prefs.kbAutocorrect)}") to false
-            SPEECH -> "${if (prefs.stt == SttChoice.LOCAL) "On the phone" else prefs.stt.label} · cleanup ${if (prefs.cleanup == CleanupChoice.OFF) "off" else prefs.cleanup.label}" to false
-            KEYS -> {
-                val have = Services.all.filter { prefs.key(it.first).isNotEmpty() }.map { it.second }
-                if (have.isEmpty()) "None added yet" to (prefs.stt != SttChoice.LOCAL) else have.joinToString(", ") to false
+            SPEECH -> {
+                val keys = Services.all.count { prefs.key(it.first).isNotEmpty() }
+                val needKey = keys == 0 && prefs.stt != SttChoice.LOCAL
+                "${if (prefs.stt == SttChoice.LOCAL) "On the phone" else prefs.stt.label} · cleanup ${if (prefs.cleanup == CleanupChoice.OFF) "off" else prefs.cleanup.label} · " +
+                    (if (keys == 0) "no API keys yet" else "$keys ${if (keys == 1) "key" else "keys"}") to needKey
             }
             RECORDING -> "${if (prefs.holdToTalk) "Hold to talk" else "Tap to talk"} · sounds ${yes(prefs.sounds)} · ${if (prefs.headsetMic) "headset mic" else "phone mic"}" to false
-            SHORTCUTS -> (if (prefs.notesBeta) "Dictate tile, voice notes, volume keys" else "Dictate tile, volume keys") to false
+            SHORTCUTS -> "Dictate tile, volume keys" to false
+            NOTES -> (if (!prefs.notesBeta) "Off" else listOfNotNull(
+                if (prefs.noteAutoSpeed) "Auto speed" else NoteMedia.speedLabel(prefs.noteSpeed),
+                if (prefs.noteSkipSilence) "skip silence" else null,
+                if (prefs.noteSkipUms) "skip ums" else null,
+            ).joinToString(" · ")) to false
             "Appearance" -> when (prefs.theme) { "light" -> "Light"; "dark" -> "Dark"; else -> "Match phone" } to false
             DATA -> (if (prefs.syncUri == null) "Sync off" else if (prefs.syncError != null) "Sync needs attention" else Sync.ago(prefs.syncLast)) to (prefs.syncError != null)
-            "Recordings & usage" -> {
+            STORAGE -> {
                 val keep = when (prefs.audioKeepDays) { 0 -> "Audio not saved"; Int.MAX_VALUE -> "Audio kept forever"; else -> "Audio kept ${prefs.audioKeepDays} days" }
                 "$keep · ${MainActivity.money(Usage.month(this).total)} this month" to false
             }

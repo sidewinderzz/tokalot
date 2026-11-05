@@ -2,6 +2,14 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.15.0
+
+- Voice notes have a speed wheel. Click the speed button under a note and scroll or drag the wheel to any speed from 0.5× to 4×. Scrolling over the button works too, and right-clicking it goes back to 1×.
+- Auto speed speeds a voice note up where the person talks slowly and eases off where they talk fast, aiming for the pace you pick (180 to 350 words a minute). Changing speed restarts ffplay or mpv here, so Auto changes it between words, every few seconds at most.
+- Settings has a search box above the page list. Type what you're after in everyday words ("dark", "offline", "speed") and click a result to jump to it.
+- A new Notes page in Settings holds the voice notes beta and the defaults every note starts with. A note's ⋯ menu can still change Skip silence and Skip ums for just that note.
+- API keys now sit on the Speech & AI page, and Recordings & usage is called Storage & stats.
+
 ## New in 0.14.0
 
 - Voice messages shared to Tokalot on your phone now show on Home with your dictations (click one to open it, with Summary and Timeline), instead of on the Notes page. Move to Notes files one there; Move to Home sends it back.

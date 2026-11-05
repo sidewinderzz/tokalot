@@ -49,6 +49,13 @@ object NoteImport {
         val segments: List<NoteMedia.Segment> get() = o.optJSONArray("segments")?.let { a ->
             List(a.length()) { a.getJSONArray(it).let { s -> NoteMedia.Segment(s.getDouble(0), s.getDouble(1), s.getString(2)) } }
         } ?: emptyList()
+        /** Read aloud: the words that start a paragraph, or null for a voice note (breaks come from pauses). */
+        val breaks: Set<Int>? get() = o.optJSONArray("breaks")?.let { a -> (0 until a.length()).map { a.getInt(it) }.toSet() }
+        /** Read aloud: where playing last stopped, in seconds. */
+        val resume get() = o.optDouble("resume", 0.0)
+        /** This note's own Skip silence / Skip ums from its ⋮ menu, or null to follow Settings › Notes. */
+        val skipSilence: Boolean? get() = if (o.has("skipSilence")) o.optBoolean("skipSilence") else null
+        val skipUms: Boolean? get() = if (o.has("skipUms")) o.optBoolean("skipUms") else null
         /** The note's short title, made by the AI or typed in Rename. */
         val title: String? get() = o.optString("title").trim().takeIf { it.isNotEmpty() }
         /** Rename saved an empty title: this note is left without one and isn't titled again. */
@@ -60,7 +67,7 @@ object NoteImport {
     }
 
     fun dir(ctx: Context) = File(ctx.applicationContext.filesDir, DIR)
-    private fun folder(ctx: Context, id: Long) = File(dir(ctx), "$id")
+    fun folder(ctx: Context, id: Long) = File(dir(ctx), "$id")
     private fun infoFile(ctx: Context, id: Long) = File(folder(ctx, id), "info.json")
     fun audioFile(ctx: Context, id: Long): File? = info(ctx, id)?.audio?.let { File(folder(ctx, id), it) }?.takeIf { it.exists() }
 
@@ -85,14 +92,14 @@ object NoteImport {
     fun waiting(ctx: Context): List<Info> =
         ids(ctx).mapNotNull { info(ctx, it) }.filter { it.status == "pending" || it.status == "failed" }.sortedByDescending { it.id }
 
-    fun isRunning(id: Long) = id in running
+    fun isRunning(id: Long) = id in running || Listen.isRunning(id)
 
     private fun ids(ctx: Context) = dir(ctx).listFiles()?.mapNotNull { it.name.toLongOrNull() } ?: emptyList()
 
     /** Removes the folders of notes deleted on another device. Ones still waiting to become a note are kept. */
     fun prune(ctx: Context, noteIds: Set<Long>) {
         for (id in ids(ctx)) {
-            if (id in noteIds || id in running) continue
+            if (id in noteIds || isRunning(id)) continue
             val s = info(ctx, id)?.status
             if (s == "pending" || s == "failed") continue
             deleteMedia(ctx, id)
@@ -135,7 +142,7 @@ object NoteImport {
 
     /** A note id nobody has: the current time, nudged on if two arrive in the same millisecond. */
     @Synchronized
-    private fun freshId(ctx: Context): Long {
+    fun freshId(ctx: Context): Long {
         val taken = Notes.all(ctx).map { it.id }.toSet()
         var id = System.currentTimeMillis()
         while (id in taken || folder(ctx, id).exists()) id++
@@ -172,7 +179,7 @@ object NoteImport {
         }
     }
 
-    private fun changed() = main.post { Notes.onChange?.invoke() }
+    fun changed() = main.post { Notes.onChange?.invoke() }
 
     /**
      * Listens through a recording for where someone is talking (blocking: call it off the main thread) and saves the

@@ -1182,7 +1182,7 @@ class MainActivity : Activity() {
         box.addView(text(n.text.trim(), 18f).apply { maxLines = 6; ellipsize = TextUtils.TruncateAt.END })
         val meta = buildString {
             append(SimpleDateFormat("MMM d, h:mm a", Locale.US).format(Date(n.time)))
-            append(" · ").append(if (voice) "Shared voice message" else "Shared")
+            append(" · ").append(if (info?.o?.has("listen") == true) "Read aloud" else if (voice) "Shared voice message" else "Shared")
             info?.source?.let { append(" from $it") }
             if (voice && info!!.duration > 0) append(" · ${NoteMedia.clock(info.duration)}")
         }
