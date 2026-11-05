@@ -6,6 +6,11 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.57 · 2026-11-05
+- Tapping the speed button under a voice note opens the speed wheel and leaves it open, instead of a row of buttons underneath. Drag anywhere on it, or tap a speed to pick it. Auto and 1× sit on top of the wheel, and a tap anywhere else closes it.
+- Dragging sideways changes speed too: right is faster, left is slower. That helps when the button is near the bottom of the screen and there's no room to drag down.
+- The pace Auto speed aims for is in Settings › Notes.
+
 ## 1.56 · 2026-11-05
 - The speed wheel grows upward from the speed button, with the speed you're on right under your thumb and faster speeds above it, so it's no longer cut off at the bottom of the screen.
 - The note's top Copy button is now called Copy text, so it's clear it copies the whole note. The Timeline has its own copy button now, like the Summary.
