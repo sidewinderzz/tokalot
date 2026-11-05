@@ -139,6 +139,9 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                     timelineShown = !timelineShown; layout(); if (timelineShown) indexOpened?.invoke()
                 })
             }
+            // The whole text in one tap (a summary has its own copy button on its card).
+            buttons.addView(spacer(wDp = 8))
+            buttons.addView(quietPill(null, R.drawable.ic_copy, "Copy", false) { copy(note.text) })
         }
         col.addView(buttons, lp().margins(this, b = 8))
         col.addView(summary, lp().margins(this, b = 12))

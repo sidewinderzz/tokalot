@@ -9,6 +9,7 @@
 - Settings has a search box above the page list. Type what you're after in everyday words ("dark", "offline", "speed") and click a result to jump to it.
 - A new Notes page in Settings holds the voice notes beta and the defaults every note starts with. A note's ⋯ menu can still change Skip silence and Skip ums for just that note.
 - API keys now sit on the Speech & AI page, and Recordings & usage is called Storage & stats.
+- A Copy button next to Summary and Timeline copies a note's whole text in one click.
 
 ## New in 0.14.0
 
