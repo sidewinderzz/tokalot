@@ -53,7 +53,7 @@ object Privacy {
             { it.kbClipSuggest }) { p, on -> p.kbClipSuggest = on },
         Switch("Keyboard: offer new screenshots", "A screenshot you just took shows on the keyboard's bar, ready to paste. Needs photo access.", CLOUD,
             { it.kbScreenshots }) { p, on -> p.kbScreenshots = on },
-        Switch("Keyboard: codes from texts", "A sign-in code that just came in a text shows on the keyboard's bar. Needs notification access; nothing is kept or sent.", setOf(Level.FULL),
+        Switch("Keyboard: codes from texts and emails", "A sign-in code that just came in a text or email shows on the keyboard's bar. Needs notification access; nothing is kept or sent.", setOf(Level.FULL),
             { it.kbCodes }) { p, on -> p.kbCodes = on },
         Switch("Reminder text on the lock screen", "Voice note reminders show what they're for on the lock screen. Off: they still ring, and show their text once the phone is unlocked.", CLOUD,
             { it.reminderLockText }) { p, on -> p.reminderLockText = on },

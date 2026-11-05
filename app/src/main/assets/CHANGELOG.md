@@ -15,6 +15,13 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - Read aloud (beta): share a web link, PDF, Word file or text to "Listen in Tokalot" and it becomes a note you can listen to, in the same player with the speed wheel, tap a word and the Timeline. Menus, ads and related stories are left out of web pages; the article itself is never reworded. It picks up where you left off.
 - Read aloud uses Gemini's free voice when you have a Gemini key (pick the voice in Settings › Notes), and the phone's own voice otherwise. A new Privacy switch, Cloud voice for read aloud, keeps it on the phone. Scanned PDFs with no text in them can't be read yet.
 
+## 1.53 · 2026-11-03
+- The keyboard's keys look softly raised instead of flat: a light top edge, a gentle shade down each key and a soft shadow under it, and a key sinks flat while you press it. Classic and Tinted have it. Prefer the old look? Pick Flat in the keyboard's menu or Settings › Keyboard.
+- New screenshots show up on the bar more dependably. Tokalot now recognises screenshots wherever the phone saves them (Pictures, DCIM, a Screenshots album, files named Screenshot), looks again a moment later for phones that save the file late, and keeps offering it for 5 minutes instead of 2.
+- The screenshot's button on the bar is always the same size: a tiny copy of the picture, whole and in its own shape, with "Screenshot" beside it ("Image" for a picture you copied).
+- In an app that doesn't take pictures from keyboards, tapping the screenshot copies it instead, so you can press and hold the text box and Paste.
+- Sign-in codes: a code in an email is offered too, when the email's notification shows it (Gmail, Outlook and other mail apps show the start of the email). Older messages in a conversation, and account or order numbers, are no longer mistaken for a new code.
+
 ## 1.52 · 2026-11-03
 - Voice messages and text you share to Tokalot now land on Home with your dictations instead of on the Notes page, since you often share them just to read or listen. Tap one to open it big, with the player, Summary and Timeline as before.
 - Move to Notes (on Home, or in the ⋮ menu of an opened one) files a shared message in Notes when you want to keep it. Move to Home sends it back.
