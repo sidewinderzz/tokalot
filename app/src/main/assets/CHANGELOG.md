@@ -7,7 +7,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 -->
 
 ## 1.55 · 2026-11-05
-- Voice notes have a speed wheel. Tap the speed button under a note and flick the wheel to any speed from 0.5× to 4×, in steps of 0.1. Hold the button to go back to 1×.
+- Voice notes have a speed wheel. Press the speed button under a note and drag up or down: it stretches into a wheel, from 0.5× to 4× in steps of 0.1, and shrinks back when you let go. A quick flick goes further. Tap the button for Auto speed and 1×.
 - Auto speed (on the same wheel) speeds a voice note up where the person talks slowly or draws words out, and eases off where they talk fast. Pick the pace it aims for, from 180 to 350 words a minute. It never plays slower than 1×.
 - Settings has a search box. Type what you're after in everyday words ("dark", "offline", "speed", "um") and tap a result to jump straight to it.
 - A new Notes page in Settings holds the voice notes beta and the defaults every note starts with: Skip silence, Skip ums, speed, Auto speed and summary length. A note's ⋮ menu can still change Skip silence and Skip ums for just that note.

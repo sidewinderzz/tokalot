@@ -460,8 +460,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     }
 
     /**
-     * The slim bar under the note: play, the position with the time gone and left under it, and the speed. The
-     * speed button opens the speed wheel under it; holding it goes back to 1×.
+     * The slim bar under the note: play, the position with the time gone and left under it, and the speed. Press
+     * the speed button and drag up or down: it stretches into a wheel (see [stretchDrag]). A tap opens Auto speed.
      */
     private fun playerBar(file: java.io.File): View = with(a) {
         playButton = iconButton(R.drawable.ic_play, "Play", 26) { toggle(file) }
@@ -486,16 +486,8 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
         val speedPill = pill(speedLabel(), desc = "Playback speed") {
             if (drawer.visibility == View.VISIBLE) drawer.visibility = View.GONE
             else { fillSpeedDrawer(drawer); drawer.visibility = View.VISIBLE }
-        }.apply {
-            setOnLongClickListener {
-                prefs.noteAutoSpeed = false
-                prefs.noteSpeed = 1f
-                showSpeed()
-                if (drawer.visibility == View.VISIBLE) fillSpeedDrawer(drawer)
-                toast("Back to 1×")
-                true
-            }
         }
+        stretchDrag(speedPill, drawer)
         speedLabelView = speedPill.getChildAt(0) as? TextView
         // The times sit under the ends of the bar's track, so the bar gets the whole width.
         val middle = LinearLayout(this).apply {
@@ -519,51 +511,114 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
     }
 
     /**
-     * Under the player: a wheel to flick to any speed from 0.5× to 4×, Auto speed, and the pace Auto aims for.
-     * Turning the wheel is choosing a speed yourself, so it turns Auto off.
+     * Shelby's "Stretch": pressing the speed button grows it tall in place into a wheel with the speed lit in the
+     * middle; dragging up goes faster, down slower, and letting go shrinks it back. About 6 dp a step, and a quick
+     * flick goes up to twice as far, so 0.5× to 4× fits in one thumb reach. A tap without a drag is a click.
+     */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    private fun stretchDrag(v: android.view.ViewGroup, drawer: LinearLayout): Unit = with(a) {
+        val speeds = NoteMedia.WHEEL_SPEEDS
+        val labels = speeds.map { NoteMedia.speedLabel(it) }
+        val step = dpf(6)
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        var popup: android.widget.PopupWindow? = null
+        var wheel: StretchWheel? = null
+        var acc = 0f; var lastY = 0f; var lastT = 0L; var downY = 0f
+        var i0 = 0; var idx = 0; var moved = false
+        fun close() {
+            val w = wheel ?: return
+            val pw = popup
+            wheel = null; popup = null
+            w.animate().scaleY(v.height.toFloat() / w.height.coerceAtLeast(1)).alpha(0f).setDuration(140)
+                .withEndAction { runCatching { pw?.dismiss() }; v.alpha = 1f }.start()
+        }
+        v.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downY = e.rawY; lastY = e.rawY; lastT = e.eventTime; acc = 0f; moved = false
+                    i0 = speeds.indices.minByOrNull { Math.abs(speeds[it] - speed()) } ?: 5
+                    idx = i0
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    val w = StretchWheel(this, labels, dpf(30), C.TEXT, C.SUB, C.visible(prefs.accent), dpf(18), dpf(14)).apply { exact = i0.toFloat(); on = i0 }
+                    val width = maxOf(v.width + dp(8), dp(70)); val height = dp(238)
+                    val loc = IntArray(2); v.getLocationOnScreen(loc)
+                    val pw = android.widget.PopupWindow(w, width, height, false).apply {
+                        isTouchable = false
+                        isClippingEnabled = false
+                        elevation = dpf(10)
+                        setBackgroundDrawable(android.graphics.drawable.GradientDrawable().apply { cornerRadius = dpf(24); setColor(C.CARD) })
+                    }
+                    runCatching { pw.showAtLocation(v.rootView, Gravity.NO_GRAVITY, loc[0] + v.width / 2 - width / 2, loc[1] + v.height / 2 - height / 2) }
+                    w.pivotY = height / 2f
+                    w.scaleY = v.height.toFloat() / height
+                    w.animate().scaleY(1f).setDuration(200).setInterpolator(android.view.animation.OvershootInterpolator(1.1f)).start()
+                    v.alpha = 0f
+                    popup = pw; wheel = w
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!moved && Math.abs(e.rawY - downY) > slop) moved = true
+                    if (moved) {
+                        val d = lastY - e.rawY // up is faster
+                        val dt = (e.eventTime - lastT).coerceAtLeast(1)
+                        val gain = (Math.abs(d) / dt / (0.5f * resources.displayMetrics.density)).coerceIn(1f, 2f)
+                        acc += d / step * gain
+                        lastY = e.rawY; lastT = e.eventTime
+                        val exact = (i0 + acc).coerceIn(0f, (speeds.size - 1).toFloat())
+                        val n = Math.round(exact)
+                        if (n != idx) {
+                            idx = n
+                            v.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                            prefs.noteAutoSpeed = false
+                            prefs.noteSpeed = speeds[n]
+                            showSpeed()
+                        }
+                        wheel?.let { it.exact = exact; it.on = n; it.invalidate() }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    close()
+                    if (moved) { if (drawer.visibility == View.VISIBLE) fillSpeedDrawer(drawer) }
+                    else if (e.actionMasked == MotionEvent.ACTION_UP) v.performClick()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /**
+     * Under the player, from a tap on the speed button: Auto speed and the pace it aims for, and back to 1×. The
+     * speed itself is picked by dragging the button (see [stretchDrag]).
      */
     private fun fillSpeedDrawer(drawer: LinearLayout): Unit = with(a) {
         drawer.removeAllViews()
-        val speeds = NoteMedia.WHEEL_SPEEDS
-        val wheel = android.widget.NumberPicker(this).apply {
-            minValue = 0
-            maxValue = speeds.size - 1
-            displayedValues = speeds.map { NoteMedia.speedLabel(it) }.toTypedArray()
-            wrapSelectorWheel = false
-            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS // a wheel, not a box to type in
-            value = speeds.indices.minByOrNull { Math.abs(speeds[it] - prefs.noteSpeed) } ?: 5
-            if (android.os.Build.VERSION.SDK_INT >= 29) { textColor = C.TEXT; textSize = dpf(18) }
-            contentDescription = "Speed"
-            setOnValueChangedListener { _, _, i ->
-                prefs.noteSpeed = speeds[i]
-                if (prefs.noteAutoSpeed) { prefs.noteAutoSpeed = false; fillSpeedDrawer(drawer) }
-                showSpeed()
-            }
-        }
         val auto = prefs.noteAutoSpeed
-        val side = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(16) }
-            addView(row(pill(if (auto) "Auto speed: on" else "Auto speed: off", filled = auto) {
-                prefs.noteAutoSpeed = !prefs.noteAutoSpeed
-                autoNow = prefs.noteSpeed.coerceAtLeast(1f)
-                autoAt = 0L
-                showSpeed()
-                fillSpeedDrawer(drawer)
-            }))
-            if (auto) {
-                val wpm = prefs.noteTargetWpm
-                addView(row(pill("Aim for $wpm words a minute ▾") {
-                    val names = NoteMedia.TARGET_WPM.map { paceName(it) }
-                    choose("Auto speed aims for", names, NoteMedia.TARGET_WPM.indexOf(wpm).coerceAtLeast(0)) { i ->
-                        prefs.noteTargetWpm = NoteMedia.TARGET_WPM[i]
-                        fillSpeedDrawer(drawer)
-                    }
-                }))
-                addView(text("Speeds up where the talking is slow and eases off where it's fast. Never slower than 1×.", 13f, C.SUB), lp().margins(this@with, t = 4))
-            } else addView(text("Flick the wheel to pick a speed. Hold the speed button to go back to 1×.", 13f, C.SUB), lp().margins(this@with, t = 4))
-        }
-        drawer.addView(row(wheel, side).apply { gravity = Gravity.CENTER_VERTICAL }, lp())
+        val pills = row(pill(if (auto) "Auto speed: on" else "Auto speed: off", filled = auto) {
+            prefs.noteAutoSpeed = !prefs.noteAutoSpeed
+            autoNow = prefs.noteSpeed.coerceAtLeast(1f)
+            autoAt = 0L
+            showSpeed()
+            fillSpeedDrawer(drawer)
+        }, spacer(wDp = 8), pill("1×") {
+            prefs.noteAutoSpeed = false
+            prefs.noteSpeed = 1f
+            showSpeed()
+            fillSpeedDrawer(drawer)
+        })
+        drawer.addView(pills, lp())
+        if (auto) {
+            val wpm = prefs.noteTargetWpm
+            drawer.addView(row(pill("Aim for $wpm words a minute ▾") {
+                val names = NoteMedia.TARGET_WPM.map { paceName(it) }
+                choose("Auto speed aims for", names, NoteMedia.TARGET_WPM.indexOf(wpm).coerceAtLeast(0)) { i ->
+                    prefs.noteTargetWpm = NoteMedia.TARGET_WPM[i]
+                    fillSpeedDrawer(drawer)
+                }
+            }), lp().margins(this, t = 6))
+            drawer.addView(text("Speeds up where the talking is slow and eases off where it's fast. Never slower than 1×.", 13f, C.SUB), lp().margins(this, t = 4))
+        } else drawer.addView(text("Press the speed button and drag up for faster, down for slower.", 13f, C.SUB), lp().margins(this, t = 6))
     }
 
     private fun paceName(wpm: Int) = when {
@@ -900,5 +955,36 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                 fill(false)
             }
         }.start()
+    }
+}
+
+
+/** The tall wheel the speed button stretches into: every speed in a column, faster below, the current one lit. */
+private class StretchWheel(
+    ctx: android.content.Context, private val labels: List<String>, private val row: Float,
+    private val text: Int, private val sub: Int, private val accent: Int, private val big: Float, private val small: Float,
+) : View(ctx) {
+    var exact = 0f
+    var on = 0
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textAlign = android.graphics.Paint.Align.CENTER }
+    private val band = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    override fun onDraw(c: android.graphics.Canvas) {
+        val cy = height / 2f
+        band.color = (accent and 0x00FFFFFF) or 0x48000000
+        val inset = row * 0.2f
+        c.drawRoundRect(inset, cy - row / 2, width - inset, cy + row / 2, row / 2, row / 2, band)
+        val reach = (cy / row).toInt() + 2
+        val from = maxOf(0, Math.floor(exact.toDouble()).toInt() - reach)
+        val to = minOf(labels.size - 1, Math.ceil(exact.toDouble()).toInt() + reach)
+        for (k in from..to) {
+            val y = cy + (k - exact) * row
+            val far = (Math.abs(y - cy) / cy).coerceAtMost(1f)
+            paint.color = if (k == on) text else sub
+            paint.textSize = if (k == on) big else small
+            paint.isFakeBoldText = k == on
+            paint.alpha = (255 * (1f - far * 0.85f)).toInt().coerceIn(0, 255)
+            c.drawText(labels[k], width / 2f, y - (paint.descent() + paint.ascent()) / 2, paint)
+        }
     }
 }
