@@ -6,6 +6,10 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.56 · 2026-11-05
+- The speed wheel grows upward from the speed button, with the speed you're on right under your thumb and faster speeds above it, so it's no longer cut off at the bottom of the screen.
+- A short What's new shows once after this update, with a slide for each new feature. It's also in Settings › About.
+
 ## 1.55 · 2026-11-05
 - Voice notes have a speed wheel. Press the speed button under a note and drag up or down: it stretches into a wheel, from 0.5× to 4× in steps of 0.1, and shrinks back when you let go. A quick flick goes further. Tap the button for Auto speed and 1×.
 - Auto speed (on the same wheel) speeds a voice note up where the person talks slowly or draws words out, and eases off where they talk fast. Pick the pace it aims for, from 180 to 350 words a minute. It never plays slower than 1×.
