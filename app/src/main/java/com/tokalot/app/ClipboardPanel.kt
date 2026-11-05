@@ -30,6 +30,10 @@ class ClipboardPanel(context: Context, private val listener: Listener) : LinearL
         fun onClipClear()
         fun onClipClose()
         fun onPress(code: Int)
+        /** The [index]th screenshot shown by [showPictures] was tapped. */
+        fun onClipPicture(index: Int)
+        /** "Allow" on the note that screenshots can't be shown without access to photos. */
+        fun onClipAllowPhotos()
     }
 
     private val density = resources.displayMetrics.density
@@ -43,6 +47,9 @@ class ClipboardPanel(context: Context, private val listener: Listener) : LinearL
         set(v) { if (field != v) { field = v; requestLayout() } }
 
     private var items: List<ClipHistory.Item> = emptyList()
+    /** Recent screenshots' little pictures, newest first (null where one couldn't be read). */
+    private var pictures: List<android.graphics.Bitmap?> = emptyList()
+    private var needsAccess = false
     private var enabled = true
     /** The item showing Pin and Delete after a long press. */
     private var menuFor: String? = null
@@ -66,6 +73,14 @@ class ClipboardPanel(context: Context, private val listener: Listener) : LinearL
         menuFor = null
         build()
         scroll.scrollTo(0, 0)
+    }
+
+    /** Recent screenshots for the top of the page ([needsAccess]: Android won't let Tokalot see photos). */
+    fun showPictures(thumbs: List<android.graphics.Bitmap?>, needsAccess: Boolean) {
+        if (thumbs.isEmpty() && pictures.isEmpty() && this.needsAccess == needsAccess) return
+        pictures = thumbs
+        this.needsAccess = needsAccess
+        build()
     }
 
     private fun build() {
@@ -95,6 +110,39 @@ class ClipboardPanel(context: Context, private val listener: Listener) : LinearL
         addView(header, LayoutParams(LayoutParams.MATCH_PARENT, dp(44f)))
 
         list.removeAllViews()
+        if (needsAccess) {
+            val note = LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = GradientDrawable().apply { cornerRadius = dp(10f).toFloat(); setColor(if (t.borderless) t.keyPressed else t.key) }
+                setPadding(dp(12f), dp(8f), dp(4f), dp(8f))
+            }
+            note.addView(label("Screenshots can't show here: Tokalot isn't allowed to see all your photos.", 13f, t.text),
+                LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+            note.addView(label("Allow", 14f, t.accentText, bold = true).apply {
+                setPadding(dp(12f), dp(8f), dp(12f), dp(8f))
+                setOnClickListener { listener.onPress(0); listener.onClipAllowPhotos() }
+            })
+            list.addView(note, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).apply { setMargins(dp(3f), dp(3f), dp(3f), dp(6f)) })
+        } else if (pictures.isNotEmpty()) {
+            // The last hour's screenshots in a row, each whole and in its own shape; tap one to paste it.
+            val row = LinearLayout(context).apply { orientation = HORIZONTAL; setPadding(dp(3f), dp(3f), dp(3f), dp(3f)) }
+            pictures.forEachIndexed { i, bmp ->
+                val frame = FrameLayout(context).apply {
+                    background = GradientDrawable().apply { cornerRadius = dp(10f).toFloat(); setColor(if (t.borderless) t.keyPressed else t.key) }
+                    contentDescription = "Paste screenshot"
+                    setOnClickListener { listener.onPress(0); listener.onClipPicture(i) }
+                }
+                frame.addView(ImageView(context).apply {
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    if (bmp != null) setImageBitmap(bmp)
+                    setPadding(dp(4f), dp(4f), dp(4f), dp(4f))
+                }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                row.addView(frame, LayoutParams(dp(64f), dp(96f)).apply { marginEnd = dp(6f) })
+            }
+            list.addView(android.widget.HorizontalScrollView(context).apply { isHorizontalScrollBarEnabled = false; addView(row) },
+                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
         if (!enabled || items.isEmpty()) {
             val msg = if (!enabled) "The clipboard list is off. Turn it on in Tokalot › Settings › Keyboard."
                 else "Things you copy show up here for an hour.\nLong-press one to pin it so it stays."

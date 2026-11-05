@@ -15,6 +15,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Tokalot Keyboard offers a screenshot you just took on its bar, ready to paste (Settings › Keyboard). -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Declared so "Select photos" (Android 14+) is a choice Tokalot can see and explain: without it Android
+         quietly grants all photos only until Tokalot closes, and new screenshots then stop showing. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <!-- Recording from a Bluetooth headset's mic (Settings › Recording › Microphone): opening the headset's call
          link. Neither asks anything; BLUETOOTH is only needed for that on Android 11 and older. -->

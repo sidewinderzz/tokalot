@@ -1188,23 +1188,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val app = applicationContext
         val since = (System.currentTimeMillis() - IMAGE_FRESH_MS) / 1000
         Thread {
-            val found = runCatching {
-                val cols = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.MIME_TYPE,
-                    MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
-                    if (android.os.Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA)
-                app.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cols,
-                    "${MediaStore.Images.Media.DATE_ADDED} >= ?", arrayOf(since.toString()),
-                    "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { c ->
-                    var hit: Picture? = null
-                    while (hit == null && c.moveToNext()) {
-                        val where = (3..5).joinToString(" ") { c.getString(it).orEmpty() }
-                        if (!isScreenshot(where)) continue
-                        val uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0))
-                        hit = Picture(uri, c.getLong(1) * 1000, c.getString(2) ?: "image/png", thumbnail(app, uri), screenshot = true)
-                    }
-                    hit
-                }
-            }.getOrNull() ?: return@Thread
+            val found = screenshots(app, since, max = 1).firstOrNull() ?: return@Thread
             main.post {
                 val had = image
                 // The same screenshot again: only taken if this time its little picture could be read.
@@ -1214,6 +1198,28 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             }
         }.start()
     }
+
+    /**
+     * Screenshots added since [since] (seconds), newest first, at most [max], each with its little picture. Reads
+     * the photo library, so never on the main thread.
+     */
+    private fun screenshots(app: Context, since: Long, max: Int): List<Picture> = runCatching {
+        val out = ArrayList<Picture>()
+        val cols = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED, MediaStore.Images.Media.MIME_TYPE,
+            MediaStore.Images.Media.DISPLAY_NAME, MediaStore.Images.Media.BUCKET_DISPLAY_NAME,
+            if (android.os.Build.VERSION.SDK_INT >= 29) MediaStore.Images.Media.RELATIVE_PATH else MediaStore.Images.Media.DATA)
+        app.contentResolver.query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cols,
+            "${MediaStore.Images.Media.DATE_ADDED} >= ?", arrayOf(since.toString()),
+            "${MediaStore.Images.Media.DATE_ADDED} DESC")?.use { c ->
+            while (out.size < max && c.moveToNext()) {
+                val where = (3..5).joinToString(" ") { c.getString(it).orEmpty() }
+                if (!isScreenshot(where)) continue
+                val uri = android.content.ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, c.getLong(0))
+                out += Picture(uri, c.getLong(1) * 1000, c.getString(2) ?: "image/png", thumbnail(app, uri), screenshot = true)
+            }
+        }
+        out
+    }.getOrDefault(emptyList())
 
     private fun isScreenshot(where: String) =
         where.contains("screenshot", ignoreCase = true) || where.contains("screen_shot", ignoreCase = true) ||
@@ -1337,6 +1343,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (clips.changed) saveClips()
         c.panelHeight = k.height
         c.show(clips.items.toList(), prefs.kbClipboard)
+        showPanelScreenshots()
         clipOpen = true
         c.visibility = View.VISIBLE
         k.visibility = View.GONE
@@ -1381,6 +1388,43 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     }
 
     override fun onClipClose() = closeClipboard()
+
+    /** Screenshots on the clipboard page, as on Gboard: the last hour's, tap one to paste it. */
+    private var panelPictures: List<Picture> = emptyList()
+
+    private fun showPanelScreenshots() {
+        val c = clipPanel ?: return
+        if (!prefs.kbScreenshots) { panelPictures = emptyList(); c.showPictures(emptyList(), needsAccess = false); return }
+        if (!canSeePhotos()) {
+            // Android took the photo permission back (or "Select photos" was picked, which lasts only while
+            // Tokalot is open): say so here, where the missing screenshots are noticed.
+            panelPictures = emptyList()
+            c.showPictures(emptyList(), needsAccess = true)
+            return
+        }
+        val app = applicationContext
+        val since = (System.currentTimeMillis() - 60 * 60 * 1000L) / 1000
+        Thread {
+            val found = screenshots(app, since, max = 6)
+            main.post {
+                if (!clipOpen) return@post
+                panelPictures = found
+                c.showPictures(found.map { it.thumb }, needsAccess = false)
+            }
+        }.start()
+    }
+
+    override fun onClipPicture(index: Int) {
+        val pic = panelPictures.getOrNull(index) ?: return
+        dismissedImage = pic.uri
+        closeClipboard()
+        pastePicture(pic)
+    }
+
+    override fun onClipAllowPhotos() {
+        closeClipboard()
+        openApp(settings = true)
+    }
 
     private fun saveClips() {
         val text = clips.serialize()

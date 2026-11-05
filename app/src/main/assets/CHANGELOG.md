@@ -6,6 +6,11 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.57 · 2026-11-05
+- Screenshots are on the keyboard's clipboard page now, as on Gboard: the last hour's, newest first, each shown whole. Tap one to paste it.
+- If Android stopped letting Tokalot see your photos, the clipboard page says so, with an Allow button, instead of screenshots just not showing up.
+- On Android 14 and newer, "Select photos" only lets Tokalot see the pictures you picked that time, never a new screenshot. Settings › Keyboard now says when that's the case, and the button takes you to Allow all.
+
 ## 1.56 · 2026-11-05
 - The speed wheel grows upward from the speed button, with the speed you're on right under your thumb and faster speeds above it, so it's no longer cut off at the bottom of the screen.
 - The note's top Copy button is now called Copy text, so it's clear it copies the whole note. The Timeline has its own copy button now, like the Summary.
