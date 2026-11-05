@@ -6,6 +6,10 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.58 · 2026-11-05
+- Autocorrect, word suggestions and swipe typing work now. The keyboard couldn't find its own word list in the installed app, so since the keyboard first shipped it has been running with no words at all: nothing was fixed, nothing was suggested, and swipe couldn't find words. If the list ever fails to load again, the keyboard says so instead of going quiet.
+- Trade-specific words that had been added to the word list (hay equipment, machinery brands) are gone. Tokalot's keyboard is for everyone; your own words still go in your dictionary.
+
 ## 1.57 · 2026-11-05
 - Screenshots are on the keyboard's clipboard page now, as on Gboard: the last hour's, newest first, each shown whole. Tap one to paste it.
 - If Android stopped letting Tokalot see your photos, the clipboard page says so, with an Allow button, instead of screenshots just not showing up.
