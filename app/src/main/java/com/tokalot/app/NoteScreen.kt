@@ -139,9 +139,10 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                     timelineShown = !timelineShown; layout(); if (timelineShown) indexOpened?.invoke()
                 })
             }
-            // The whole text in one tap (a summary has its own copy button on its card).
+            // The note's own text in one tap. The Summary and Timeline cards each have their own copy button,
+            // so this one says what it copies.
             buttons.addView(spacer(wDp = 8))
-            buttons.addView(quietPill(null, R.drawable.ic_copy, "Copy", false) { copy(note.text) })
+            buttons.addView(quietPill(null, R.drawable.ic_copy, "Copy text", false) { copy(note.text) })
         }
         col.addView(buttons, lp().margins(this, b = 8))
         col.addView(summary, lp().margins(this, b = 12))
@@ -889,6 +890,19 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
         litPoint = i
     }
 
+    /** The timeline as plain text: topic headings, then "m:ss  point" lines. */
+    private fun timelineText(points: List<NoteMedia.Point>): String = buildString {
+        var heading = ""
+        for (p in points) {
+            if (p.topic.isNotEmpty() && !p.topic.equals(heading, true)) {
+                heading = p.topic
+                if (isNotEmpty()) append('\n')
+                append(p.topic).append('\n')
+            }
+            append(NoteMedia.clock(p.time)).append("  ").append(p.text).append('\n')
+        }
+    }.trimEnd()
+
     private fun indexCard(segments: List<NoteMedia.Segment>): View = with(a) {
         val c = card(18)
         c.addView(text("Timeline", 16f, bold = true))
@@ -927,7 +941,10 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
                             setOnClickListener { jump(p.time) }
                         })
                     }
-                    body.addView(row(weightSpacer(), pill("Redo") { make(segments, ::fill) }))
+                    body.addView(row(weightSpacer(),
+                        iconButton(R.drawable.ic_copy, "Copy timeline", 20, C.SUB) { copy(timelineText(points)) },
+                        pill("Redo") { make(segments, ::fill) },
+                    ))
                     player?.let { pl -> if (pl.isPlaying || pl.currentPosition > 0) markPoint(pl.currentPosition / 1000.0) }
                 }
             }

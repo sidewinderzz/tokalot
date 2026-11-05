@@ -8,6 +8,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 
 ## 1.56 · 2026-11-05
 - The speed wheel grows upward from the speed button, with the speed you're on right under your thumb and faster speeds above it, so it's no longer cut off at the bottom of the screen.
+- The note's top Copy button is now called Copy text, so it's clear it copies the whole note. The Timeline has its own copy button now, like the Summary.
 - A short What's new shows once after this update, with a slide for each new feature. It's also in Settings › About.
 
 ## 1.55 · 2026-11-05

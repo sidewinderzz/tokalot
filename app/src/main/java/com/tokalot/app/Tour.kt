@@ -57,8 +57,8 @@ object Tour {
             { speedPicture() },
         ),
         Slide(
-            "Copy a whole note",
-            "Copy sits next to Summary and Timeline, so the whole note is one tap away.",
+            "Copy what you need",
+            "Copy text copies the whole note in one tap. The Summary and Timeline each have their own copy button too.",
             { copyPicture() },
         ),
         Slide(
@@ -211,7 +211,7 @@ object Tour {
 
     private fun MainActivity.homePicture(): View = stage(
         noteCard("SHARED · WHATSAPP · 8:12 PM", "“Running late, be there by six”"),
-        noteCard("DICTATION · 7:40 PM", "Pick up hydraulic oil and filters"),
+        noteCard("DICTATION · 7:40 PM", "Pick up milk on the way home"),
         chips(chip("Move to Notes", on = true)),
     )
 
@@ -242,7 +242,7 @@ object Tour {
     }
 
     private fun MainActivity.copyPicture(): View = stage(
-        chips(chip("Summary"), chip("Timeline"), chip("⧉ Copy", on = true)),
+        chips(chip("Summary"), chip("Timeline"), chip("⧉ Copy text", on = true)),
         text("Copied the whole note ✓", 14f).apply {
             gravity = Gravity.CENTER
             background = rounded(C.FIELD, 12)
@@ -259,7 +259,7 @@ object Tour {
     private fun MainActivity.listenPicture(): View = stage(
         text("Share a link, PDF or Word file", 13f, C.SUB).apply { gravity = Gravity.CENTER },
         chips(chip("Copy link"), chip("Listen in Tokalot", on = true), chip("Save")),
-        noteCard("READ ALOUD · 12 MIN", "Spring planter calibration guide"),
+        noteCard("READ ALOUD · 12 MIN", "Why we need more sleep"),
     )
 
     private fun MainActivity.keysPicture(): View = stage(

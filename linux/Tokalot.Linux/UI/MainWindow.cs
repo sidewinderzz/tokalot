@@ -1736,7 +1736,7 @@ public sealed partial class MainWindow : Window
             buttons.Children.Add(timeline);
         }
         // The whole text in one click (a summary has its own copy button on its panel).
-        var copyPill = NotePill("copy", "Copy", false, () => { _ = TextInjector.Copy(note.Text); Toast("Copied"); });
+        var copyPill = NotePill("copy", "Copy text", false, () => { _ = TextInjector.Copy(note.Text); Toast("Copied"); });
         copyPill.Margin = new Thickness(8, 0, 0, 0);
         buttons.Children.Add(copyPill);
         col.Children.Add(Spaced(buttons, 0, 0, 0, 14));
@@ -1883,6 +1883,24 @@ public sealed partial class MainWindow : Window
         return Ui.Card(box, 22);
     }
 
+    /** The timeline as plain text: topic headings, then "m:ss  point" lines. */
+    private static string TimelineText(List<NoteMedia.Point> points)
+    {
+        var b = new System.Text.StringBuilder();
+        var heading = "";
+        foreach (var p in points)
+        {
+            if (p.Topic.Length > 0 && !p.Topic.Equals(heading, StringComparison.OrdinalIgnoreCase))
+            {
+                heading = p.Topic;
+                if (b.Length > 0) b.Append('\n');
+                b.Append(p.Topic).Append('\n');
+            }
+            b.Append(NoteMedia.Clock(p.Time)).Append("  ").Append(p.Text).Append('\n');
+        }
+        return b.ToString().TrimEnd();
+    }
+
     private Control TimelinePanel(long id, NoteImport.Info? info, List<NoteMedia.Segment> segments, string? busy)
     {
         var box = Ui.Stack(Ui.Text("Timeline", 15.5, bold: true),
@@ -1917,8 +1935,8 @@ public sealed partial class MainWindow : Window
                 box.Children.Add(Ui.Keys(row, () => NotePlay(at), NoteMedia.Clock(p.Time) + ", " + p.Text));
             }
             var redo = Ui.Button("Redo", () => RunNote(id, "Making the timeline…", () => NoteImport.MakeIndex(S, id, segments)));
-            redo.Margin = new Thickness(0, 10, 0, 0);
-            box.Children.Add(redo);
+            var copy = Ui.Button("Copy", () => { _ = TextInjector.Copy(TimelineText(points)); Toast("Copied"); }, icon: "copy");
+            box.Children.Add(Spaced(Ui.Row(copy, redo), 0, 10, 0, 0));
         }
         return Ui.Card(box, 22);
     }
