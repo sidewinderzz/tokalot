@@ -206,7 +206,7 @@
    "release": "desktop-v1.0.5"
   },
   "602542714": {
-   "count": 4,
+   "count": 5,
    "name": "Tokalot-1.1.0-full.nupkg",
    "release": "desktop-v1.1.0"
   },
@@ -216,7 +216,7 @@
    "release": "desktop-v1.1.0"
   },
   "602542718": {
-   "count": 3,
+   "count": 4,
    "name": "TokalotSetup.exe",
    "release": "desktop-v1.1.0"
   },
@@ -1011,7 +1011,7 @@
    "release": "v1.35"
   },
   "654874159": {
-   "count": 1,
+   "count": 2,
    "name": "Tokalot-linux-x64-0.8.0.tar.gz",
    "release": "linux-v0.8.0"
   },
@@ -2711,7 +2711,7 @@
    "release": "desktop"
   },
   "712190409": {
-   "count": 8,
+   "count": 9,
    "name": "Tokalot-v1.56.apk",
    "release": "v1.56"
   },
@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 33,
+   "count": 37,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2776,6 +2776,6 @@
    "release": "android-beta"
   }
  },
- "total": 1304,
- "updated": "2026-11-06T10:54:06Z"
+ "total": 1312,
+ "updated": "2026-11-06T17:58:27Z"
 }
