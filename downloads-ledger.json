@@ -811,7 +811,7 @@
    "release": "v1.27"
   },
   "626050492": {
-   "count": 1,
+   "count": 2,
    "name": "Tokalot-linux-x64-0.5.2.tar.gz",
    "release": "linux-v0.5.2"
   },
@@ -1911,7 +1911,7 @@
    "release": "android-beta"
   },
   "670391959": {
-   "count": 1,
+   "count": 2,
    "name": "Tokalot-linux-x64-0.15.0.tar.gz",
    "release": "linux-v0.15.0"
   },
@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 54,
+   "count": 56,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2776,6 +2776,6 @@
    "release": "android-beta"
   }
  },
- "total": 1334,
- "updated": "2026-11-07T16:27:16Z"
+ "total": 1338,
+ "updated": "2026-11-07T20:53:32Z"
 }
