@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 74,
+   "count": 77,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2776,6 +2776,6 @@
    "release": "android-beta"
   }
  },
- "total": 1359,
- "updated": "2026-11-08T15:13:38Z"
+ "total": 1362,
+ "updated": "2026-11-08T19:43:25Z"
 }
