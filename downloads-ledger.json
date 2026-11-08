@@ -856,7 +856,7 @@
    "release": "mac-v0.3.2"
   },
   "627155527": {
-   "count": 2,
+   "count": 3,
    "name": "Tokalot-linux-x64-0.5.3.tar.gz",
    "release": "linux-v0.5.3"
   },
@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 64,
+   "count": 74,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2776,6 +2776,6 @@
    "release": "android-beta"
   }
  },
- "total": 1348,
- "updated": "2026-11-08T07:22:58Z"
+ "total": 1359,
+ "updated": "2026-11-08T15:13:38Z"
 }
