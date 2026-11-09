@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 81,
+   "count": 85,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2756,7 +2756,7 @@
    "release": "desktop"
   },
   "712191683": {
-   "count": 4,
+   "count": 7,
    "name": "releases.win-arm64.json",
    "release": "desktop"
   },
@@ -2774,8 +2774,13 @@
    "count": 2,
    "name": "Tokalot-beta.apk",
    "release": "android-beta"
+  },
+  "726293266": {
+   "count": 1,
+   "name": "Tokalot-beta.apk",
+   "release": "android-beta"
   }
  },
- "total": 1366,
- "updated": "2026-11-08T23:43:32Z"
+ "total": 1374,
+ "updated": "2026-11-09T06:32:02Z"
 }
