@@ -549,12 +549,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     private fun enter() {
         val ic = currentInputConnection ?: return
-        if (word.isNotEmpty()) endWord("", correct = true)
-        autoSpaced = false; phantomSpace = false; lastCorrection = null
         val ei = currentInputEditorInfo
         val action = (ei?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
         val noAction = ei == null || ei.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0 ||
             action == EditorInfo.IME_ACTION_NONE || action == EditorInfo.IME_ACTION_UNSPECIFIED
+        // Send, Search, Go and Done send the word as it stands: a fix made at that moment would go out
+        // unseen. A new line fixes the word like a space does.
+        if (word.isNotEmpty()) { if (noAction) endWord("", correct = true) else commitWord() }
+        autoSpaced = false; phantomSpace = false; lastCorrection = null
         when {
             !noAction -> ic.performEditorAction(action)
             ei != null && ei.inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_CLASS_TEXT &&
@@ -578,7 +580,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
                 ic.commitText(c.typed + c.sep, 1)
                 ic.endBatchEdit()
                 keepAsTyped = c.typed
-                remember(c.typed, c.prev, kept = true)
+                remember(c.typed, c.prev, kept = true, chosen = true)
                 showStrip()
                 return
             }
@@ -678,7 +680,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
      * and isn't recorded, so it never turns into a "word of yours" that is no longer corrected, nor gets
      * learned into the dictionary that syncs.
      */
-    private fun remember(w: String, prev: String?, kept: Boolean) {
+    /** [chosen]: the user insisted on it (undid its correction, or tapped it on the bar): learned straight away. */
+    private fun remember(w: String, prev: String?, kept: Boolean, chosen: Boolean = false) {
         if (!personal) return
         val h = history ?: return
         val list = words ?: return
@@ -690,7 +693,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         }
         if (!kept && list.probOf(w) < 0) return
         h.used(w, prev)
-        if (kept && KeyboardLearn.worth(w, list) && h.count(w) >= KeyboardLearn.TIMES) learn(w)
+        if (kept && KeyboardLearn.worth(w, list) && (chosen || h.count(w) >= KeyboardLearn.TIMES)) learn(w)
     }
 
     private fun learn(w: String) {
@@ -772,7 +775,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             ic.commitText("$s ", 1)
             // Tapping what was typed on the bar is choosing it: it counts towards learning it.
             if (s == typed) keepAsTyped = typed
-            remember(s, prev, kept = s == typed)
+            remember(s, prev, kept = s == typed, chosen = s == typed)
             resetWord()
         } else {
             val prev = prevWord(ic.getTextBeforeCursor(64, 0))
