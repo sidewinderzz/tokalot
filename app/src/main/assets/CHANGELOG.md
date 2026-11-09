@@ -7,7 +7,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 -->
 
 ## 1.59 · 2026-11-09
-- The keyboard's Send, Search, Go and Done keys send the word as you typed it, as on Gboard, so a fix can no longer slip into a message you couldn't check first. A new line still fixes the word like a space does.
+- The keyboard's Send, Search, Go and Done keys send the word as you typed it, so a fix can no longer slip into a message you couldn't check first. A new line still fixes the word like a space does.
 - Autocorrect guesses less: a word the keyboard doesn't know stays as you typed it unless a correction is close and clearly likely. App names, tech words and new slang ("venmo", "kotlin", "rizz") no longer turn into other words, and a close everyday word now beats a rare name ("chaim" becomes "chain", not "Chaim").
 - About 170 everyday words the old list lacked are in: apps, tech words and slang (login, dropdown, wifi, airpods, selfie, tiktok, venmo, lowkey and more).
 - Two words run together are only split when they're a very common pair ("ofthe", "haveto"), not a compound or a name ("squarespace", "redis").

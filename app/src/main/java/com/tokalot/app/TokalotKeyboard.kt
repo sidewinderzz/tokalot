@@ -553,7 +553,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val action = (ei?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
         val noAction = ei == null || ei.imeOptions and EditorInfo.IME_FLAG_NO_ENTER_ACTION != 0 ||
             action == EditorInfo.IME_ACTION_NONE || action == EditorInfo.IME_ACTION_UNSPECIFIED
-        // Send, Search, Go and Done send the word as it stands, as on Gboard: a fix made at that moment goes out
+        // Send, Search, Go and Done send the word as it stands: a fix made at that moment would go out
         // unseen. A new line fixes the word like a space does.
         if (word.isNotEmpty()) { if (noAction) endWord("", correct = true) else commitWord() }
         autoSpaced = false; phantomSpace = false; lastCorrection = null
