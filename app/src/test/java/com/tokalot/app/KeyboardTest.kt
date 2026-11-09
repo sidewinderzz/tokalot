@@ -56,8 +56,10 @@ class KeyboardTest {
         assertEquals("of the", fixed("ofthe"))
         assertEquals("in the", fixed("inthe"))
         assertEquals("going to", fixed("goingto"))
-        // B, N, V, C and M sit above the space bar: a thumb meant for space lands on them.
-        assertEquals("the dog", fixed("thebdog"))
+        assertEquals("have to", fixed("haveto"))
+        // Compounds and names stay as typed: only common pairs are split.
+        assertNull(fixed("squarespace"))
+        assertNull(fixed("redis"))
         assertEquals("a lot", fixed("alot"))
         // An ordinary typo is still a typo, not two words.
         assertEquals("because", fixed("becuase"))
@@ -80,6 +82,14 @@ class KeyboardTest {
         assertEquals("the", fixed("theb"))
         assertEquals("supposed", fixed("supoosed"))
         assertEquals("I", fixed("i"))
+    }
+
+    @Test fun newWordsAreLeftAlone() {
+        // A word the list doesn't know stays as typed unless a correction is close and likely.
+        for (w in listOf("kotlin", "venmo", "nginx", "supabase", "tokalot", "gradle", "async", "webhook", "lyft", "rizz")) assertNull(w, fixed(w))
+        // A name doesn't beat a close everyday word.
+        assertEquals("chain", fixed("chaim"))
+        assertEquals("human", fixed("hunan"))
     }
 
     @Test fun contextHelps() {

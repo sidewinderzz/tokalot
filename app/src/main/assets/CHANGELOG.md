@@ -6,6 +6,13 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.59 · 2026-11-09
+- The keyboard's Send, Search, Go and Done keys send the word as you typed it, as on Gboard, so a fix can no longer slip into a message you couldn't check first. A new line still fixes the word like a space does.
+- Autocorrect guesses less: a word the keyboard doesn't know stays as you typed it unless a correction is close and clearly likely. App names, tech words and new slang ("venmo", "kotlin", "rizz") no longer turn into other words, and a close everyday word now beats a rare name ("chaim" becomes "chain", not "Chaim").
+- About 170 everyday words the old list lacked are in: apps, tech words and slang (login, dropdown, wifi, airpods, selfie, tiktok, venmo, lowkey and more).
+- Two words run together are only split when they're a very common pair ("ofthe", "haveto"), not a compound or a name ("squarespace", "redis").
+- A word is learned the moment you undo its correction or tap it on the bar, instead of after the second time.
+
 ## 1.58 · 2026-11-05
 - Autocorrect, word suggestions and swipe typing work now. The keyboard couldn't find its own word list in the installed app, so since the keyboard first shipped it has been running with no words at all: nothing was fixed, nothing was suggested, and swipe couldn't find words. If the list ever fails to load again, the keyboard says so instead of going quiet.
 - Trade-specific words that had been added to the word list (hay equipment, machinery brands) are gone. Tokalot's keyboard is for everyone; your own words still go in your dictionary.

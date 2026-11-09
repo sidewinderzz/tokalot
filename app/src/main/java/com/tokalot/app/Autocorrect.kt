@@ -25,6 +25,11 @@ import kotlin.math.sqrt
  */
 class Autocorrect(private val words: KeyboardWords, private val history: TypingHistory? = null) {
 
+    /** How good a correction's score must be to replace a word the list doesn't know (see [choose]). */
+    var sureEnough = SURE_ENOUGH
+    /** A correction this close (a slip onto a neighbouring key or two, letters swapped) is made whatever its score. */
+    var closeEnough = CLOSE_ENOUGH
+
     /** Where each letter's key sits, in key widths (rows are [ROW_ASPECT] key widths apart). */
     var centers: Map<Char, FloatArray> = Qwerty.centers
 
@@ -49,9 +54,14 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
         private const val DEL = 0.9f
         private const val TRANSPOSE = 0.6f
         /** How much likelier an ordinary word must be to beat a name with exactly the typed letters. */
-        private const val NAME_EDGE = 3.5f
+        private const val NAME_EDGE = 1f
         /** What a missed space costs, against a single word; more when a letter was typed in its place. */
         private const val SPLIT = 2f
+        /** A correction's score (word frequency / 16 minus 3.5 per edit, plus context) needed to replace unknown typing. */
+        const val SURE_ENOUGH = 6f
+        const val CLOSE_ENOUGH = 1.0f
+        /** A split ("of the") must score this well: only very common pairs, not compounds ("low key", "block chain"). */
+        private const val SPLIT_SURE = 7.75f
         private const val SPACE_ROW = "cvbnm"
         private const val VOWELS = "aeiou"
         private const val VOWEL = 0.65f
@@ -217,9 +227,12 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
         if (name != null && (bestOther == null || name.wholeScore + NAME_EDGE >= bestOther.wholeScore)) return words.form(name.id)
         // Two words run together.
         val split = split(typed, prev)
-        if (split != null && (bestOther == null || split.second > bestOther.wholeScore + 1f)) return split.first
+        if (split != null && split.second >= SPLIT_SURE && (bestOther == null || split.second > bestOther.wholeScore + 1f)) return split.first
         if (typed.length < 2) return null
-        return bestOther?.let { words.form(it.id) }
+        // Something new (a name, an app, a technical term) is as likely as a fairly rare word: a correction has
+        // to be clearly likelier than that, or what was typed stays ("kotlin" isn't "kaolin", "venmo" isn't "venom").
+        val best = bestOther ?: return null
+        return if (best.whole!! <= closeEnough || best.wholeScore >= sureEnough) words.form(best.id) else null
     }
 
     /**
@@ -232,6 +245,8 @@ class Autocorrect(private val words: KeyboardWords, private val history: TypingH
         var best: Pair<String, Float>? = null
         fun consider(a: String, b: String, penalty: Float) {
             val l = common(a) ?: return
+            // "a" and "I" start a word pair, never end one ("canva" isn't "can a").
+            if (b.length == 1) return
             val r = common(b) ?: return
             var s = min(words.probOf(l), words.probOf(r)) / 16f - penalty + context(l, r)
             if (prev != null) s += 0.5f * context(prev, l)
