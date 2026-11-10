@@ -1,8 +1,12 @@
 # Tokalot keyboard: additions on top of en_US.txt.gz (which is generated from the AOSP list, see
 # tools/keyboard/make_wordlist.py). Edited by hand. A word here is added, or raised to this probability
-# (0-255; nothing is lowered). "ok" after it clears the list's "possibly offensive" mark.
-#   word<TAB>probability[<TAB>ok]
-# After "sus	105
+# (0-255; nothing is lowered). After it, "ok" clears the list's "possibly offensive" mark and "x" sets it
+# (the word is accepted as typed, never suggested).
+#   word<TAB>probability[<TAB>ok|x]
+# Then "=shortcuts": typed<TAB>replacement<TAB>strength (14+ always replaces something that isn't a word),
+# and "=next": word<TAB>next<TAB>next... (what commonly follows a word, likeliest first; these go in front of
+# the generated list's own).
+sus	105
 rizz	105
 bae	105
 yeet	105
@@ -32,7 +36,6 @@ matcha	105
 boba	105
 keto	105
 vegan	105
-=shortcuts": typed<TAB>replacement<TAB>strength (14+ always replaces something that isn't a word).
 ur	110
 u	120
 ya	100	ok
@@ -200,6 +203,100 @@ keyboards	110
 scrollbar	110
 timestamp	110
 timestamps	110
+# Everyday texting words the 2014 list lacks (general chat, nothing tied to a trade or a region).
+jk	100
+gtg	100
+g2g	100
+ily	100
+ilysm	100
+wya	100
+tmr	100
+tmrw	100
+tmw	100
+ofc	100
+idgaf	100	x
+wdym	100
+frfr	100
+istg	100
+iykyk	100
+hmu	100
+wbu	100
+bff	100
+iirc	100
+tldr	100
+ftw	100
+gg	100
+ez	100
+lmfao	100	x
+bruh	100
+yw	100
+nbd	100
+srsly	100
+obvi	100
+vid	100
+vids	100
+convo	100
+bday	100
+gf	100
+kk	100
+hm	100
+ew	100
+aww	100
+meh	100
+vibing	100
+nocap	100
+deadass	100
+finna	100
+tryna	100
+boutta	100
+wassup	100
+hiya	100
+heya	100
+yolo	100
+facetimed	100
+venmoed	100
+screenshotted	100
+unfollow	100
+unfriend	100
+retweet	100
+delulu	100
+bussin	100
+periodt	100
+ick	100
+situationship	100
+glowup	100
+goated	100
+idc	100
+ngl	100
+fr	100
+fyi	100
+asap	100
+irl	100
+pic	100
+pics	100
+fam	100
+bro	100
+sis	100
+lil	100
+huh	100
+uh	100
+um	100
+ugh	100
+yay	100
+woo	100
+oops	100
+whoa	100
+wow	100
+gotcha	100
+sup	100
+congrats	100
+texted	100
+texting	100
+googled	100
+emoji	100
+meme	100
+vibe	100
+vibes	100
 =shortcuts
 definatly	definitely	15
 definately	definitely	15
@@ -237,3 +334,88 @@ andthe	and the	15
 forthe	for the	15
 iam	I am	15
 alot	a lot	15
+wenesday	Wednesday	15
+wensday	Wednesday	15
+wendsday	Wednesday	15
+wednsday	Wednesday	15
+wedensday	Wednesday	15
+thrusday	Thursday	15
+thurday	Thursday	15
+tuseday	Tuesday	15
+teusday	Tuesday	15
+saterday	Saturday	15
+satuday	Saturday	15
+febuary	February	15
+feburary	February	15
+=next
+I	don't	can	know	think	have	will	was	am	just	need	want	love	mean	can't	didn't	would
+you	can	are	know	have	want	need	too	don't	guys	got	were	will	think	should
+we	can	are	have	need	should	will	were	could	got	just
+they	are	have	were	will	can	don't	said	just
+he	is	was	said	has	will	just	can	didn't
+she	is	was	said	has	will	just	can	didn't
+it	is	was	will	would	works	looks	just	should	doesn't
+my	way	phone	house	mom	dad	name	bad	own	friend	car	wife	husband	place	day	fault
+your	way	phone	house	mom	dad	name	own	call	place	day	time
+on	my	the	a	your	it	his	her	time
+in	the	a	my	fact	case	this	an	your	there
+at	the	home	work	least	all	a	my	this
+to	the	be	do	get	go	see	have	me	you	make
+for	the	a	me	you	sure	now	it	this	my	your
+of	the	a	my	course	it	them	this	those	us	your
+with	the	a	you	me	my	it	that	this	them	us
+do	you	it	not	that	we	they	I
+did	you	it	not	that	he	she	they	I	we
+can	you	I	we	be	do	get	see
+could	you	be	have	I	we	not
+would	you	be	have	like	love	it	not
+will	be	you	do	have	get	not	let
+should	be	I	have	we	you	not
+are	you	we	they	not	the	going	there
+is	it	that	there	the	a	not	this	he	she
+was	the	a	it	going	just	not	there	thinking
+have	a	to	you	been	the	any	fun
+has	been	a	the	to	it
+had	a	to	the	been	it
+be	there	a	the	able	back	good	great	home	late	fine	sure
+been	a	the	there	working	thinking	trying
+thank	you	God	goodness
+thanks	for	so	a	again	though
+see	you	if	it	the	what	how	that
+let	me	us	them	you	him	her	it
+let's	go	do	get	see	just
+love	you	it	the	that	this	to
+miss	you	it	the	him	her
+call	me	you	him	her	it	them
+tell	me	you	him	her	them	us
+text	me	you	him	her	them
+send	me	it	you	them	him	her	the
+give	me	it	you	them	him	her	us
+going	to	on	out	back	home	well
+want	to	it	a	the	you	me	some
+need	to	a	it	the	you	some	help
+have	to	a	you	been	the	any	fun
+got	it	a	the	to	home	my	your
+get	it	a	the	to	back	out	home	there	some
+how	are	is	do	about	much	many	was	did	long
+what	is	are	do	about	time	did	was	the	if	happened
+when	you	I	we	the	is	are	do	did	it
+where	are	is	do	did	you	the	we
+why	are	is	do	did	not	would	don't
+who	is	are	was	did	knows
+good	morning	night	luck	job	to	idea	one	for	thing	time
+sounds	good	great	like	fun	perfect
+no	problem	worries	way	one	idea	I	need	thanks
+not	sure	a	the	yet	really	going	too	sure
+just	a	got	the	to	wanted	let	saw	like	in
+so	I	much	we	that	you	it	the	sorry	far	good
+too	much	many	late	bad	long
+very	much	good	well	nice
+a	lot	few	little	good	bit	couple	great	new	while
+the	same	best	way	other	first	one	time	only	whole	rest	next	last
+this	is	one	morning	week	weekend	time	year	afternoon	evening
+that	is	was	the	I	you	we	would	sounds	works	one
+next	week	time	year	month	to	weekend
+last	night	week	year	time	month	one	weekend
+right	now	here	there	away	after	before	back
+as	well	soon	a	long	much	the	far	I

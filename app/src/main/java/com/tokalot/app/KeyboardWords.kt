@@ -36,15 +36,22 @@ class KeyboardWords private constructor() {
 
     private val nextWords = HashMap<String, Array<String>>()
     private val shortcuts = HashMap<String, Pair<String, Int>>()
+    /** Words the user asked not to be suggested (see [hide]). */
+    private val hidden = HashSet<Int>()
 
     val size get() = forms.size
 
     companion object {
         /** A word added by the user (Tokalot's dictionary, or learned while typing) counts as this common. */
         const val USER_PROB = 170
+        /** A word the keyboard learned from typing counts as an ordinary word, so it doesn't start winning other typos. */
+        const val LEARNED_PROB = 110
 
-        /** The word list, plus the hand-kept additions in [extra] (en_US_extra.txt: words, then "=shortcuts"). */
-        fun load(reader: BufferedReader, extra: BufferedReader? = null): KeyboardWords {
+        /**
+         * The word list, plus the additions in each of [extras]: en_US_extra.txt (hand-kept words, "=shortcuts"
+         * and "=next") and en_US_chat.txt (how common words are in conversation).
+         */
+        fun load(reader: BufferedReader, vararg extras: BufferedReader?): KeyboardWords {
             val w = KeyboardWords()
             var section = 0
             val pending = ArrayList<Triple<String, Int, Boolean>>(170_000)
@@ -71,9 +78,16 @@ class KeyboardWords private constructor() {
             w.offensive = BooleanArray(pending.size + 64)
             w.sameKey = IntArray(pending.size + 64) { -1 }
             for ((form, p, x) in pending) w.add(form, p, x)
-            extra?.let { w.addExtra(it) }
+            val next = ArrayList<List<String>>()
+            for (e in extras) e?.let { w.addExtra(it, next) }
             // The dictionary lists next words in no useful order: commonest first.
             for ((k, list) in w.nextWords) w.nextWords[k] = list.sortedByDescending { w.probOf(it) }.toTypedArray()
+            // The hand-kept ones are in order already, and go in front.
+            for (t in next) {
+                val k = if (w.nextWords.containsKey(t[0])) t[0] else t[0].lowercase()
+                val mine = t.subList(1, t.size)
+                w.nextWords[k] = (mine + (w.nextWords[k]?.filter { old -> mine.none { it.equals(old, ignoreCase = true) } } ?: emptyList())).toTypedArray()
+            }
             return w
         }
 
@@ -90,17 +104,21 @@ class KeyboardWords private constructor() {
     }
 
     /** Words added or made more common, and more fixed replacements, on top of the generated list. */
-    private fun addExtra(reader: BufferedReader) {
-        var shortcutsNow = false
+    private fun addExtra(reader: BufferedReader, next: MutableList<List<String>>) {
+        var section = 0
         reader.forEachLine { line ->
             if (line.isEmpty() || line.startsWith("#")) return@forEachLine
-            if (line == "=shortcuts") { shortcutsNow = true; return@forEachLine }
+            if (line == "=shortcuts") { section = 1; return@forEachLine }
+            if (line == "=next") { section = 2; return@forEachLine }
             val t = line.split('\t')
-            if (shortcutsNow) {
-                if (t.size >= 3) shortcuts[t[0].lowercase()] = t[1] to (t[2].toIntOrNull() ?: 0)
-            } else if (t.size >= 2) {
-                val id = add(t[0], t[1].toIntOrNull() ?: 0, false)
-                if (id >= 0 && t.size > 2 && t[2] == "ok") offensive[id] = false
+            when {
+                section == 1 -> if (t.size >= 3) shortcuts[t[0].lowercase()] = t[1] to (t[2].toIntOrNull() ?: 0)
+                section == 2 -> if (t.size >= 2) next += t
+                t.size >= 2 -> {
+                    val id = add(t[0], t[1].toIntOrNull() ?: 0, false)
+                    if (id >= 0 && t.size > 2 && t[2] == "ok") offensive[id] = false
+                    if (id >= 0 && t.size > 2 && t[2] == "x") offensive[id] = true
+                }
             }
         }
     }
@@ -161,12 +179,47 @@ class KeyboardWords private constructor() {
         return nodes++
     }
 
-    /** Adds the user's own words (Tokalot's dictionary, words learned while typing), as common words. */
-    fun addUserWords(words: Collection<String>) {
+    /** Adds the user's own words: Tokalot's dictionary as common words, or with another [prob] (learned while typing). */
+    fun addUserWords(words: Collection<String>, prob: Int = USER_PROB) {
         for (w in words) {
             val t = w.trim()
             if (t.isEmpty() || t.contains(' ') || t.length > 40) continue
-            add(t, USER_PROB, false)
+            add(t, prob, false)
+        }
+    }
+
+    /** Takes a word the user added back out (exactly this form), so it's neither known nor suggested. */
+    fun remove(form: String): Boolean {
+        val node = find(key(form))
+        if (node < 0) return false
+        var before = -1
+        var i = nodeWord[node]
+        while (i >= 0 && forms[i] != form) { before = i; i = sameKey[i] }
+        if (i < 0) return false
+        if (before < 0) nodeWord[node] = sameKey[i] else sameKey[before] = sameKey[i]
+        sameKey[i] = -1
+        probs[i] = 0
+        hidden.remove(i)
+        return true
+    }
+
+    /** Stops [word] (any capitalisation) being suggested or corrected to; typed, it is still a word. */
+    fun hide(word: String) {
+        val lower = word.lowercase()
+        for (id in formsOf(key(word))) if (forms[id].lowercase() == lower && !offensive[id]) { offensive[id] = true; hidden += id }
+    }
+
+    /** Undoes [hide]. */
+    fun unhide(word: String) {
+        val lower = word.lowercase()
+        for (id in formsOf(key(word))) if (forms[id].lowercase() == lower && hidden.remove(id)) offensive[id] = false
+    }
+
+    /** Adds words with how common each is (0-255): what the user says in dictations (see [SpokenWords.unknown]). */
+    fun addWords(words: Collection<Pair<String, Int>>) {
+        for ((w, prob) in words) {
+            if (w.isEmpty() || w.contains(' ') || w.length > 40) continue
+            add(w, prob.coerceIn(1, 255), false)
         }
     }
 

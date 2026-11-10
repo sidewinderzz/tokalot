@@ -51,7 +51,7 @@ object ListenText {
         return Regex("content=[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE).find(tag)?.groupValues?.get(1)?.let { clean(it) }?.takeIf { it.isNotEmpty() }
     }
 
-    /** "How to calibrate a drill | Farm Journal" → "How to calibrate a drill" when the site is Farm Journal. */
+    /** "How to calibrate a drill | Maker Journal" → "How to calibrate a drill" when the site is Maker Journal. */
     private fun stripSite(title: String, site: String): String {
         if (site.isEmpty()) return title
         for (sep in listOf(" | ", " - ", " – ", " — ", " · ")) {

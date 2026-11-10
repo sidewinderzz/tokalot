@@ -25,7 +25,13 @@ Keyboard word list (English, from the Android Open Source Project's LatinIME dic
 https://android.googlesource.com/platform/packages/inputmethods/LatinIME
 Copyright (C) The Android Open Source Project
 Licensed under the Apache License, Version 2.0: https://www.apache.org/licenses/LICENSE-2.0
-Changed for Tokalot: converted to a word list, and a few texting, farm and trade words added.
+Changed for Tokalot: converted to a word list, and everyday texting, app and tech words added.
+
+
+Keyboard word ranks for conversation (FrequencyWords by Hermit Dave, from OpenSubtitles 2018)
+https://github.com/hermitdave/FrequencyWords · https://opus.nlpl.eu/OpenSubtitles2018.php
+Licensed under the Creative Commons Attribution-ShareAlike 4.0 International licence: https://creativecommons.org/licenses/by-sa/4.0/
+Changed for Tokalot: turned into how common each word already in the keyboard's list is in conversation. That one file (keyboard/en_US_chat.txt) is shared under the same CC BY-SA 4.0 licence; the rest of Tokalot stays under the MIT licence.
 
 
 Swipe typing (adapted from FlorisBoard's StatisticalGlideTypingClassifier)
