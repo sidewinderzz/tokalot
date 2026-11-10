@@ -319,6 +319,10 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     var symbolHints = true
 
     /** The keys' height against the usual (Settings' keyboard height, 0.8-1.3). */
+    /** True while a word is being typed (space is then the likely next key, see [KeyboardPage.keyAt]). */
+    var wordInProgress: () -> Boolean = { false }
+    private fun spaceReach() = if (wordInProgress()) Layouts.SPACE_REACH else Layouts.SPACE_REACH_IDLE
+
     var heightScale = 1f
         set(v) { if (field != v) { field = v; requestLayout(); invalidate() } }
 
@@ -343,9 +347,15 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
             return out
         }
         val micLeft = KeyboardToolbar.micOnLeft(toolbar)
-        val from = if (micLeft) 2 * side else side
+        var from = if (micLeft) 2 * side else side
         val to = if (micLeft) w else w - side
         if (micLeft) out += Part(side, 2 * side, TOOL, KeyboardToolbar.MIC)
+        // The clipboard stays one tap away while suggestions fill the bar (if it's on the toolbar at all).
+        if (message == null && KeyboardToolbar.CLIPBOARD in toolbar) {
+            val clip = stripHeight
+            out += Part(from, from + clip, TOOL, KeyboardToolbar.CLIPBOARD)
+            from += clip
+        }
         when {
             message != null -> out += Part(from, to, SLOT_MESSAGE)
             chips -> {
@@ -645,7 +655,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 }
                 // A second finger down: the first one's key is typed now (fast two-thumb typing).
                 for (p in pointers.values) if (!p.fired && !p.gliding && !p.sliding && !p.deleting && menu == null) fire(p)
-                val key = page.keyAt(toPageX(x), toPageY(y))
+                val key = page.keyAt(toPageX(x), toPageY(y), spaceReach())
                 val p = Pointer(e.getPointerId(i), key, x, y, SystemClock.uptimeMillis())
                 pointers[p.id] = p
                 if (key != null) {

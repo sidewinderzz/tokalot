@@ -221,6 +221,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     override fun onCreateInputView(): View {
         val k = KeyboardView(this, this)
+        k.wordInProgress = { word.isNotEmpty() }
         val e = EmojiPanel(this, this).apply { visibility = View.GONE }
         val c = ClipboardPanel(this, this).apply { visibility = View.GONE }
         val m = KeyboardMenuPanel(this, this).apply { visibility = View.GONE }

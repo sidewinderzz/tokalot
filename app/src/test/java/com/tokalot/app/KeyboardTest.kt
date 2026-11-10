@@ -174,16 +174,44 @@ class KeyboardTest {
         assertEquals('a'.code, page.keyAt(1f, 150f + 75f)?.code)
         assertEquals('l'.code, page.keyAt(1079f, 150f + 75f)?.code)
         assertEquals(KeyCode.SPACE, page.keyAt(540f, 3 * 150f + 75f)?.code)
-        assertNull(page.keyAt(540f, 4 * 150f + 1f))
+        // The thin margin under the space bar still types a space; above the keys is nothing.
+        assertEquals(KeyCode.SPACE, page.keyAt(540f, page.height + 1f)?.code)
+        assertNull(page.keyAt(540f, -1f))
         // The number row puts the letters a row lower, but their centres stay in the same frame.
         val withNumbers = Layouts.letters(numberRow = true, symbolHints = true)
         withNumbers.layout(1080f, 150f, 10f)
         assertEquals(0f, withNumbers.letterCenters().getValue('q')[1], 0.01f)
         // The number row is shorter than a letter row, and touches still land on the right row.
-        assertEquals(150f * (4 + Layouts.NUMBER_ROW), withNumbers.height, 0.01f)
+        assertEquals(150f * (3 + Layouts.SPACE_ROW + Layouts.NUMBER_ROW), withNumbers.height, 0.01f)
         assertEquals('1'.code, withNumbers.keyAt(5f, 150f * Layouts.NUMBER_ROW - 1f)?.code)
         assertEquals('q'.code, withNumbers.keyAt(5f, 150f * Layouts.NUMBER_ROW + 1f)?.code)
         assertEquals(150f * Layouts.NUMBER_ROW, withNumbers.lettersTop, 0.01f)
+    }
+
+    @Test fun spaceBarReachesUpWhileTyping() {
+        val page = Layouts.letters(numberRow = false, symbolHints = true)
+        page.layout(1080f, 150f, 10f)
+        val space = page.keys.first { it.code == KeyCode.SPACE }
+        val b = page.keys.first { it.code == 'b'.code }
+        // The space bar row is a little taller than a letter row.
+        assertEquals(150f * (3 + Layouts.SPACE_ROW), page.height, 0.01f)
+        assertTrue(space.h > b.h)
+        val x = b.cx
+        assertTrue(x >= space.hitLeft && x < space.hitRight)
+        // The bottom of b, just above space: b with no reach, space while a word is being typed.
+        val low = 3 * 150f - 150f * 0.15f
+        assertEquals('b'.code, page.keyAt(x, low)?.code)
+        assertEquals(KeyCode.SPACE, page.keyAt(x, low, Layouts.SPACE_REACH)?.code)
+        // Right after a space only the very edge goes to space; the middle of b is always b.
+        assertEquals('b'.code, page.keyAt(x, low, Layouts.SPACE_REACH_IDLE)?.code)
+        assertEquals('b'.code, page.keyAt(x, b.cy, Layouts.SPACE_REACH)?.code)
+        // Only over the space bar: shift and delete keep their whole touch area, as does z beside the comma.
+        assertEquals(KeyCode.SHIFT, page.keyAt(5f, low, Layouts.SPACE_REACH)?.code)
+        assertEquals(KeyCode.DELETE, page.keyAt(1075f, low, Layouts.SPACE_REACH)?.code)
+        // The number pad has no space bar, so nothing changes there.
+        val pad = Layouts.numbers(phone = false)
+        pad.layout(1080f, 150f, 10f)
+        assertEquals('8'.code, pad.keyAt(400f, 3 * 150f - 5f, Layouts.SPACE_REACH)?.code)
     }
 
     @Test fun toolbar() {
