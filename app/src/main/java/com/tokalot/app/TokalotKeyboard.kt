@@ -753,26 +753,38 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         phantomSpace = false
         val selected = ic.getSelectedText(0)
         if (!selected.isNullOrEmpty()) ic.commitText("", 1)
-        else sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+        else if (!deleteChar(ic)) {
+            // An emoji, an accent, or a box that doesn't say what's in it: the app deletes it its own way. A key
+            // press lands whenever the app gets to it, so nothing is read back or picked up after one.
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+            updateShift()
+            showStrip()
+            return
+        }
         if (predictive) resumeWord(ic)
         updateShift()
         showStrip()
     }
 
-    /** Backspaced to the end of a word: it becomes the word being typed again, so suggestions come back. */
+    /**
+     * Deletes the one plain character before the cursor through the text connection, so it has happened by the
+     * time the text is next read. False if what's there isn't one plain character (see [delete]).
+     */
+    private fun deleteChar(ic: InputConnection): Boolean {
+        val c = ic.getTextBeforeCursor(1, 0)?.singleOrNull() ?: return false
+        if (!(c.isLetterOrDigit() || c == ' ' || c == '\n' || c.code in 0x21..0x7e)) return false
+        return ic.deleteSurroundingText(1, 0)
+    }
+
+    /**
+     * Backspaced to the end of a word: it becomes the word being typed again, so suggestions come back. The word
+     * is only marked, never deleted and retyped: retyping it from a reading of the text that was a moment out of
+     * date took the space in front of it too.
+     */
     private fun resumeWord(ic: InputConnection) {
-        val before = ic.getTextBeforeCursor(48, 0)?.toString() ?: return
-        val after = ic.getTextAfterCursor(1, 0)?.toString()
-        if (after != null && after.isNotEmpty() && after[0].isLetterOrDigit()) return
-        var i = before.length
-        while (i > 0 && (before[i - 1].isLetterOrDigit() || before[i - 1] == '\'' || before[i - 1] == '’')) i--
-        val w = before.substring(i)
-        if (w.isEmpty() || i == 0 && before.length >= 48 || !w.any { it.isLetter() }) return
-        ic.beginBatchEdit()
-        ic.deleteSurroundingText(w.length, 0)
-        ic.setComposingText(w, 1)
-        ic.endBatchEdit()
-        pickedUp(w, before.substring(0, i))
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0) ?: return
+        if (et.selectionStart < 0 || et.selectionStart != et.selectionEnd) return
+        resumeAt(ic, et.startOffset + et.selectionStart)
     }
 
     /**

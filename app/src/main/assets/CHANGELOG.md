@@ -25,6 +25,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 - A space you typed after a word moves behind a full stop, comma, ! or ?: "ok ." becomes "ok. ".
 - With caps lock on, words of four letters or more are fixed and stay in capitals ("THANKD" becomes "THANKS"). Short ones are left alone.
 - Suggestions are worked out in the background, so each letter shows the moment you tap it, however long the word search takes.
+- Backspacing through several words no longer eats the space in front of a word now and then, mostly seen in browsers and chat apps.
 - "sus" was missing from the word list because of a broken line in the file. Example words in the app's tests and notes are no longer farm-specific.
 
 ## 1.59 · 2026-11-09
