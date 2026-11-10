@@ -9,15 +9,16 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 
 /**
- * The first-run welcome, in two steps: pick a privacy level (each lists what it turns on, and every switch can be
- * changed right there), then the setup that level needs: the mic, the accessibility switch, and a key or the
- * on-device model. Finishing or skipping it marks it done; anything left over shows as Finish setup on Home.
+ * The first-run welcome, in three steps: how you'll use Tokalot (the floating mic button, the keyboard, or just the
+ * app; see [UseMode]), a privacy level (each lists what it turns on, and every switch can be changed right there),
+ * then the setup those need: the mic, the accessibility switch only for the floating button, the keyboard only for
+ * the keyboard, and a key or the on-device model. Finishing or skipping it marks it done; anything left over shows as Finish setup on Home.
  * Shown once, on a new install. Someone who updated keeps their settings and gets a row about the levels in
  * Home's Needs you card instead.
  */
 class WelcomeScreen(private val a: MainActivity) {
     companion object {
-        /** 0: pick a level, 1: setup. Kept while the app runs. */
+        /** 0: how you'll use it, 1: pick a level, 2: setup. Kept while the app runs. */
         var step = 0
 
         /** Whether to show the welcome now. On an update it's marked done straight away, so it never shows. */
@@ -39,10 +40,10 @@ class WelcomeScreen(private val a: MainActivity) {
             a.render()
         }
 
-        /** Back on the welcome: from setup to the levels. False on the first step (Android closes the app). */
+        /** Back on the welcome: one step back. False on the first step (Android closes the app). */
         fun back(a: MainActivity): Boolean {
             if (step == 0) return false
-            step = 0
+            step--
             a.render()
             return true
         }
@@ -50,12 +51,31 @@ class WelcomeScreen(private val a: MainActivity) {
 
     fun build(): View = with(a) {
         val col = column()
-        if (step == 0) levels(col) else setup(col)
+        when (step) {
+            0 -> modes(col)
+            1 -> levels(col)
+            else -> setup(col)
+        }
         scroll(col)
     }
 
-    private fun levels(col: LinearLayout) = with(a) {
+    private fun modes(col: LinearLayout) = with(a) {
         col.addView(heading("Welcome to Tokalot", 34f), lp().margins(this, t = 8, b = 6))
+        col.addView(text("How do you want to use it? Pick one to start. You can change it any time in Settings › Setup, or use more than one.", 16f, C.SUB), lp().margins(this, b = 16))
+        modePicker(col)
+        col.addView(text("Whichever you pick, everything you say lands on Home, where you can copy, share or play it back.", 13f, C.SUB), lp().margins(this, t = 8, l = 4))
+        col.addView(row(
+            link("Skip setup", 15f) { done(this) },
+            weightSpacer(),
+            pill("Next", filled = true) {
+                if (prefs.useMode.isEmpty()) prefs.useMode = useMode().name // Next on the preselected one picks it
+                step = 1; render()
+            },
+        ), lp().margins(this, t = 20, b = 16))
+    }
+
+    private fun levels(col: LinearLayout) = with(a) {
+        col.addView(heading("Privacy", 34f), lp().margins(this, t = 8, b = 6))
         col.addView(text("How private should it be? Pick a level, and change any switch below if you like. You can change all of this later in Settings › Privacy.", 16f, C.SUB), lp().margins(this, b = 16))
         val level = Privacy.current(prefs)
         val lv = card()
@@ -88,13 +108,18 @@ class WelcomeScreen(private val a: MainActivity) {
         col.addView(row(
             link("Skip setup", 15f) { done(this) },
             weightSpacer(),
-            pill("Next", filled = true) { step = 1; render() },
+            pill("Next", filled = true) { step = 2; render() },
         ), lp().margins(this, t = 20, b = 16))
     }
 
     private fun setup(col: LinearLayout) = with(a) {
         col.addView(heading("Set it up", 34f), lp().margins(this, t = 8, b = 6))
-        col.addView(text("A few things Tokalot needs before the mic button can appear.", 16f, C.SUB), lp().margins(this, b = 16))
+        val mode = useMode()
+        col.addView(text(when (mode) {
+            UseMode.FLOATING -> "A few things Tokalot needs before the mic button can appear."
+            UseMode.KEYBOARD -> "A few things Tokalot needs before you can talk with the keyboard's mic key."
+            UseMode.APP -> "Just the mic and a way to turn speech into text. Nothing else to switch on."
+        }, 16f, C.SUB), lp().margins(this, b = 16))
         val c = card()
         fun item(title: String, sub: String, done: Boolean, doneText: String, action: String?, onClick: () -> Unit): android.widget.TextView {
             if (c.childCount > 0) c.addView(divider())
@@ -119,8 +144,21 @@ class WelcomeScreen(private val a: MainActivity) {
                 askPermission(Manifest.permission.POST_NOTIFICATIONS, 2)
             }
         }
-        item("Accessibility switch", "Shows the mic button over your keyboard and types your words in.", serviceEnabled(), "On", "Set up") {
-            openAccessibilitySetup()
+        when (mode) {
+            UseMode.FLOATING -> item("Accessibility switch", "Shows the mic button over your keyboard and types your words in.", serviceEnabled(), "On", "Set up") {
+                openAccessibilitySetup()
+            }
+            UseMode.KEYBOARD -> {
+                item("Turn on Tokalot Keyboard", "In Android's keyboard list. Android warns about every keyboard; Tokalot keeps what you type on this phone.",
+                    TokalotKeyboard.isEnabled(this), "On", "Turn on") {
+                    startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+                }
+                item("Use it as your keyboard", "Pick Tokalot in the keyboard switcher.", TokalotKeyboard.isCurrent(this), "In use", "Switch") {
+                    if (!TokalotKeyboard.isEnabled(this)) startActivity(Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+                    else getSystemService(android.view.inputmethod.InputMethodManager::class.java)?.showInputMethodPicker()
+                }
+            }
+            UseMode.APP -> {}
         }
         if (prefs.stt == SttChoice.LOCAL) {
             val pct = SettingsScreen.downloadPct
@@ -167,11 +205,29 @@ class WelcomeScreen(private val a: MainActivity) {
             ), lp().margins(this, t = 8))
             col.addView(k, lp().margins(this, t = 12))
         }
+        if (mode == UseMode.APP) col.addView(text("To record, tap Record at the top of Home. To transcribe a voice message or audio file, share it from any app and pick Tokalot.", 13f, C.SUB), lp().margins(this, t = 12, l = 4))
         col.addView(text("Anything you skip stays on Home under Finish setup.", 13f, C.SUB), lp().margins(this, t = 12, l = 4))
         col.addView(row(
-            link("Back", 15f) { step = 0; render() },
+            link("Back", 15f) { step = 1; render() },
             weightSpacer(),
             pill(if (setupComplete()) "Done" else "Finish later", filled = true) { done(this) },
         ), lp().margins(this, t = 20, b = 16))
     }
+}
+
+/**
+ * The three ways to use Tokalot as choice rows in a card (see [UseMode]), on the welcome and in Settings › Setup.
+ * Picking one only changes what setup asks for; nothing already switched on is turned off.
+ */
+internal fun MainActivity.modePicker(col: LinearLayout) {
+    val mode = useMode()
+    val c = card()
+    UseMode.values().forEachIndexed { i, m ->
+        if (i > 0) c.addView(divider())
+        c.addView(choiceRow(m.label, m.blurb, mode == m) {
+            prefs.useMode = m.name
+            render()
+        })
+    }
+    col.addView(c)
 }
