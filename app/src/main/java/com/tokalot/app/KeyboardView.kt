@@ -347,9 +347,15 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
             return out
         }
         val micLeft = KeyboardToolbar.micOnLeft(toolbar)
-        val from = if (micLeft) 2 * side else side
+        var from = if (micLeft) 2 * side else side
         val to = if (micLeft) w else w - side
         if (micLeft) out += Part(side, 2 * side, TOOL, KeyboardToolbar.MIC)
+        // The clipboard stays one tap away while suggestions fill the bar (if it's on the toolbar at all).
+        if (message == null && KeyboardToolbar.CLIPBOARD in toolbar) {
+            val clip = stripHeight
+            out += Part(from, from + clip, TOOL, KeyboardToolbar.CLIPBOARD)
+            from += clip
+        }
         when {
             message != null -> out += Part(from, to, SLOT_MESSAGE)
             chips -> {

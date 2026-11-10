@@ -9,6 +9,7 @@ versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per 
 ## 1.61 · 2026-11-10
 - Fewer letters typed by mistake when you aim for the space bar. While you're typing a word, the space bar's touch area now reaches a little way up into the bottom of c, v, b and n, since a thumb going for space tends to land a bit high. Right after a space it barely reaches, so starting the next word on those letters works as before.
 - The space bar row is a little taller, and a tap in the thin strip under it now types a space instead of nothing.
+- The clipboard button stays on the bar while word suggestions are showing, next to the menu button, so you no longer have to finish or clear a word to reach it. Take Clipboard off the toolbar (Settings › Keyboard) and it goes from both.
 
 ## 1.60 · 2026-11-10
 - New, in beta: the keyboard learns from your dictations. The names and terms you say count as words, a typo near one is fixed to it, the bar offers what you usually say next ("on my" then "way") and how you usually start a sentence, and something you dictated in the last few hours ranks higher while you type the follow-up. It's worked out on the phone from your dictation history each time the keyboard opens; nothing new is saved or sent, and deleting a dictation takes its words back out. Saying a word a lot never makes autocorrect swap a real word for it. Settings › Keyboard › Learn from my dictations, also on the Privacy page; it starts out matching "Learn from my typing".
