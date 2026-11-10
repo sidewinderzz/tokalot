@@ -952,7 +952,8 @@ class SettingsScreen(private val a: MainActivity) {
         kbSwitch("Swipe typing", "Slide your finger from letter to letter instead of tapping.", prefs.kbSwipe) { prefs.kbSwipe = it }
         kbSwitch("Capitalize sentences", "A capital letter at the start of each sentence, where the app asks for one.", prefs.kbAutoCaps) { prefs.kbAutoCaps = it }
         kbSwitch("Double space for a period", "Two taps on the space bar type a period and a space.", prefs.kbDoubleSpace) { prefs.kbDoubleSpace = it }
-        kbSwitch("Learn from my typing", "Remembers the words you use and what follows what, on this phone only, for better suggestions. A word the keyboard doesn't know goes into your dictionary once you've kept it twice, so it syncs.", prefs.kbLearn) { prefs.kbLearn = it }
+        kbSwitch("Learn from my typing", "Remembers the words you use and what follows what, on this phone only, for better suggestions. A word the keyboard doesn't know goes into your dictionary once you've kept it twice or tapped it on the bar, so it syncs. Hold a word on the bar to stop it being suggested.", prefs.kbLearn) { prefs.kbLearn = it }
+        kbSwitch("Learn from my dictations (beta)", "Autocorrect and suggestions follow what you say: your names and terms count as words, typos near them are fixed to them, the bar offers what you usually say next, and something you just dictated ranks higher. Worked out from your dictation history on this phone; nothing new is saved or sent.", prefs.kbSpoken) { prefs.kbSpoken = it }
         kbSwitch("Symbols on letters", "Each letter shows the symbol a long press gives.", prefs.kbSymbolHints) { prefs.kbSymbolHints = it }
         kbSwitch("Show key on press", "The key pops up bigger above your finger.", prefs.kbPopup) { prefs.kbPopup = it }
         kbSwitch("Vibrate on key press", "", prefs.kbVibrate) { prefs.kbVibrate = it }
@@ -1021,6 +1022,17 @@ class SettingsScreen(private val a: MainActivity) {
             pill("Clear") {
                 TokalotKeyboard.clearHistory(this)
                 android.widget.Toast.makeText(this, "Typing history cleared", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        ), lp().margins(this, t = 8, l = 4))
+        val hiddenWords = prefs.kbHidden
+        if (hiddenWords.isNotEmpty()) col.addView(row(
+            text((if (hiddenWords.size == 1) "1 word" else "${hiddenWords.size} words") + " you told the keyboard to stop suggesting: " + hiddenWords.sorted().take(8).joinToString(", ") + (if (hiddenWords.size > 8) "…" else "") + ". Hold a word on the keyboard's bar to add one.", 14f, C.SUB).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+            pill("Suggest again") {
+                prefs.kbHidden = emptySet()
+                android.widget.Toast.makeText(this, "Those words can be suggested again", android.widget.Toast.LENGTH_SHORT).show()
+                render()
             }
         ), lp().margins(this, t = 8, l = 4))
 

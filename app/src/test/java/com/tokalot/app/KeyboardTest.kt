@@ -14,7 +14,12 @@ class KeyboardTest {
     companion object {
         /** Loaded once: it's the same file the keyboard reads (the tests run in the app folder). */
         val words: KeyboardWords by lazy {
-            GZIPInputStream(File("src/main/assets/keyboard/en_US.txt.gz").inputStream()).bufferedReader().use { KeyboardWords.load(it, File("src/main/assets/keyboard/en_US_extra.txt").bufferedReader()) }
+            fresh()
+        }
+
+        /** A list of its own, for tests that add to it or take from it. */
+        fun fresh(): KeyboardWords = GZIPInputStream(File("src/main/assets/keyboard/en_US.txt.gz").inputStream()).bufferedReader().use {
+            KeyboardWords.load(it, File("src/main/assets/keyboard/en_US_extra.txt").bufferedReader(), File("src/main/assets/keyboard/en_US_chat.txt").bufferedReader())
         }
     }
 
@@ -24,9 +29,8 @@ class KeyboardTest {
     @Test fun wordListLoads() {
         assertTrue(words.size > 150_000)
         assertTrue(words.probOf("the") > 200)
-        assertTrue(words.probOf("tractor") > 0)
+        assertTrue(words.probOf("window") > 0)
         // Texting words were added to the list; nothing trade-specific (it's a public app).
-        assertTrue(words.probOf("swather") < 0)
         assertTrue(words.probOf("lol") > 100)
         assertTrue(words.next("thank")!!.contains("you"))
     }
@@ -38,17 +42,17 @@ class KeyboardTest {
         assertEquals("I'm", fixed("im"))
         assertEquals("I", fixed("i"))
         assertEquals("receive", fixed("recieve"))
-        assertEquals("tractor", fixed("tractr"))
+        assertEquals("monitor", fixed("monitr"))
         assertEquals("definitely", fixed("definately"))
         assertEquals("Wednesday", fixed("wenesday"))
-        assertEquals("Kubota", fixed("kubota"))
+        assertEquals("Toyota", fixed("toyota"))
     }
 
     @Test fun realWordsAndSlangAreLeftAlone() {
-        for (w in listOf("its", "were", "nut", "lol", "ok", "thx", "hay", "baler")) assertNull(w, fixed(w))
+        for (w in listOf("its", "were", "nut", "lol", "ok", "thx")) assertNull(w, fixed(w))
         // Numbers, addresses and shouting aren't touched.
         assertNull(fixed("4wd"))
-        assertNull(fixed("www.deere.com"))
+        assertNull(fixed("www.example.com"))
         assertNull(fixed("STOP"))
     }
 
@@ -71,7 +75,7 @@ class KeyboardTest {
         assertEquals("much", fixed("mich"))
         assertEquals("names", fixed("mames"))
         // A name is still right when nothing ordinary is close.
-        assertEquals("Kubota", fixed("kubota"))
+        assertEquals("Toyota", fixed("toyota"))
     }
 
     @Test fun textingWordsAndMisspellings() {
@@ -105,7 +109,7 @@ class KeyboardTest {
         h.used("shelbs", null); h.used("shelbs", null)
         assertNull(fixed("shelbs", history = h))
         assertTrue(KeyboardLearn.worth("shelbs", words))
-        assertFalse(KeyboardLearn.worth("tractor", words))
+        assertFalse(KeyboardLearn.worth("window", words))
         assertFalse(KeyboardLearn.worth("4wd", words))
     }
 
@@ -134,7 +138,7 @@ class KeyboardTest {
         val centers = Qwerty.centers.mapValues { floatArrayOf(it.value[0] * kw, it.value[1] * kh) }
         g.setLayout(centers, kw, kh)
         val rnd = Random(4)
-        val list = listOf("hello", "the", "tractor", "going", "because", "farm", "thanks", "tomorrow", "weather", "field",
+        val list = listOf("hello", "the", "window", "going", "because", "house", "thanks", "tomorrow", "weather", "field",
             "would", "could", "think", "truck", "coffee", "morning", "sounds", "great", "parts", "running")
         var right = 0
         for (word in list) {
@@ -200,13 +204,13 @@ class KeyboardTest {
 
     @Test fun typingHistoryRoundTrips() {
         val h = TypingHistory()
-        h.used("hay", null); h.used("bales", "hay"); h.used("bales", "hay"); h.used("bales", "hay")
+        h.used("ice", null); h.used("cream", "ice"); h.used("cream", "ice"); h.used("cream", "ice")
         val back = TypingHistory.parse(h.serialize())
-        assertEquals(3, back.count("bales"))
-        assertEquals(3, back.pairCount("hay", "bales"))
-        assertEquals(listOf("bales"), back.after("hay", 3))
-        back.forget("bales")
-        assertEquals(0, back.count("bales"))
+        assertEquals(3, back.count("cream"))
+        assertEquals(3, back.pairCount("ice", "cream"))
+        assertEquals(listOf("cream"), back.after("ice", 3))
+        back.forget("cream")
+        assertEquals(0, back.count("cream"))
     }
 
     @Test fun emoji() {
@@ -216,7 +220,7 @@ class KeyboardTest {
         assertEquals("👍🏽", EmojiData.withTone("👍", 3))
         assertEquals("🧑🏽‍🌾", EmojiData.withTone("🧑‍🌾", 3))
         assertEquals("👍", EmojiData.withTone("👍", 0))
-        assertTrue(e.search("tractor").any { it.text == "🚜" })
+        assertTrue(e.search("rocket").any { it.text == "🚀" })
         assertTrue(e.search("thumbs up").any { it.text == "👍" })
         assertTrue(e.groups.flatMap { it.emoji }.any { it.text == "#️⃣" })
     }
@@ -239,15 +243,15 @@ class KeyboardTest {
     }
 
     @Test fun deleteSlideWords() {
-        assertEquals("tractor ".length, TextSteps.wordsBack("the tractor ", 1))
-        assertEquals("the tractor ".length, TextSteps.wordsBack("the tractor ", 2))
-        assertEquals("tractor".length, TextSteps.wordsBack("the tractor", 1))
+        assertEquals("kitchen ".length, TextSteps.wordsBack("the kitchen ", 1))
+        assertEquals("the kitchen ".length, TextSteps.wordsBack("the kitchen ", 2))
+        assertEquals("kitchen".length, TextSteps.wordsBack("the kitchen", 1))
         // Punctuation and emoji go as a word of their own, and an emoji is never cut in half.
         assertEquals("!!".length, TextSteps.wordsBack("done!!", 1))
         assertEquals("👍🏽 ".length, TextSteps.wordsBack("done 👍🏽 ", 1))
         assertEquals("don't".length, TextSteps.wordsBack("I don't", 1))
         assertEquals("I don't".length, TextSteps.wordsBack("I don't", 5))
-        assertEquals(0, TextSteps.wordsBack("hay", 0))
+        assertEquals(0, TextSteps.wordsBack("day", 0))
     }
 
     @Test fun clipboardList() {
@@ -276,9 +280,9 @@ class KeyboardTest {
     }
 
     @Test fun clipboardChips() {
-        assertEquals(listOf("https://deere.com/parts"), ClipHistory.smart("https://deere.com/parts"))
-        assertEquals(listOf("https://deere.com/parts", "Parts are at https://deere.com/parts."),
-            ClipHistory.smart("Parts are at https://deere.com/parts."))
+        assertEquals(listOf("https://example.com/parts"), ClipHistory.smart("https://example.com/parts"))
+        assertEquals(listOf("https://example.com/parts", "Parts are at https://example.com/parts."),
+            ClipHistory.smart("Parts are at https://example.com/parts."))
         assertEquals(listOf("shelby@example.com", "(555) 123-4567", "Call (555) 123-4567 or mail shelby@example.com"),
             ClipHistory.smart("Call (555) 123-4567 or mail shelby@example.com"))
         // Plain numbers and dates aren't phone numbers.
@@ -288,7 +292,7 @@ class KeyboardTest {
     @Test fun codesFromTexts() {
         assertEquals("123456", CodeFinder.find("Your Google verification code is 123456"))
         assertEquals("482913", CodeFinder.find("G-482913 is your Google verification code."))
-        assertEquals("7731", CodeFinder.find("Use 7731 to log in to Deere Operations Center"))
+        assertEquals("7731", CodeFinder.find("Use 7731 to log in to Example Cloud"))
         assertEquals("123456", CodeFinder.find("Your one-time passcode: 123 456. Don't share it."))
         assertEquals("90210", CodeFinder.find("Chase: 90210 is your security code. Expires in 10 min"))
         // Messages that don't talk about a code, and numbers that aren't one, are left alone.
@@ -304,5 +308,103 @@ class KeyboardTest {
         assertNull(CodeFinder.find("Your statement is ready. Account ending 4821. Log in to view."))
         assertNull(CodeFinder.find("Order # 5532 shipped. Sign in to track it."))
         assertEquals("660412", CodeFinder.find("Card ending in 4821: your verification code is 660412"))
+    }
+
+    // ---- the 2026-11 autocorrect review
+
+    private fun ac() = Autocorrect(words)
+
+    @Test fun realWordsAreNeverForceSwapped() {
+        for (w in listOf("mow", "cam", "bot", "hum", "sill", "goo", "foe", "moat")) assertNull(w, fixed(w))
+        // The same list still fixes what isn't a word.
+        assertEquals("I'm", fixed("im"))
+        assertEquals("don't", fixed("dont"))
+    }
+
+    @Test fun newWordsAndTextingWordsStay() {
+        for (w in listOf("numpy", "yaml", "postgres", "airtag", "icloud", "jk", "tmrw", "ily", "gtg", "ofc", "tryna", "finna", "bruh", "sus")) assertNull(w, fixed(w))
+        // Rude shorthand is taken as typed but never offered.
+        assertNull(fixed("idgaf"))
+        assertFalse("idgaf" in ac().suggest("idga", null).shown)
+    }
+
+    @Test fun aCapitalTheKeyboardAddedIsNotAName() {
+        fun start(typed: String) = ac().suggest(typed, null, autoCap = true).correction
+        assertEquals("Much", start("Mich"))
+        assertEquals("And", start("Nad"))
+        assertEquals("The", start("Teh"))
+        assertNull(start("Friend's"))
+        // Typed with shift, the capital is the user's: a name stays a name.
+        assertNull(ac().suggest("Mich", null).correction)
+    }
+
+    @Test fun capsLockWordsAreFixedAndStayInCapitals() {
+        fun locked(typed: String) = ac().suggest(typed, null, capsLock = true).correction
+        assertEquals("THANKS", locked("THANKD"))
+        assertEquals("HELLO", locked("HELO"))
+        assertNull(locked("SSD"))
+        assertNull(locked("STOP"))
+        // Capitals typed one at a time are left alone.
+        assertNull(fixed("THANKD"))
+    }
+
+    @Test fun farKeysCostMoreThanNeighbours() {
+        assertEquals("What", ac().suggest("Qhat", null, autoCap = true).correction)
+        assertEquals("lock", fixed("lovk"))
+    }
+
+    @Test fun missedSpacesWithIAndA() {
+        assertEquals("I can", fixed("ican"))
+        assertEquals("I don't", fixed("idont"))
+        assertEquals("and I", fixed("andi"))
+        assertEquals("in fact", fixed("infact"))
+        assertEquals("thank you", fixed("thankyou"))
+        assertEquals("do you", fixed("doyou"))
+        // A slip onto the next key is still one word.
+        assertEquals("arrive", fixed("areive"))
+        assertEquals("soon", fixed("doon"))
+    }
+
+    @Test fun hyphensAndApostrophesThatWereTypedStay() {
+        for (w in listOf("re-enter", "set-up", "touch-up", "drop-off", "time's", "minute's")) assertNull(w, fixed(w))
+    }
+
+    @Test fun contextLooksTwoWordsBack() {
+        assertEquals("way", fixed("wat", "my"))
+        val h = TypingHistory()
+        repeat(2) { h.used("pick", null); h.used("up", "pick"); h.used("milk", "up", "pick") }
+        assertEquals(2, h.tripleCount("pick", "up", "milk"))
+        val back = TypingHistory.parse(h.serialize())
+        assertEquals(2, back.tripleCount("pick", "up", "milk"))
+        assertEquals("milk", Autocorrect(words, back).suggest("mikk", "up", prev2 = "pick").correction)
+        // An undone correction is taken back out.
+        back.unused("milk", "up", "pick"); back.unused("milk", "up", "pick")
+        assertEquals(0, back.count("milk"))
+        assertEquals(0, back.pairCount("up", "milk"))
+        assertEquals(0, back.tripleCount("pick", "up", "milk"))
+    }
+
+    @Test fun wordsCanBeRemovedAndHidden() {
+        val list = fresh()
+        list.addUserWords(listOf("zibblet"), KeyboardWords.LEARNED_PROB)
+        assertEquals(KeyboardWords.LEARNED_PROB, list.probOf("zibblet"))
+        assertTrue(list.remove("zibblet"))
+        assertTrue(list.probOf("zibblet") < 0)
+        assertFalse(list.remove("zibblet"))
+        // A hidden word is still a word when typed, but is never offered or corrected to.
+        val a = Autocorrect(list)
+        assertEquals("hello", a.suggest("helo", null).correction)
+        list.hide("Hello")
+        assertTrue(a.suggest("helo", null).correction != "hello")
+        assertNull(a.suggest("hello", null).correction)
+        assertFalse("hello" in a.suggest("hell", null).shown)
+        list.unhide("hello")
+        assertEquals("hello", a.suggest("helo", null).correction)
+    }
+
+    @Test fun commonNextWordsComeFromTheHandKeptList() {
+        assertTrue(words.next("my")!!.take(3).contains("way"))
+        assertTrue(words.next("I")!!.contains("can"))
+        assertTrue(ac().predict("thank", 3).first() == "you")
     }
 }

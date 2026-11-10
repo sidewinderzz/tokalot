@@ -37,7 +37,7 @@ class NotePlanTest {
         assertEquals("2026-11-04T09:00", at("tomorrow call the vet"))
         assertEquals("2026-11-04T06:00", at("tomorrow at 6 load the dogs"))
         assertEquals("2026-11-04T17:00", at("tomorrow at 5"))
-        assertEquals("2026-11-06T08:00", at("Friday morning grease the baler"))
+        assertEquals("2026-11-06T08:00", at("Friday morning oil the hinges"))
         assertEquals("2026-11-03T20:00", at("tonight take the meds"))
         assertEquals("2026-11-03T08:00", at("in 20 minutes check the oven"))
         assertEquals("2026-11-03T08:20", at("in half an hour", morning.plusMinutes(10)))

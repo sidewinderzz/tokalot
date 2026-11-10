@@ -195,7 +195,7 @@ class Prefs(ctx: Context) {
             "notesBeta" to "notes_beta", "holdToTalk" to "hold", "haptics" to "haptics", "fitSentence" to "fit_sentence",
             "noteSkipSilence" to "note_skip_silence", "noteSkipUms" to "note_skip_ums", "noteAutoSpeed" to "note_auto_speed",
             "keyboardAutocorrect" to "kb_autocorrect", "keyboardSwipe" to "kb_swipe", "keyboardAutoCaps" to "kb_autocap",
-            "keyboardDoubleSpace" to "kb_double_space", "keyboardLearn" to "kb_learn", "keyboardNumberRow" to "kb_number_row",
+            "keyboardDoubleSpace" to "kb_double_space", "keyboardLearn" to "kb_learn", "keyboardSpoken" to "kb_spoken", "keyboardNumberRow" to "kb_number_row",
             "keyboardSymbolHints" to "kb_symbol_hints", "keyboardSound" to "kb_sound", "keyboardVibrate" to "kb_vibrate",
             "keyboardPopup" to "kb_popup", "keyboardClipboard" to "kb_clipboard", "keyboardClipSuggest" to "kb_clip_suggest",
             "keyboardScreenshots" to "kb_screenshots", "keyboardCodes" to "kb_codes",
@@ -206,7 +206,7 @@ class Prefs(ctx: Context) {
         /** The keys here whose change is a change to the sync file (see [Sync.watch]). */
         fun synced(key: String) = key in BOOLEANS.values || key in setOf(
             "stt", "cleanup", "theme", "accent", "sound_set", "note_phrases", "learned_words", "dismissed_words",
-            "note_level", "note_speed", "note_wpm", "kb_theme", "kb_style", "kb_accent", "kb_toolbar", "kb_height",
+            "note_level", "note_speed", "note_wpm", "kb_hidden", "kb_theme", "kb_style", "kb_accent", "kb_toolbar", "kb_height",
         ) || key.startsWith("sttmodel_") || key.startsWith("model_") || key.startsWith("app_")
 
         /** Whether a synced setting's value from the file is one this version can use. */
@@ -230,7 +230,7 @@ class Prefs(ctx: Context) {
                 "noteSummaryLevel" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 1..5
                 "noteSpeed" -> v is Number && v.toDouble() in NoteMedia.MIN_SPEED.toDouble()..NoteMedia.MAX_SPEED.toDouble()
                 "noteTargetWpm" -> v is Number && v.toDouble() == Math.floor(v.toDouble()) && v.toInt() in 100..500
-                "learnedWords", "dismissedWords" -> v is JSONArray && (0 until v.length()).all { v.opt(it) is String }
+                "learnedWords", "dismissedWords", "keyboardHidden" -> v is JSONArray && (0 until v.length()).all { v.opt(it) is String }
                 else -> name in BOOLEANS && v is Boolean
             }
         }
@@ -328,6 +328,11 @@ class Prefs(ctx: Context) {
     var learnWords: Boolean
         get() = sp.safeBoolean("learn_words", false)
         set(v) = sp.edit().putBoolean("learn_words", v).apply()
+
+    /** Words the keyboard was told not to suggest (a suggestion held, then Forget), in lower case. Synced. */
+    var kbHidden: Set<String>
+        get() = stringList("kb_hidden").toSet()
+        set(v) = sp.edit().putString("kb_hidden", JSONArray(v.toList().sorted()).toString()).apply()
 
     /** The dictionary words that were learned rather than typed in, so the Dictionary screen can mark them. */
     var learnedWords: Set<String>
@@ -432,6 +437,8 @@ class Prefs(ctx: Context) {
             "keyboardAutoCaps" to kbAutoCaps,
             "keyboardDoubleSpace" to kbDoubleSpace,
             "keyboardLearn" to kbLearn,
+            "keyboardSpoken" to kbSpoken,
+            "keyboardHidden" to JSONArray(kbHidden.toList().sorted()),
             "keyboardNumberRow" to kbNumberRow,
             "keyboardSymbolHints" to kbSymbolHints,
             "keyboardSound" to kbSound,
@@ -503,6 +510,7 @@ class Prefs(ctx: Context) {
             "noteTargetWpm" -> ed.putInt("note_wpm", (v as Number).toInt())
             "learnedWords" -> ed.putString("learned_words", strings(v as JSONArray))
             "dismissedWords" -> ed.putString("dismissed_words", strings(v as JSONArray))
+            "keyboardHidden" -> ed.putString("kb_hidden", strings(v as JSONArray))
             else -> BOOLEANS[name]?.let { ed.putBoolean(it, v as Boolean) }
         }
     }
@@ -612,6 +620,13 @@ class Prefs(ctx: Context) {
     var kbLearn: Boolean
         get() = sp.safeBoolean("kb_learn", true)
         set(v) = sp.edit().putBoolean("kb_learn", v).apply()
+    /**
+     * The keyboard's autocorrect and suggestions follow what the user says in dictations (see SpokenWords).
+     * Until it's set, it goes with "Learn from my typing", so nobody's privacy level changes with the update.
+     */
+    var kbSpoken: Boolean
+        get() = if (sp.contains("kb_spoken")) sp.safeBoolean("kb_spoken", true) else kbLearn
+        set(v) = sp.edit().putBoolean("kb_spoken", v).apply()
     /** A row of digits above the letters. */
     var kbNumberRow: Boolean
         get() = sp.safeBoolean("kb_number_row", false)

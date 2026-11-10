@@ -6,6 +6,28 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.60 · 2026-11-10
+- New, in beta: the keyboard learns from your dictations. The names and terms you say count as words, a typo near one is fixed to it, the bar offers what you usually say next ("on my" then "way") and how you usually start a sentence, and something you dictated in the last few hours ranks higher while you type the follow-up. It's worked out on the phone from your dictation history each time the keyboard opens; nothing new is saved or sent, and deleting a dictation takes its words back out. Saying a word a lot never makes autocorrect swap a real word for it. Settings › Keyboard › Learn from my dictations, also on the Privacy page; it starts out matching "Learn from my typing".
+- Real words are no longer swapped for commoner ones: "mow", "cam", "bot", "hum" and about 30 more stay as typed.
+- New words and jargon are left alone unless a likely slip onto a common word explains them: "numpy", "yaml", "postgres" and "airtag" stay, and a lowercase word never becomes an abbreviation ("jk" is no longer "HK").
+- About 90 everyday texting words are in (jk, tmrw, gtg, ofc, ngl, tryna, bruh, sus and more). Rude ones are accepted as typed but never suggested.
+- Words are ranked by how often people say them in conversation, not in formal writing, so "Kust" at the start of a sentence becomes "Just", not "Must". The ranks come from film and TV subtitle counts (FrequencyWords, CC BY-SA 4.0, credited in Open-source licenses); that one word file carries that licence.
+- The capital the keyboard adds at the start of a sentence no longer makes a typo look like a name: "Mich" becomes "Much", "Nad" becomes "And", and "Friend's" keeps its apostrophe.
+- A letter from across the keyboard counts as less likely than the key next door: "Qhat" becomes "What", "lovk" becomes "lock".
+- Two words typed without the space are split when they go together, including with "I": "ican", "idont", "andi", "infact", "thankyou", "doyou". A slip onto the next key stays one word ("doon" is "soon").
+- A hyphen or apostrophe you typed stays: "re-enter", "set-up", "time's", "minute's".
+- The keyboard looks two words back, in what you've typed and what you've said, and knows more of what commonly follows a word: "on my wat" becomes "on my way".
+- Undoing a correction with backspace no longer puts the word in your dictionary on the spot, since a backspace can be a slip. It's learned the second time, or when you tap it on the bar. Learned words rank as ordinary words, an undone correction leaves your typing history, and "tap to undo" on the Learned notice removes the word everywhere at once.
+- Tap back on a word that was corrected and the bar offers what you typed first. One tap puts it back.
+- Hold a word on the bar, then tap the notice, to stop it being suggested. Your own words leave the dictionary; any other word stays a word when you type it but is never offered again. Settings › Keyboard lists them, with a button to bring them back.
+- Put the cursor at the end of a word and add letters, and the whole word is checked as one ("walk" + "ing" is "walking"). A word you only touched is left exactly as it was.
+- After a swiped word, a comma or full stop no longer glues the next word on: "good, thanks", "done. See".
+- A space you typed after a word moves behind a full stop, comma, ! or ?: "ok ." becomes "ok. ".
+- With caps lock on, words of four letters or more are fixed and stay in capitals ("THANKD" becomes "THANKS"). Short ones are left alone.
+- Suggestions are worked out in the background, so each letter shows the moment you tap it, however long the word search takes.
+- Backspacing through several words no longer eats the space in front of a word now and then, mostly seen in browsers and chat apps.
+- "sus" was missing from the word list because of a broken line in the file. Example words in the app's tests and notes are no longer farm-specific.
+
 ## 1.59 · 2026-11-09
 - The keyboard's Send, Search, Go and Done keys send the word as you typed it, so a fix can no longer slip into a message you couldn't check first. A new line still fixes the word like a space does.
 - Autocorrect guesses less: a word the keyboard doesn't know stays as you typed it unless a correction is close and clearly likely. App names, tech words and new slang ("venmo", "kotlin", "rizz") no longer turn into other words, and a close everyday word now beats a rare name ("chaim" becomes "chain", not "Chaim").

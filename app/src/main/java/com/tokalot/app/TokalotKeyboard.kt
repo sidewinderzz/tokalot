@@ -54,6 +54,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         private var loading = false
         /** The dictionary words already added to [words] (removed ones stay until the app restarts). */
         private val userWords = HashSet<String>()
+        /** What the user says in dictations (see [SpokenWords]), and the [History.version] it was read at. */
+        private var spoken: SpokenWords? = null
+        private var spokenAt = -1L
+        private var spokenBusy = false
+        /** Names from dictations were added to [words]: switching the feature off reloads the list without them. */
+        private var spokenAdded = false
+        /** The words hidden in [words] so far (see [Prefs.kbHidden]). */
+        private var hiddenWords: Set<String> = emptySet()
 
         private const val HISTORY_FILE = "typing_history.txt"
         /** The clipboard list: kept out of backups (see [ClipHistory]). */
@@ -65,12 +73,25 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         private const val CORRECT_AFTER = ".,!?;:)]}\"\n"
         /** Typed right after an automatic space, these take its place ("word ." becomes "word. "). */
         private const val SWAP_SPACE = ".,!?;:"
+        /** ...and these also hop in front of a space the user typed ("ok ." becomes "ok. "). Not ":" or ";": ":)" follows a space. */
+        private const val SWAP_TYPED = ".,!?"
+        /** A cursor move this soon after a key is the keyboard's own doing, not a tap in the text. */
+        private const val OWN_MOVE_MS = 300L
+        private const val FIXES_MAX = 40
+
+        /**
+         * Suggestions are worked out here, off the main thread, so a key shows up at once however long the word
+         * search takes. [LOCK] is held by a search, and by anything that changes the word list or the typing
+         * history while one may be running.
+         */
+        private val searcher = java.util.concurrent.Executors.newSingleThreadExecutor()
+        private val LOCK = Any()
         private const val AROUND = 200
         private const val FIX_MAX = 6000
 
         /** Settings: forgets the words and pairs the keyboard learned from typing. */
         fun clearHistory(ctx: Context) {
-            history?.clear()
+            synchronized(LOCK) { history?.clear() }
             File(ctx.filesDir, HISTORY_FILE).delete()
         }
 
@@ -113,6 +134,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private var swipe = false
     /** Typing may be remembered (not a password, not an incognito tab). */
     private var personal = false
+    /** What's said in dictations may steer suggestions here: switched on, and not a password box or an incognito tab. */
+    private var spokenHere = false
     private var autocorrect = true
     /** Not a web or email address, nor a box that asks for no suggestions: words may be fixed by themselves. */
     private var plainBox = true
@@ -131,8 +154,26 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     /** Where each letter was touched, in key widths and rows ([Autocorrect]'s units); NaN when not tapped. */
     private val xs = ArrayList<Float>()
     private val ys = ArrayList<Float>()
-    /** The word before it, for context. */
+    /** The word before it, for context, and the one before that when only a space parts them. */
     private var wordPrev: String? = null
+    private var wordPrev2: String? = null
+    /** The word's capital came from the keyboard (the start of a sentence), not from a tap on shift. */
+    private var wordAutoCap = false
+    /** Every letter of the word was typed with caps lock on. */
+    private var wordLocked = false
+    /**
+     * The word as it was picked back up from the text (backspaced into, or the cursor put at its end). Ended
+     * again unchanged, it's left exactly as it is: it wasn't typed just now.
+     */
+    private var resumedAs: String? = null
+    /** Shift is on because a sentence starts here, not because it was tapped. */
+    private var shiftAuto = false
+    /** The space before the cursor was typed on the space bar just now. */
+    private var spaceTyped = false
+    /** The corrections made in this text box, corrected -> typed: back on one, the bar offers what was typed. */
+    private val fixes = LinkedHashMap<String, String>()
+    /** When a key, the bar or a swipe was last used (see [OWN_MOVE_MS]). */
+    private var lastTouch = 0L
     /** It came from a swipe: the bar shows [glideWords], and a backspace takes all of it. */
     private var glided = false
     private var glideWords: List<String> = emptyList()
@@ -143,7 +184,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private var lastSpaceAt = 0L
 
     /** The last autocorrection, which a backspace straight after undoes. */
-    private class Correction(val typed: String, val corrected: String, val sep: String, val prev: String?)
+    private class Correction(val typed: String, val corrected: String, val sep: String, val prev: String?, val prev2: String?)
     private var lastCorrection: Correction? = null
     /** A word whose correction was undone: left alone if it's ended again. */
     private var keepAsTyped: String? = null
@@ -207,7 +248,10 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
                 // autocorrect, no swipe. Both names are tried, the plain one first.
                 val main = runCatching { app.assets.open("keyboard/en_US.txt") }.getOrNull()?.bufferedReader()
                     ?: GZIPInputStream(app.assets.open("keyboard/en_US.txt.gz")).bufferedReader()
-                main.use { m -> app.assets.open("keyboard/en_US_extra.txt").bufferedReader().use { extra -> KeyboardWords.load(m, extra) } }
+                // en_US_chat.txt (how common words are in conversation) is under CC BY-SA 4.0: see its first lines.
+                main.use { m -> app.assets.open("keyboard/en_US_extra.txt").bufferedReader().use { extra ->
+                    app.assets.open("keyboard/en_US_chat.txt").bufferedReader().use { chat -> KeyboardWords.load(m, extra, chat) }
+                } }
             }.onFailure { android.util.Log.e("TokalotKeyboard", "word list didn't load", it) }.getOrNull()
             val h = runCatching {
                 File(app.filesDir, HISTORY_FILE).takeIf { it.exists() }?.readText()?.let { TypingHistory.parse(it) }
@@ -215,7 +259,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             val e = runCatching { app.assets.open("keyboard/emoji.txt").bufferedReader().use { EmojiData.load(it) } }.getOrNull()
             main.post {
                 loading = false
-                words = w; history = h; emoji = e
+                words = w; emoji = e
+                if (history == null) history = h
                 instance?.loaded()
                 if (w == null) instance?.notice("Suggestions and autocorrect are off: the word list didn't load", 5000)
             }
@@ -229,15 +274,72 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (glide == null) glide = Glide(w)
         emoji?.let { e -> panel?.let { if (it.data == null) it.data = e } }
         onLayoutChanged()
+        refreshSpoken()
+        useSpoken()
         showStrip()
     }
+
+    /**
+     * Reads the dictation history into [spoken] when "Learn from my dictations" is on and the history has changed
+     * since it was last read, in the background. Switched off, what was read is dropped at once.
+     */
+    private fun refreshSpoken() {
+        if (words == null) return
+        if (!prefs.kbSpoken) {
+            if (spoken == null) return
+            spoken = null
+            spokenAt = -1L
+            ac?.spoken = null
+            if (spokenAdded) {
+                // The names it added leave the word list too.
+                saveHistory()
+                words = null; userWords.clear(); hiddenWords = emptySet(); spokenAdded = false
+                ac = null; glide = null
+                load()
+            }
+            return
+        }
+        val version = History.version
+        if (spokenBusy || (spoken != null && version == spokenAt)) return
+        spokenBusy = true
+        val app = applicationContext
+        Thread {
+            val read = runCatching { SpokenWords.build(History.all(app).filter { !it.pending }.map { it.text to it.time }) }
+                .onFailure { android.util.Log.w("TokalotKeyboard", "couldn't read dictations", it) }.getOrNull()
+            main.post {
+                spokenBusy = false
+                val w = words
+                if (read == null || w == null || !Prefs(app).kbSpoken) return@post
+                spoken = read
+                spokenAt = version
+                val names = read.unknown(w)
+                if (names.isNotEmpty()) {
+                    synchronized(LOCK) { w.addWords(names) }
+                    spokenAdded = true
+                    instance?.glide?.refreshWords()
+                }
+                instance?.let { it.useSpoken(); it.showStrip() }
+            }
+        }.start()
+    }
+
+    private fun useSpoken() { ac?.spoken = if (spokenHere) spoken else null }
 
     /** Tokalot's dictionary words (typed in, learned, or synced from another device) count as known words. */
     private fun addUserWords() {
         val w = words ?: return
         val add = prefs.words.filter { it !in userWords }
-        if (add.isEmpty()) return
-        w.addUserWords(add)
+        val hide = prefs.kbHidden
+        if (add.isEmpty() && hide == hiddenWords) return
+        // Words the keyboard learned by itself rank as ordinary words; ones put in the dictionary by hand rank high.
+        val learned = prefs.learnedWords
+        synchronized(LOCK) {
+            w.addUserWords(add.filter { it !in learned })
+            w.addUserWords(add.filter { it in learned }, KeyboardWords.LEARNED_PROB)
+            for (h in hiddenWords - hide) w.unhide(h)
+            for (h in hide - hiddenWords) w.hide(h)
+        }
+        hiddenWords = hide
         userWords += add
         glide?.refreshWords()
     }
@@ -245,6 +347,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         session++
+        fixes.clear()
         endSlides()
         resetWord()
         lastCorrection = null; keepAsTyped = null
@@ -267,7 +370,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         )) || (cls == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         predictive = cls == InputType.TYPE_CLASS_TEXT && !password
         // Web and email addresses still get suggestions on the bar, but a word is never changed by itself there
-        // ("deere.com" must stay as typed). Everywhere else autocorrect works, as on Gboard: many apps and web
+        // ("example.com" must stay as typed). Everywhere else autocorrect works, as on Gboard: many apps and web
         // pages mark their chat or search box "no suggestions" (React Native and web autocomplete="off" do), and
         // honouring that left autocorrect quietly off in much of what gets typed.
         plainBox = variation !in setOf(
@@ -279,6 +382,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         swipe = cls == InputType.TYPE_CLASS_TEXT && !password
         personal = !password && info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 && prefs.kbLearn
         autocorrect = prefs.kbAutocorrect && plainBox
+        spokenHere = !password && info.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING == 0 && prefs.kbSpoken
+        refreshSpoken()
+        useSpoken()
         vibrate = prefs.kbVibrate
         sound = prefs.kbSound
 
@@ -366,7 +472,16 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             lastCorrection?.let { c ->
                 if (ic.getTextBeforeCursor(c.corrected.length + c.sep.length, 0)?.toString() != c.corrected + c.sep) lastCorrection = null
             }
-            if (autoSpaced && ic.getTextBeforeCursor(1, 0)?.toString() != " ") autoSpaced = false
+            val last = ic.getTextBeforeCursor(1, 0)?.toString()
+            if (autoSpaced && last != " ") autoSpaced = false
+            if (spaceTyped && last != " ") spaceTyped = false
+            // The cursor was put at the end of a word: that word is picked up whole, so letters added to it are
+            // checked with it ("walk" + "ing"), and a word that was corrected offers what was typed.
+            val moved = oldSelStart != newSelStart || oldSelEnd != newSelEnd
+            val byHand = moved && SystemClock.uptimeMillis() - lastTouch > OWN_MOVE_MS
+            if (byHand) phantomSpace = false // the space owed after a swiped word was for that spot
+            if (moved && shown && predictive && newSelStart == newSelEnd && candidatesStart < 0 && !busy() &&
+                SystemClock.uptimeMillis() - lastTouch > OWN_MOVE_MS) resumeAt(ic, newSelStart)
         }
         if (newSelStart == newSelEnd) updateShift()
         showStrip()
@@ -410,8 +525,14 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val k = kv ?: return
         if (k.page.kind != PageKind.LETTERS || k.shift == KeyboardView.Shift.LOCKED || word.isNotEmpty()) return
         val ei = currentInputEditorInfo ?: return
-        val caps = prefs.kbAutoCaps && (currentInputConnection?.getCursorCapsMode(ei.inputType) ?: 0) != 0
+        val ic = currentInputConnection
+        var caps = prefs.kbAutoCaps && (ic?.getCursorCapsMode(ei.inputType) ?: 0) != 0
+        // A space is owed after a swiped word and its full stop: the sentence that follows starts with a capital.
+        if (!caps && prefs.kbAutoCaps && phantomSpace && ei.inputType and InputType.TYPE_TEXT_FLAG_CAP_SENTENCES != 0) {
+            caps = ic?.getTextBeforeCursor(1, 0)?.lastOrNull()?.let { it in ".!?" } == true
+        }
         k.shift = if (caps) KeyboardView.Shift.ON else KeyboardView.Shift.OFF
+        shiftAuto = caps
     }
 
     // ------------------------------------------------------------------ keys
@@ -436,8 +557,9 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onKey(code: Int, x: Float, y: Float) {
         if (emojiMode == EmojiMode.SEARCH) { searchKey(code); return }
         if (code != KeyCode.SHIFT) dropNotice()
+        lastTouch = SystemClock.uptimeMillis()
         when (code) {
-            KeyCode.SHIFT -> {}
+            KeyCode.SHIFT -> shiftAuto = false
             KeyCode.DELETE -> delete()
             KeyCode.ENTER -> enter()
             KeyCode.SYMBOLS -> showPage(symbolsPage)
@@ -452,6 +574,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onText(text: String) {
         if (emojiMode == EmojiMode.SEARCH) { text.forEach { searchKey(it.code) }; return }
         dropNotice()
+        lastTouch = SystemClock.uptimeMillis()
         if (text.length == 1) type(text[0], Float.NaN, Float.NaN)
         else { commitWord(); currentInputConnection?.commitText(text, 1); showStrip() }
     }
@@ -485,14 +608,24 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         }
         lastCorrection = null
         autoSpaced = false
+        spaceTyped = false
         if (k.chips) dismissChips() // typing on: the things to paste leave the bar, as on Gboard
         val ch = if (k.shift != KeyboardView.Shift.OFF && c.isLetter()) c.uppercaseChar() else c
+        val autoCap = k.shift == KeyboardView.Shift.ON && shiftAuto && c.isLetter()
+        val locked = k.shift == KeyboardView.Shift.LOCKED
         if (k.shift == KeyboardView.Shift.ON) k.shift = KeyboardView.Shift.OFF
         if (!predictive) {
             ic.commitText(ch.toString(), 1)
             return
         }
-        if (word.isEmpty()) wordPrev = prevWord(ic.getTextBeforeCursor(64, 0))
+        if (word.isEmpty()) {
+            val before = ic.getTextBeforeCursor(64, 0)
+            wordPrev = prevWord(before)
+            wordPrev2 = prevWord2(before)
+            wordAutoCap = autoCap
+            wordLocked = locked
+            resumedAs = null
+        } else if (!locked && c.isLetter()) wordLocked = false
         word.append(ch)
         val p = k.page
         val tapped = !x.isNaN() && p.kind == PageKind.LETTERS && p.unit > 0f && c.isLetter()
@@ -504,17 +637,24 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     private fun punctuation(s: String) {
         val ic = currentInputConnection ?: return
+        // A swiped word is owed a space before the next word, and still is after a comma or a full stop.
+        val owed = (glided || phantomSpace) && s[0] in SWAP_SPACE
+        val typedSpace = spaceTyped && s[0] in SWAP_TYPED
+        spaceTyped = false
+        var swapped = false
         if (word.isNotEmpty()) {
             endWord(s, correct = s[0] in CORRECT_AFTER)
-        } else if (autoSpaced && s[0] in SWAP_SPACE && ic.getTextBeforeCursor(1, 0)?.toString() == " ") {
+        } else if ((autoSpaced && s[0] in SWAP_SPACE || typedSpace) && ic.getTextBeforeCursor(2, 0)?.toString().let { it != null && it.endsWith(" ") && (autoSpaced || it.length == 2 && it[0].isLetterOrDigit()) }) {
+            // "word ." becomes "word. ": the space was the keyboard's, or typed straight after a word.
             ic.deleteSurroundingText(1, 0)
             ic.commitText("$s ", 1)
+            swapped = true
         } else {
             ic.commitText(s, 1)
         }
         // After "word." the automatic space stays put: "word. " is ready for the next sentence.
-        autoSpaced = autoSpaced && s[0] in SWAP_SPACE
-        phantomSpace = false
+        autoSpaced = swapped
+        phantomSpace = owed
         updateShift()
         showStrip()
     }
@@ -522,6 +662,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private fun space() {
         val ic = currentInputConnection ?: return
         val now = SystemClock.uptimeMillis()
+        spaceTyped = true
         if (word.isNotEmpty()) {
             endWord(" ", correct = true)
             lastSpaceAt = now
@@ -533,6 +674,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
                 ic.deleteSurroundingText(1, 0)
                 ic.commitText(". ", 1)
                 lastSpaceAt = 0
+                spaceTyped = false
             } else {
                 ic.commitText(" ", 1)
                 lastSpaceAt = now
@@ -556,7 +698,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         // Send, Search, Go and Done send the word as it stands: a fix made at that moment would go out
         // unseen. A new line fixes the word like a space does.
         if (word.isNotEmpty()) { if (noAction) endWord("", correct = true) else commitWord() }
-        autoSpaced = false; phantomSpace = false; lastCorrection = null
+        autoSpaced = false; phantomSpace = false; lastCorrection = null; spaceTyped = false
         when {
             !noAction -> ic.performEditorAction(action)
             ei != null && ei.inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_CLASS_TEXT &&
@@ -571,16 +713,20 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val ic = currentInputConnection ?: return
         val c = lastCorrection
         lastCorrection = null
+        spaceTyped = false
         if (c != null && word.isEmpty()) {
-            // Straight after an autocorrection: back to what was typed. Undoing one counts as using the word,
-            // so twice and it's learned.
+            // Straight after an autocorrection: back to what was typed. Undoing one counts as using the word
+            // once, so it takes two (or a tap on the bar) before it's learned: a backspace can be a slip too.
+            // The correction itself is taken back out of the typing history: it wasn't what was meant.
             if (ic.getTextBeforeCursor(c.corrected.length + c.sep.length, 0)?.toString() == c.corrected + c.sep) {
                 ic.beginBatchEdit()
                 ic.deleteSurroundingText(c.corrected.length + c.sep.length, 0)
                 ic.commitText(c.typed + c.sep, 1)
                 ic.endBatchEdit()
                 keepAsTyped = c.typed
-                remember(c.typed, c.prev, kept = true, chosen = true)
+                forgetUse(c.corrected, c.prev, c.prev2)
+                fixes.remove(c.corrected)
+                remember(c.typed, c.prev, c.prev2, kept = true)
                 showStrip()
                 return
             }
@@ -607,29 +753,67 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         phantomSpace = false
         val selected = ic.getSelectedText(0)
         if (!selected.isNullOrEmpty()) ic.commitText("", 1)
-        else sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+        else if (!deleteChar(ic)) {
+            // An emoji, an accent, or a box that doesn't say what's in it: the app deletes it its own way. A key
+            // press lands whenever the app gets to it, so nothing is read back or picked up after one.
+            sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+            updateShift()
+            showStrip()
+            return
+        }
         if (predictive) resumeWord(ic)
         updateShift()
         showStrip()
     }
 
-    /** Backspaced to the end of a word: it becomes the word being typed again, so suggestions come back. */
+    /**
+     * Deletes the one plain character before the cursor through the text connection, so it has happened by the
+     * time the text is next read. False if what's there isn't one plain character (see [delete]).
+     */
+    private fun deleteChar(ic: InputConnection): Boolean {
+        val c = ic.getTextBeforeCursor(1, 0)?.singleOrNull() ?: return false
+        if (!(c.isLetterOrDigit() || c == ' ' || c == '\n' || c.code in 0x21..0x7e)) return false
+        return ic.deleteSurroundingText(1, 0)
+    }
+
+    /**
+     * Backspaced to the end of a word: it becomes the word being typed again, so suggestions come back. The word
+     * is only marked, never deleted and retyped: retyping it from a reading of the text that was a moment out of
+     * date took the space in front of it too.
+     */
     private fun resumeWord(ic: InputConnection) {
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0) ?: return
+        if (et.selectionStart < 0 || et.selectionStart != et.selectionEnd) return
+        resumeAt(ic, et.startOffset + et.selectionStart)
+    }
+
+    /**
+     * The cursor was put at the end of a word (at [pos] in the text): the word becomes the one being typed. The
+     * text itself isn't touched, only marked, and only when the app's own account of where the cursor is agrees.
+     */
+    private fun resumeAt(ic: InputConnection, pos: Int) {
         val before = ic.getTextBeforeCursor(48, 0)?.toString() ?: return
         val after = ic.getTextAfterCursor(1, 0)?.toString()
         if (after != null && after.isNotEmpty() && after[0].isLetterOrDigit()) return
         var i = before.length
         while (i > 0 && (before[i - 1].isLetterOrDigit() || before[i - 1] == '\'' || before[i - 1] == '’')) i--
         val w = before.substring(i)
-        if (w.isEmpty() || i == 0 && before.length >= 48 || !w.any { it.isLetter() }) return
-        ic.beginBatchEdit()
-        ic.deleteSurroundingText(w.length, 0)
-        ic.setComposingText(w, 1)
-        ic.endBatchEdit()
+        if (w.isEmpty() || i == 0 && before.length >= 48 || !w.any { it.isLetter() } || pos < w.length) return
+        val et = ic.getExtractedText(ExtractedTextRequest(), 0) ?: return
+        if (et.selectionStart != et.selectionEnd || et.startOffset + et.selectionStart != pos) return
+        if (!ic.setComposingRegion(pos - w.length, pos)) return
+        pickedUp(w, before.substring(0, i))
+    }
+
+    private fun pickedUp(w: String, before: String) {
         word.setLength(0); word.append(w)
         xs.clear(); ys.clear()
         repeat(w.length) { xs += Float.NaN; ys += Float.NaN }
-        wordPrev = prevWord(before.substring(0, i))
+        wordPrev = prevWord(before)
+        wordPrev2 = prevWord2(before)
+        wordAutoCap = false
+        wordLocked = false
+        resumedAs = w
         glided = false
     }
 
@@ -640,16 +824,33 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val ic = currentInputConnection ?: return
         val typed = word.toString()
         val prev = wordPrev
+        val prev2 = wordPrev2
         var final = typed
+        // Picked back up from the text and not changed: it stays exactly as it is.
+        val untouched = typed == resumedAs
         // What autocorrect makes of it, even where it may not change it, so a typo left alone isn't learned.
-        val fix = if (glided) null else ac?.suggest(typed, prev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction
+        val fix = if (glided || untouched) null else searched()?.correction
         val chosen = typed == keepAsTyped
         if (correct && autocorrect && !chosen && fix != null) final = fix
         ic.commitText(final + sep, 1)
-        lastCorrection = if (final != typed) Correction(typed, final, sep, prev) else null
+        lastCorrection = if (final != typed) Correction(typed, final, sep, prev, prev2) else null
+        if (final != typed && !final.contains(' ')) {
+            fixes.remove(final)
+            fixes[final] = typed
+            if (fixes.size > FIXES_MAX) fixes.remove(fixes.keys.first())
+        }
         if (!chosen) keepAsTyped = null
-        remember(final, prev, kept = final == typed && !glided && (fix == null || chosen))
+        if (!untouched) remember(final, prev, prev2, kept = final == typed && !glided && (fix == null || chosen))
         resetWord()
+    }
+
+    /**
+     * What autocorrect makes of the word being typed: the bar's own search if it has finished for exactly this
+     * word (see [showStrip]), otherwise worked out now.
+     */
+    private fun searched(): Autocorrect.Result? {
+        found?.let { if (it.gen == stripGen && it.auto) return it.result }
+        return ac?.suggest(word.toString(), wordPrev, xs.toFloatArray(), ys.toFloatArray(), true, wordAutoCap, wordLocked, wordPrev2)
     }
 
     /** Commits the word being typed as it stands. */
@@ -657,8 +858,10 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (word.isEmpty()) return
         currentInputConnection?.finishComposingText()
         val typed = word.toString()
-        val fix = if (glided) null else ac?.suggest(typed, wordPrev, xs.toFloatArray(), ys.toFloatArray(), auto = true)?.correction
-        remember(typed, wordPrev, kept = !glided && (fix == null || typed == keepAsTyped))
+        if (typed != resumedAs) {
+            val fix = if (glided) null else searched()?.correction
+            remember(typed, wordPrev, wordPrev2, kept = !glided && (fix == null || typed == keepAsTyped))
+        }
         resetWord()
         phantomSpace = false
     }
@@ -666,34 +869,48 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private fun resetWord() {
         word.setLength(0); xs.clear(); ys.clear()
         wordPrev = null
+        wordPrev2 = null
+        wordAutoCap = false
+        wordLocked = false
+        resumedAs = null
         glided = false
         glideWords = emptyList()
+        found = null
     }
 
-    /**
-     * The word was used. [kept]: typed by the user and left as typed, so a word the list doesn't know is
-     * learned once it has been kept [KeyboardLearn.TIMES] times.
-     */
     /**
      * Records a finished word in the typing history. [kept]: typed as it stands on purpose, or nothing better was
      * near. A typo that autocorrect would have fixed (in an address box, or with autocorrect off) isn't [kept]
      * and isn't recorded, so it never turns into a "word of yours" that is no longer corrected, nor gets
      * learned into the dictionary that syncs.
      */
-    /** [chosen]: the user insisted on it (undid its correction, or tapped it on the bar): learned straight away. */
-    private fun remember(w: String, prev: String?, kept: Boolean, chosen: Boolean = false) {
+    /**
+     * A word the list doesn't know is learned into the dictionary once it has been [kept] [KeyboardLearn.TIMES]
+     * times, or at once when [chosen]: the user tapped it on the bar.
+     */
+    private fun remember(w: String, prev: String?, prev2: String?, kept: Boolean, chosen: Boolean = false) {
         if (!personal) return
         val h = history ?: return
         val list = words ?: return
         if (w.contains(' ')) {
             // A split ("of the"): each word in turn.
             var p = prev
-            for (part in w.split(' ').filter { it.isNotEmpty() }) { h.used(part, p); p = part }
+            var p2 = prev2
+            synchronized(LOCK) { for (part in w.split(' ').filter { it.isNotEmpty() }) { h.used(part, p, p2); p2 = p; p = part } }
             return
         }
         if (!kept && list.probOf(w) < 0) return
-        h.used(w, prev)
+        synchronized(LOCK) { h.used(w, prev, prev2) }
         if (kept && KeyboardLearn.worth(w, list) && (chosen || h.count(w) >= KeyboardLearn.TIMES)) learn(w)
+    }
+
+    /** Takes back what [remember] recorded for a correction that was undone. */
+    private fun forgetUse(w: String, prev: String?, prev2: String?) {
+        if (!personal) return
+        val h = history ?: return
+        var p = prev
+        var p2 = prev2
+        synchronized(LOCK) { for (part in w.split(' ').filter { it.isNotEmpty() }) { h.unused(part, p, p2); p2 = p; p = part } }
     }
 
     private fun learn(w: String) {
@@ -701,15 +918,62 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         if (p.words.any { it.equals(w, ignoreCase = true) }) return
         p.words = p.words + w
         p.learnedWords = p.learnedWords + w
-        words?.addUserWords(listOf(w))
+        synchronized(LOCK) { words?.addUserWords(listOf(w), KeyboardWords.LEARNED_PROB) }
         userWords += w
         glide?.refreshWords()
         notice("Learned “$w” · tap to undo", 5000) {
-            val q = Prefs(this)
-            q.words = q.words.filter { it != w }
-            q.learnedWords = q.learnedWords - w
-            history?.forget(w)
+            dropWord(w)
             notice("Removed “$w”", 2000)
+        }
+    }
+
+    /** Takes [w] out of the dictionary, the typing history and the keyboard's own list, all at once. */
+    private fun dropWord(w: String) {
+        val q = Prefs(this)
+        q.words = q.words.filter { it != w }
+        q.learnedWords = q.learnedWords - w
+        synchronized(LOCK) {
+            history?.forget(w)
+            words?.remove(w)
+        }
+        userWords -= w
+        glide?.refreshWords()
+    }
+
+    /** A suggestion was held: offers to stop suggesting it. */
+    override fun onStripLong(slot: Int) {
+        val k = kv ?: return
+        if (k.chips || busy() || emojiMode == EmojiMode.SEARCH) return
+        val s = k.suggestions.getOrNull(slot) ?: return
+        if (s.contains(' ') || !s.any { it.isLetter() }) return
+        lastTouch = SystemClock.uptimeMillis()
+        notice("Tap here to stop suggesting “$s”", 5000) { forget(s) }
+    }
+
+    /**
+     * Stops [s] being suggested: one of the user's own words leaves the dictionary; any other word stays a word
+     * when typed but is never offered or corrected to again ([Prefs.kbHidden]). Either way it leaves the typing history.
+     */
+    private fun forget(s: String) {
+        val p = Prefs(this)
+        val mine = p.words.firstOrNull { it.equals(s, ignoreCase = true) }
+        val learned = mine != null && mine in p.learnedWords
+        val lower = s.lowercase()
+        synchronized(LOCK) { history?.forget(s); history?.forget(lower) }
+        if (mine != null) dropWord(mine)
+        else {
+            p.kbHidden = p.kbHidden + lower
+            addUserWords()
+        }
+        found = null
+        notice("Won't suggest “$s” · tap to undo", 5000) {
+            val q = Prefs(this)
+            if (mine != null) {
+                q.words = q.words + mine
+                if (learned) q.learnedWords = q.learnedWords + mine
+            } else q.kbHidden = q.kbHidden - lower
+            addUserWords()
+            showStrip()
         }
     }
 
@@ -724,6 +988,15 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         return t.substring(j, i)
     }
 
+    /** The word before [prevWord]'s, when only spaces part them. */
+    private fun prevWord2(before: CharSequence?): String? {
+        val t = before ?: return null
+        var i = t.length
+        while (i > 0 && t[i - 1] == ' ') i--
+        while (i > 0 && (t[i - 1].isLetterOrDigit() || t[i - 1] == '\'' || t[i - 1] == '’')) i--
+        return prevWord(t.subSequence(0, i))
+    }
+
     private fun sentenceStart(before: CharSequence?): Boolean {
         val t = before?.toString()?.trimEnd(' ') ?: return true
         return t.isEmpty() || t.last() in ".!?\n"
@@ -732,6 +1005,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     // ------------------------------------------------------------------ the suggestion bar
 
     override fun onStrip(slot: Int) {
+        lastTouch = SystemClock.uptimeMillis()
         when (slot) {
             KeyboardView.SLOT_MENU -> openMenu()
             KeyboardView.SLOT_CANCEL -> when {
@@ -772,18 +1046,40 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             }
             val typed = word.toString()
             val prev = wordPrev
-            ic.commitText("$s ", 1)
-            // Tapping what was typed on the bar is choosing it: it counts towards learning it.
-            if (s == typed) keepAsTyped = typed
-            remember(s, prev, kept = s == typed, chosen = s == typed)
+            val prev2 = wordPrev2
+            // A word picked back up in the middle of the text already has its space or punctuation after it.
+            val next = if (typed == resumedAs) ic.getTextAfterCursor(1, 0)?.firstOrNull() else null
+            val sep = if (next != null && !next.isLetterOrDigit()) "" else " "
+            val original = if (typed == resumedAs) fixes[typed] else null
+            ic.commitText(s + sep, 1)
+            if (original != null && s == original) {
+                // Back to what was typed before it was corrected: the correction leaves the typing history, and
+                // the word counts as chosen.
+                forgetUse(typed, prev, prev2)
+                fixes.remove(typed)
+                keepAsTyped = s
+                remember(s, prev, prev2, kept = true, chosen = true)
+            } else {
+                // Tapping what was typed on the bar is choosing it: it counts towards learning it.
+                if (s == typed) keepAsTyped = typed
+                if (!(s == typed && typed == resumedAs)) remember(s, prev, prev2, kept = s == typed, chosen = s == typed)
+            }
             resetWord()
+            lastCorrection = null
+            autoSpaced = sep.isNotEmpty()
+            spaceTyped = false
+            lastSpaceAt = 0
+            updateShift()
+            showStrip()
+            return
         } else {
-            val prev = prevWord(ic.getTextBeforeCursor(64, 0))
+            val before = ic.getTextBeforeCursor(64, 0)
             ic.commitText("$s ", 1)
-            remember(s, prev, kept = false)
+            remember(s, prevWord(before), prevWord2(before), kept = false)
         }
         lastCorrection = null
         autoSpaced = true
+        spaceTyped = false
         lastSpaceAt = 0
         updateShift()
         showStrip()
@@ -792,6 +1088,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     /** Fills the bar: the word's corrections and completions, or next-word guesses between words. */
     private fun showStrip() {
         val k = kv ?: return
+        stripGen++ // whatever search is still running is for a bar that's gone
         if (busy() || notice != null || emojiMode == EmojiMode.SEARCH) return
         k.message = null
         k.cancelable = false
@@ -818,9 +1115,25 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
                 k.boldSlot = k.suggestions.indexOf(current)
                 return
             }
-            val r = a.suggest(word.toString(), wordPrev, xs.toFloatArray(), ys.toFloatArray(), auto = autocorrect && word.toString() != keepAsTyped)
-            k.suggestions = r.shown
-            k.boldSlot = r.pick
+            // Worked out off the main thread, so the letter shows at once; the bar follows a moment later, and a
+            // result for a word that has changed since is dropped.
+            val typed = word.toString()
+            val auto = autocorrect && typed != keepAsTyped && typed != resumedAs
+            val gen = stripGen
+            val prev = wordPrev; val prev2 = wordPrev2
+            val tx = xs.toFloatArray(); val ty = ys.toFloatArray()
+            val autoCap = wordAutoCap; val locked = wordLocked
+            searcher.execute {
+                if (gen != stripGen) return@execute
+                val r = runCatching { synchronized(LOCK) { a.suggest(typed, prev, tx, ty, auto, autoCap, locked, prev2) } }
+                    .onFailure { android.util.Log.w("TokalotKeyboard", "suggestions failed", it) }.getOrNull() ?: return@execute
+                main.post {
+                    if (gen != stripGen || instance !== this) return@post
+                    found = Found(gen, auto, r)
+                    if (busy() || notice != null || emojiMode == EmojiMode.SEARCH) return@post
+                    showFound(r)
+                }
+            }
             return
         }
         val ic = currentInputConnection
@@ -828,13 +1141,33 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val prev = prevWord(before)
         val list = when {
             before != null && before.isNotEmpty() && before.last() != ' ' && before.last() != '\n' -> emptyList()
-            prev != null -> a.predict(prev, 3)
+            prev != null -> a.predict(prev, 3, prevWord2(before))
             sentenceStart(before) -> a.predict(null, 3)
             else -> emptyList()
         }
         val caps = k.shift != KeyboardView.Shift.OFF
         k.suggestions = list.map { if (caps) it.replaceFirstChar { c -> c.uppercaseChar() } else it }
         k.boldSlot = -1
+    }
+
+    /** Goes up each time the bar is refilled; a search carries the number it was started for. */
+    @Volatile private var stripGen = 0
+    /** The last search that finished: for which refill, and whether autocorrect was on for it. */
+    private class Found(val gen: Int, val auto: Boolean, val result: Autocorrect.Result)
+    private var found: Found? = null
+
+    private fun showFound(r: Autocorrect.Result) {
+        val k = kv ?: return
+        val typed = word.toString()
+        // Back on a word that was corrected: what was typed comes first, one tap away.
+        val original = if (typed == resumedAs) fixes[typed]?.takeIf { it != typed } else null
+        if (original != null) {
+            k.suggestions = listOfNotNull(original, typed, r.shown.firstOrNull { it != original && it != typed })
+            k.boldSlot = 1
+        } else {
+            k.suggestions = r.shown
+            k.boldSlot = r.pick
+        }
     }
 
     // ---- short notices on the bar ("Learned …", "Fixed · tap to undo")
@@ -880,6 +1213,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onGlideStart(x: Float, y: Float) {
         val ic = currentInputConnection ?: return
         dropNotice()
+        lastTouch = SystemClock.uptimeMillis()
+        spaceTyped = false
         if (word.isNotEmpty()) {
             if (glided) commitWord() else endWord("", correct = true)
             glideSpace = true
@@ -895,6 +1230,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     override fun onGlideMove(x: Float, y: Float) { glide?.add(x, y) }
 
     override fun onGlideEnd() {
+        lastTouch = SystemClock.uptimeMillis()
         val ic = currentInputConnection ?: return
         val k = kv ?: return
         val g = glide
@@ -905,7 +1241,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         val prev = prevWord(ic.getTextBeforeCursor(64, 0))
         // Says on the bar why nothing was typed, rather than nothing happening.
         val found = try {
-            g.words(5, prev, if (personal) history else null)
+            g.words(5, prev, if (personal) history else null, if (spokenHere) spoken else null, System.currentTimeMillis())
         } catch (e: Throwable) {
             android.util.Log.e("TokalotKeyboard", "swipe failed", e)
             notice("Swipe didn't work (${e.javaClass.simpleName}: ${e.message?.take(40)})", 6000)
@@ -927,6 +1263,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
             return
         }
         wordPrev = prev
+        wordPrev2 = null
+        resumedAs = null
         word.setLength(0); word.append(list[0])
         xs.clear(); ys.clear()
         glided = true
@@ -949,6 +1287,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private var cursorByKeys = false
 
     override fun onCursorSlide(steps: Int) {
+        lastTouch = SystemClock.uptimeMillis()
         val ic = currentInputConnection ?: return
         if (cursorSlide == null && !cursorByKeys) {
             commitWord()
@@ -977,6 +1316,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     }
 
     override fun onSlideEnd(cancelled: Boolean) {
+        lastTouch = SystemClock.uptimeMillis()
         val ic = currentInputConnection
         if (cancelled && ic != null) {
             cursorSlide?.let { ic.setSelection(it.fromStart, it.fromEnd) }
@@ -1003,6 +1343,7 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     private var slideFromEnd = 0
 
     override fun onDeleteSlide(words: Int, done: Boolean) {
+        lastTouch = SystemClock.uptimeMillis()
         val ic = currentInputConnection ?: return
         if (slideAnchor < 0) {
             commitWord()
@@ -1366,6 +1707,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     }
 
     override fun onClipPaste(text: String) {
+        lastTouch = SystemClock.uptimeMillis()
+        spaceTyped = false
         val ic = currentInputConnection ?: return
         if (phantomSpace) ic.commitText(" ", 1)
         phantomSpace = false; autoSpaced = false; lastCorrection = null
@@ -1482,6 +1825,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
     }
 
     override fun onEmoji(text: String) {
+        lastTouch = SystemClock.uptimeMillis()
+        spaceTyped = false
         val ic = currentInputConnection ?: return
         commitWord()
         if (phantomSpace) ic.commitText(" ", 1)
@@ -1684,6 +2029,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
 
     /** Types a dictation at the cursor, fitted to the sentence around it, or copies it if the text box is gone. */
     private fun typeDictation(text: String, fitted: Boolean) {
+        lastTouch = SystemClock.uptimeMillis()
+        spaceTyped = false
         val ic = currentInputConnection
         // The keyboard closed, or moved to another text box, while the words were being worked on.
         if (ic == null || !shown || session != micSession) {
@@ -1699,6 +2046,8 @@ class TokalotKeyboard : InputMethodService(), KeyboardView.Listener, EmojiPanel.
         t = TextTools.pad(t, before.lastOrNull(), after.firstOrNull())
         ic.commitText(t, 1)
         updateShift()
+        // What was just said steers the typing that follows it.
+        main.postDelayed({ if (instance === this) refreshSpoken() }, 1500)
         val typedIn = session
         notice("Typed ✓ · tap to undo", 5000) {
             val c = currentInputConnection ?: return@notice

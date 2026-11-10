@@ -47,6 +47,8 @@ object Privacy {
         // Tokalot Keyboard: what it keeps or looks at beyond the key you pressed.
         Switch("Keyboard: learn from my typing", "Remembers the words you type and what follows what, on this phone only, for better suggestions.", CLOUD,
             { it.kbLearn }) { p, on -> p.kbLearn = on },
+        Switch("Keyboard: learn from my dictations", "Autocorrect and suggestions follow the words and phrases in your dictation history. Worked out on this phone each time the keyboard opens; nothing new is saved or sent.", CLOUD,
+            { it.kbSpoken }) { p, on -> p.kbSpoken = on },
         Switch("Keyboard: clipboard", "Keeps what you copy for an hour, on this phone only.", CLOUD,
             { it.kbClipboard }) { p, on -> p.kbClipboard = on },
         Switch("Keyboard: suggest what I copied", "Something you just copied shows on the keyboard's bar, ready to paste.", setOf(Level.FULL),
