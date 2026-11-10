@@ -42,6 +42,7 @@ class RecordingService : Service() {
         if (intent?.action == ACTION_STOP) {
             OfflineFlowService.instance?.stopFromNotification()
             TokalotKeyboard.instance?.stopFromNotification()
+            AppMic.stopFromNotification()
             return START_NOT_STICKY
         }
         val nm = getSystemService(NotificationManager::class.java)

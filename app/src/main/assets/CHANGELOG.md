@@ -6,6 +6,12 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.62 · 2026-11-10
+- The welcome on a new install starts by asking how you want to use Tokalot: a floating mic button over your own keyboard, Tokalot Keyboard, or just the app. Only the floating button needs Android's accessibility switch, and setup now asks only for what your pick needs.
+- Change it any time in Settings › Setup › How you use Tokalot. Picking one doesn't switch anything off, so you can still use more than one; it just changes what setup and Home's Finish setup ask for.
+- Just the app: a Record button at the top of Home. Talk, tap Stop, and the text is copied and saved on Home with your other dictations. Sharing a voice message or audio file to Tokalot works as before.
+- Share in a dictation's ⋮ menu on Home, to send the text to another app.
+
 ## 1.61 · 2026-11-10
 - Fewer letters typed by mistake when you aim for the space bar. While you're typing a word, the space bar's touch area now reaches a little way up into the bottom of c, v, b and n, since a thumb going for space tends to land a bit high. Right after a space it barely reaches, so starting the next word on those letters works as before.
 - The space bar row is a little taller, and a tap in the thin strip under it now types a space instead of nothing.

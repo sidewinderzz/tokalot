@@ -885,6 +885,14 @@ class Prefs(ctx: Context) {
         get() = sp.safeBoolean("welcome_done", false)
         set(v) = sp.edit().putBoolean("welcome_done", v).apply()
 
+    /**
+     * How this phone uses Tokalot: a [UseMode] name, or empty when it was never picked (then [UseMode.current]
+     * works it out from what's switched on). Stays on this phone, like the accessibility switch it's about.
+     */
+    var useMode: String
+        get() = sp.safeString("use_mode", null) ?: ""
+        set(v) = sp.edit().putString("use_mode", v).apply()
+
     /** The welcome has started, and set the level it opens on. */
     var welcomeStarted: Boolean
         get() = sp.safeBoolean("welcome_started", false)

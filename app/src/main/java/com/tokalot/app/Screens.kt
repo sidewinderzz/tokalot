@@ -831,6 +831,11 @@ class SettingsScreen(private val a: MainActivity) {
 
         // --- Setup
         section(col, "Setup")
+        // How this phone uses Tokalot: it decides which rows below are must-dos and which are optional.
+        val mode = useMode()
+        col.addView(text("How you use Tokalot", 14f, C.SUB), lp().margins(this, b = 8, l = 4))
+        modePicker(col)
+        col.addView(text("Only the floating mic button needs the accessibility switch. You can use more than one: picking one just changes what this page asks for.", 13f, C.SUB), lp().margins(this, t = 8, b = 16, l = 4))
         val setup = card()
         fun setupRow(title: String, done: Boolean, doneText: String, action: String, optional: Boolean = false, onClick: () -> Unit): TextView {
             if (setup.childCount > 0) setup.addView(divider())
@@ -859,9 +864,15 @@ class SettingsScreen(private val a: MainActivity) {
                 askPermission(Manifest.permission.POST_NOTIFICATIONS, 2)
             }
         }
-        setupRow("Accessibility switch", serviceEnabled(), "On", "Set up") { openAccessibilitySetup() }
+        if (mode == UseMode.KEYBOARD) {
+            setupRow("Tokalot Keyboard", TokalotKeyboard.isEnabled(this), "On", "Turn on") {
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+            }
+        }
+        val floating = mode == UseMode.FLOATING
+        setupRow("Accessibility switch (floating mic button)", serviceEnabled(), "On", "Set up", optional = !floating) { openAccessibilitySetup() }
         // A phone's battery saver can kill the mic button's service in the background; some makers' never start it again.
-        setupRow("Battery saver off for Tokalot", ServiceGuard.batteryUnrestricted(this), "Unrestricted", "Allow") {
+        setupRow("Battery saver off for Tokalot", ServiceGuard.batteryUnrestricted(this), "Unrestricted", "Allow", optional = !floating) {
             runCatching { startActivity(ServiceGuard.batteryIntent(this)) }
                 .onFailure { toast("Open this phone's Settings › Apps › Tokalot › Battery and pick Unrestricted") }
         }
@@ -1799,11 +1810,10 @@ class SettingsScreen(private val a: MainActivity) {
         when (name) {
             SETUP -> {
                 // The battery row only counts on phones known to kill background services; elsewhere it's just there.
-                val left = listOf(
-                    micGranted(), serviceEnabled(), prefs.cloudSttReady || ModelManager.isReady(this),
-                    !ServiceGuard.strictMaker || ServiceGuard.batteryUnrestricted(this),
-                ).count { !it }
-                if (left == 0) "All set" to false else "$left ${if (left == 1) "thing" else "things"} to do" to true
+                val battery = useMode() != UseMode.FLOATING || !ServiceGuard.strictMaker || ServiceGuard.batteryUnrestricted(this)
+                val left = (setupSteps() + battery).count { !it }
+                val how = useMode().label
+                if (left == 0) "$how · all set" to false else "$how · $left ${if (left == 1) "thing" else "things"} to do" to true
             }
             PRIVACY -> (Privacy.current(prefs)?.label ?: "Custom") to false
             KEYBOARD -> (if (!TokalotKeyboard.isEnabled(this)) "Off" else "On · swipe ${yes(prefs.kbSwipe)} · autocorrect ${yes(prefs.kbAutocorrect)}") to false

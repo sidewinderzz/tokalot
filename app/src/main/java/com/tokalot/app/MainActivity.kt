@@ -201,6 +201,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         History.onChange = { if (onHomeList()) render() }
+        AppMic.onChange = { if (!isDestroyed && onHomeList()) render() }
         Notes.onChange = { refreshNotes() }
         render()
         // Check again once Android has had time to start the service (see serviceStuck).
@@ -449,6 +450,7 @@ class MainActivity : Activity() {
             body.addView(text(detail, 15f, C.SUB))
         }
         body.addView(text("Android shows a strong warning for every accessibility app, because the permission is powerful. Here's exactly what Tokalot does with it.", 15f))
+        body.addView(text("It's only for the floating mic button. Tokalot Keyboard and the app on its own work without it (Settings › Setup › How you use Tokalot).", 14f, C.SUB), lp().margins(this, t = 8))
         point("What it's used for",
             "Noticing when your keyboard is open on a text box (to show the button), learning which app you're in (for its style), and typing your words into that box.")
         point("What it never does",
@@ -844,8 +846,32 @@ class MainActivity : Activity() {
     fun serviceStuck() = serviceEnabled() && !ServiceGuard.running() &&
         SystemClock.uptimeMillis() - android.os.Process.getStartUptimeMillis() > STUCK_GRACE_MS
 
-    fun setupComplete() = micGranted() && serviceEnabled() &&
-        (prefs.cloudSttReady || ModelManager.isReady(this))
+    /** How this phone uses Tokalot (see [UseMode]); setup only asks for what it needs. */
+    fun useMode() = UseMode.current(this, prefs)
+
+    /**
+     * The must-dos for the picked [useMode], done or not: the mic, a way to turn speech into text, and the
+     * accessibility switch for the floating button or the keyboard switched on for the keyboard. The plain app
+     * needs neither.
+     */
+    fun setupSteps(): List<Boolean> = listOfNotNull(
+        micGranted(),
+        prefs.cloudSttReady || ModelManager.isReady(this),
+        when (useMode()) {
+            UseMode.FLOATING -> serviceEnabled()
+            UseMode.KEYBOARD -> TokalotKeyboard.isEnabled(this)
+            UseMode.APP -> null
+        },
+    )
+
+    fun setupComplete() = setupSteps().all { it }
+
+    /** What setup unlocks, for "N things left before …". */
+    fun setupGoal() = when (useMode()) {
+        UseMode.FLOATING -> "the mic button appears"
+        UseMode.KEYBOARD -> "the keyboard's mic works"
+        UseMode.APP -> "you can record"
+    }
 
     // ---------- Home ----------
 
@@ -912,6 +938,7 @@ class MainActivity : Activity() {
         }
 
         needsYouCard()?.let { col.addView(it, lp().margins(this, b = 16)) }
+        if (useMode() == UseMode.APP || AppMic.state != AppMic.State.IDLE) col.addView(recordCard(), lp().margins(this, b = 16))
 
         // This month at a glance.
         val m = Usage.month(this)
@@ -956,6 +983,47 @@ class MainActivity : Activity() {
     }
 
     /**
+     * Home's Record button, for people who use Tokalot as a plain app ([UseMode.APP], see [AppMic]): tap to record,
+     * tap Stop, and the words show up below with the other dictations. The timer ticks while it records.
+     */
+    private fun recordCard(): View {
+        val c = card(18)
+        val sub = text("", 14f, C.SUB)
+        val action = when (AppMic.state) {
+            AppMic.State.IDLE -> pill("Record", R.drawable.ic_mic, filled = true) { AppMic.toggle(this) }
+            AppMic.State.RECORDING -> pill("Stop", R.drawable.ic_stop, filled = true) { AppMic.toggle(this) }
+            AppMic.State.WORKING -> pill("Cancel") { AppMic.toggle(this) }
+        }
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(text(when (AppMic.state) {
+                AppMic.State.IDLE -> "Record"
+                AppMic.State.RECORDING -> "Listening…"
+                AppMic.State.WORKING -> "Transcribing…"
+            }, 17f))
+            addView(sub)
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        c.addView(row(texts, action))
+        when (AppMic.state) {
+            AppMic.State.IDLE -> sub.text = "Talk, then tap Stop. The text is copied and saved below. Or share a voice message or audio file to Tokalot."
+            AppMic.State.WORKING -> sub.text = "The text is copied when it's ready."
+            AppMic.State.RECORDING -> {
+                val tick = object : Runnable {
+                    override fun run() {
+                        if (AppMic.state != AppMic.State.RECORDING || (sub.text.isNotEmpty() && !sub.isAttachedToWindow)) return
+                        val secs = (SystemClock.elapsedRealtime() - AppMic.startedAt) / 1000
+                        sub.text = "%d:%02d · up to 5 minutes".format(secs / 60, secs % 60)
+                        sub.postDelayed(this, 1000)
+                    }
+                }
+                tick.run()
+            }
+        }
+        return c
+    }
+
+    /**
      * Everything on Home that wants the user, as one card with a row each, most urgent first, instead of a stack of
      * cards above the stats. Each row opens where it's dealt with. Null when there's nothing.
      */
@@ -963,8 +1031,8 @@ class MainActivity : Activity() {
         class Item(val title: String, val sub: String, val warn: Boolean, val dismiss: (() -> Unit)? = null, val open: () -> Unit)
         val items = ArrayList<Item>()
         if (!setupComplete()) {
-            val left = listOf(micGranted(), serviceEnabled(), prefs.cloudSttReady || ModelManager.isReady(this)).count { !it }
-            items += Item("Finish setup", "$left ${if (left == 1) "thing" else "things"} left before the mic button appears", true) { openSettings(SettingsScreen.SETUP) }
+            val left = setupSteps().count { !it }
+            items += Item("Finish setup", "$left ${if (left == 1) "thing" else "things"} left before ${setupGoal()}", true) { openSettings(SettingsScreen.SETUP) }
         }
         if (setupComplete() && serviceStuck()) {
             // The switch is on but Android hasn't started the service (some phones, after an update).
@@ -1134,6 +1202,11 @@ class MainActivity : Activity() {
         lateinit var more: View
         more = pill(null, R.drawable.ic_more, desc = "More") {
             val items = ArrayList<Pair<String, () -> Unit>>()
+            if (!e.pending) items.add("Share" to {
+                runCatching {
+                    startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, e.text), null))
+                }
+            })
             if (!e.pending) items.add("Copy original" to { copy(e.raw.ifBlank { e.text }) })
             // Saved to Notes it's a note of its own there (same id, so this one knows), and the dictation stays here.
             if (!e.pending && Notes.has(this@MainActivity, e.id)) items.add("Open in Notes" to { openNote(e.id) })
