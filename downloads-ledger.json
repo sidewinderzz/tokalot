@@ -1351,7 +1351,7 @@
    "release": "linux-v0.10.1"
   },
   "657900902": {
-   "count": 2,
+   "count": 3,
    "name": "Tokalot-linux-x64-0.10.1.tar.gz",
    "release": "linux-v0.10.1"
   },
@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 167,
+   "count": 171,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2791,6 +2791,6 @@
    "release": "android-beta"
   }
  },
- "total": 1470,
- "updated": "2026-11-13T22:38:36Z"
+ "total": 1475,
+ "updated": "2026-11-14T03:17:24Z"
 }
