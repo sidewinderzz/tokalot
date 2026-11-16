@@ -1911,7 +1911,7 @@
    "release": "android-beta"
   },
   "670391959": {
-   "count": 3,
+   "count": 4,
    "name": "Tokalot-linux-x64-0.15.0.tar.gz",
    "release": "linux-v0.15.0"
   },
@@ -2051,7 +2051,7 @@
    "release": "android-beta"
   },
   "689051589": {
-   "count": 3,
+   "count": 4,
    "name": "Tokalot-linux-x64-0.16.0.tar.gz",
    "release": "linux-v0.16.0"
   },
@@ -2196,7 +2196,7 @@
    "release": "linux-v0.16.1"
   },
   "689536544": {
-   "count": 3,
+   "count": 4,
    "name": "Tokalot-linux-x64-0.16.1.tar.gz",
    "release": "linux-v0.16.1"
   },
@@ -2746,7 +2746,7 @@
    "release": "desktop"
   },
   "712191437": {
-   "count": 220,
+   "count": 228,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2791,6 +2791,6 @@
    "release": "android-beta"
   }
  },
- "total": 1533,
- "updated": "2026-11-16T02:44:10Z"
+ "total": 1544,
+ "updated": "2026-11-16T11:20:27Z"
 }
