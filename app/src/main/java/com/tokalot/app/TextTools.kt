@@ -24,7 +24,7 @@ object TextTools {
 
     /**
      * Whisper is given the dictionary as its prompt. On a clip with nothing said it can hand that prompt back,
-     * mixed with its stock phrases: "Thank you. Thank you. Hó, Tokalot, Shelby." True when the text is made of
+     * mixed with its stock phrases: "Thank you. Thank you. Hó, Tokalot, Marisol." True when the text is made of
      * nothing but those (plus a stray syllable or two). sparse: barely any sound was heard, so one dictionary
      * word or a stock phrase alone is enough; otherwise it takes two dictionary words and nothing else.
      */

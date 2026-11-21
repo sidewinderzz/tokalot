@@ -112,9 +112,9 @@ class KeyboardTest {
 
     @Test fun userWordsBecomeKnown() {
         val w = GZIPInputStream(File("src/main/assets/keyboard/en_US.txt.gz").inputStream()).bufferedReader().use { KeyboardWords.load(it, File("src/main/assets/keyboard/en_US_extra.txt").bufferedReader()) }
-        w.addUserWords(listOf("Shelbyz"))
-        assertNull(Autocorrect(w).suggest("Shelbyz", null).correction)
-        assertEquals("Shelbyz", Autocorrect(w).suggest("shelbyz", null).correction)
+        w.addUserWords(listOf("Marisolz"))
+        assertNull(Autocorrect(w).suggest("Marisolz", null).correction)
+        assertEquals("Marisolz", Autocorrect(w).suggest("marisolz", null).correction)
     }
 
     @Test fun swipeFindsTheWord() {
@@ -268,8 +268,8 @@ class KeyboardTest {
         assertEquals(listOf("https://deere.com/parts"), ClipHistory.smart("https://deere.com/parts"))
         assertEquals(listOf("https://deere.com/parts", "Parts are at https://deere.com/parts."),
             ClipHistory.smart("Parts are at https://deere.com/parts."))
-        assertEquals(listOf("shelby@example.com", "(555) 123-4567", "Call (555) 123-4567 or mail shelby@example.com"),
-            ClipHistory.smart("Call (555) 123-4567 or mail shelby@example.com"))
+        assertEquals(listOf("sam@example.com", "(555) 123-4567", "Call (555) 123-4567 or mail sam@example.com"),
+            ClipHistory.smart("Call (555) 123-4567 or mail sam@example.com"))
         // Plain numbers and dates aren't phone numbers.
         assertEquals(listOf("Bale count 240 on 10/20"), ClipHistory.smart("Bale count 240 on 10/20"))
     }

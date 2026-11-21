@@ -120,8 +120,8 @@ internal static class Shots
             WordStats.OnTrack(3000, 30, 30) == null && avg.Average == 2000);
         Check("10a stray thank you dropped", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.8}]}") == "");
         Check("10b said thank you kept", CloudStt.Text("{\"text\":\" Thank you.\",\"segments\":[{\"no_speech_prob\":0.05}]}") == " Thank you.");
-        var echoWords = new[] { "Tokalot", "srg62003" };
-        Check("10e dictionary echoed on silence dropped", TextTools.IsEcho("Thank you. Thank you. Hó, Tokalot, srg62003.", echoWords, false));
+        var echoWords = new[] { "Tokalot", "qz4417" };
+        Check("10e dictionary echoed on silence dropped", TextTools.IsEcho("Thank you. Thank you. Hó, Tokalot, qz4417.", echoWords, false));
         Check("10f dictionary word said kept", !TextTools.IsEcho("Tokalot is working.", echoWords, false));
         Check("10c other words kept", CloudStt.Text("{\"text\":\"Call me\",\"segments\":[{\"no_speech_prob\":0.9}]}") == "Call me");
         File.WriteAllLines(Path.Combine(dir, "sync-checks.txt"), lines);
