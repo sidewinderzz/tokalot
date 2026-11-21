@@ -2,6 +2,10 @@
 
 **Mac testers wanted:** if you try it, please comment on the ["Mac testers wanted" issue](https://github.com/sidewinderzz/tokalot/issues/6), even if everything works.
 
+## New in 0.17.0
+
+- Quiet microphones are heard properly. When a microphone records speech much softer than normal, Tokalot raises it to a normal level before it's transcribed, so soft words and soft endings are no longer missed. Your saved recordings stay as they were.
+
 ## New in 0.16.0
 
 - A short What's new card shows once on Home after this update, with a slide for each new feature and one about what's new in the Android app (skip it if you like).

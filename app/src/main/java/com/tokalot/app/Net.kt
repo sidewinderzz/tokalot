@@ -226,13 +226,13 @@ object Net {
 class Upload(val fileName: String, val mime: String, val length: Long, val write: (OutputStream) -> Unit) {
     companion object {
         fun wav(samples: FloatArray): Upload {
-            val bytes = Net.wav(samples)
+            val bytes = Net.wav(Loudness.forSpeech(samples))
             return Upload("audio.wav", "audio/wav", bytes.size.toLong()) { it.write(bytes) }
         }
 
         /** Lossless, about half the size of the WAV, and quick enough to make for any length. */
         fun flac(samples: FloatArray): Upload {
-            val bytes = Flac.encode(samples)
+            val bytes = Flac.encode(Loudness.forSpeech(samples))
             return Upload("audio.flac", "audio/flac", bytes.size.toLong()) { it.write(bytes) }
         }
 
@@ -307,4 +307,44 @@ object CloudStt {
 
     /** Whisper's own cut-off for "this was silence" is 0.6; a stock phrase on top of it needs less. */
     const val NO_SPEECH = 0.5
+}
+
+/**
+ * Brings a quiet recording up to a normal speaking level before speech recognition. Some microphones record
+ * speech 15-18 dB below normal (seen on a Windows on ARM laptop), and Whisper then misses soft words or a whole
+ * soft ending. The saved recording is left as it was. Same as the desktop apps' Loudness.
+ */
+object Loudness {
+    /** The level speech is brought up to: the loud parts of it (RMS of the top 5% of 50 ms stretches). */
+    const val TARGET = 0.1f
+    /** Never more than this (18 dB), so a recording of nothing but room noise isn't made into a roar. */
+    const val MAX_GAIN = 8f
+    /** The loudest 50 ms stretch is never raised past this RMS. */
+    const val LOUDEST = 0.25f
+
+    /** How much forSpeech would raise a by (1 = left alone). */
+    fun gain(a: FloatArray): Float {
+        val win = 800 // 50 ms at 16 kHz
+        val n = a.size / win
+        if (n < 4) return 1f
+        val rms = FloatArray(n) { w ->
+            var sum = 0.0
+            for (i in w * win until (w + 1) * win) sum += a[i] * a[i]
+            kotlin.math.sqrt(sum / win).toFloat()
+        }
+        rms.sort()
+        val loud = rms[minOf(n - 1, n * 95 / 100)]
+        if (loud <= 0.0005f) return 1f // silence: nothing to bring up
+        // A short command in a long recording: the top 5% can be room noise. Never push the loudest stretch past
+        // LOUDEST, so speech that is already at a normal level is never raised into clipping.
+        val g = minOf(MAX_GAIN, TARGET / loud, LOUDEST / rms[n - 1])
+        return if (g < 1.25f) 1f else g // already at a normal level
+    }
+
+    /** a, raised to a normal speaking level when it is quiet (a new array), or a itself. */
+    fun forSpeech(a: FloatArray): FloatArray {
+        val g = gain(a)
+        if (g == 1f) return a
+        return FloatArray(a.size) { (a[it] * g).coerceIn(-0.99f, 0.99f) }
+    }
 }

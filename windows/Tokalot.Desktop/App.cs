@@ -248,11 +248,45 @@ public sealed class App : Application
     private async Task CheckForUpdatesLoop()
     {
         await Task.Delay(TimeSpan.FromSeconds(20));
+        // Every few minutes: a build downloaded in the background goes in once Tokalot has been left alone a while.
+        new DispatcherTimer(TimeSpan.FromMinutes(5), DispatcherPriority.Background, (_, _) => ApplyUpdateWhenIdle(), Dispatcher).Start();
         while (true)
         {
             await CheckForUpdates();
+            if (UpdateVersion != null && UpdateProgress == null)
+            {
+                try
+                {
+                    var v = await Updater.Prefetch();
+                    if (v != null) Log("Update " + v + " downloaded; it goes in when Tokalot is idle or next starts");
+                }
+                catch (Exception e) { Log("Background update download failed: " + e.Message); }
+            }
             // Just after sign-in the network often isn't up yet: try again soon rather than in hours.
             await Task.Delay(Updater.LastCheckFailed ? TimeSpan.FromMinutes(3) : TimeSpan.FromHours(3));
+        }
+    }
+
+    /**
+     * Puts a downloaded update in place without being asked, when nobody would notice: no dictation for 15 minutes,
+     * none in progress, and the window closed. Tokalot restarts straight back into the tray.
+     */
+    private void ApplyUpdateWhenIdle()
+    {
+        if (Updater.ReadyVersion == null || UpdateProgress != null) return;
+        if (Controller is not { Busy: false } c || DateTime.UtcNow - c.LastUsed < TimeSpan.FromMinutes(15)) return;
+        if (window is { IsVisible: true }) return;
+        try
+        {
+            Log("Installing update " + Updater.ReadyVersion + " while idle");
+            Controller.SaveBeforeExit();
+            if (tray != null) tray.Visible = false;
+            Updater.ApplyReady();
+        }
+        catch (Exception e)
+        {
+            if (tray != null) tray.Visible = true;
+            Log("Idle update failed: " + e.Message);
         }
     }
 
@@ -499,6 +533,7 @@ public sealed class Controller : IDisposable
     /** asNote: a voice note, which goes to no app, so it's cleaned up in the general style. */
     private bool Begin(bool handsFreeMode, bool asNote = false)
     {
+        LastUsed = DateTime.UtcNow;
         learner.Stop(learn: true); // a correction made before this dictation still counts
         app = asNote ? null : AppDetect.Detect();
         recorder.CueSamples = Settings.Current.Sounds ? Recorder.SampleRate * 6 / 10 : 0;
@@ -687,6 +722,8 @@ public sealed class Controller : IDisposable
     private ActiveApp? heldApp;
 
     public bool Busy => state != State.Idle;
+    /** When a dictation was last started, so an update can wait until Tokalot has been left alone a while. */
+    public DateTime LastUsed { get; private set; } = DateTime.UtcNow;
 
     /**
      * Tokalot is about to close. A recording that is still being made or transcribed exists only in memory,

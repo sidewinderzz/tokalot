@@ -156,7 +156,7 @@ public sealed class LocalWhisper : IDisposable
             if (!string.IsNullOrWhiteSpace(hint)) builder = builder.WithPrompt(hint);
             await using var processor = builder.Build();
             var sb = new StringBuilder();
-            await foreach (var seg in processor.ProcessAsync(samples, ct)) sb.Append(seg.Text);
+            await foreach (var seg in processor.ProcessAsync(Loudness.ForSpeech(samples), ct)) sb.Append(seg.Text);
             return sb.ToString();
         }
         finally

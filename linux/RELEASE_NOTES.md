@@ -1,5 +1,9 @@
 **Beta.** This is the first Linux build of Tokalot. It is a port of the Windows app with the same pages, settings and dictation pipeline.
 
+## New in 0.21.0
+
+- Quiet microphones are heard properly. When a microphone records speech much softer than normal, Tokalot raises it to a normal level before it's transcribed, so soft words and soft endings are no longer missed. Your saved recordings stay as they were.
+
 ## New in 0.20.0
 
 - A short What's new card shows once on Home after this update, with a slide for each new feature and one about what's new in the Android app (skip it if you like).

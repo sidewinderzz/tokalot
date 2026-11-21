@@ -61,6 +61,37 @@ public static class Updater
         }
     }
 
+    /** A newer build was downloaded in the background (Prefetch) and is waiting to be put in place. */
+    public static string? ReadyVersion { get; private set; }
+    private static UpdateInfo? ready;
+
+    /**
+     * Downloads the newest build quietly, without restarting. Returns its version, or null. Velopack puts a
+     * downloaded build in place the next time Tokalot starts, and ApplyReady() does it sooner while nothing is
+     * going on. Updates once waited for a click on the banner, and a tray app that runs for weeks stayed on an
+     * old build with a dictation bug long after the fix shipped.
+     */
+    public static async Task<string?> Prefetch()
+    {
+        if (!CanUpdate) return null;
+        var info = await Manager.CheckForUpdatesAsync();
+        if (info == null) return null;
+        var v = info.TargetFullRelease.Version.ToString();
+        if (v == ReadyVersion) return v;
+        await Manager.DownloadUpdatesAsync(info, _ => { });
+        ready = info;
+        ReadyVersion = v;
+        return v;
+    }
+
+    /** Restarts into the build Prefetch downloaded, back in the tray. False when there is none. */
+    public static bool ApplyReady()
+    {
+        if (ready == null) return false;
+        Manager.ApplyUpdatesAndRestart(ready.TargetFullRelease, new[] { "--background" });
+        return true;
+    }
+
     /**
      * Looks again for the newest build, downloads it, then restarts into it. [beforeRestart] runs just
      * before the app exits. Returns the version being installed, or null when nothing newer is there.
