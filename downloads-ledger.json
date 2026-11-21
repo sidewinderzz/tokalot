@@ -2791,76 +2791,151 @@
    "release": "android-beta"
   },
   "776847323": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-linux-arm64-0.21.0.tar.gz",
    "release": "linux-v0.21.0"
   },
   "776847324": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-linux-x64-0.21.0.tar.gz",
    "release": "linux-v0.21.0"
   },
   "776854628": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-1.25.0-win-arm64-full.nupkg",
    "release": "desktop-v1.25.0"
   },
   "776854629": {
-   "count": 0,
+   "count": 1,
    "name": "RELEASES",
    "release": "desktop-v1.25.0"
   },
   "776854630": {
-   "count": 0,
+   "count": 1,
    "name": "RELEASES-win-arm64",
    "release": "desktop-v1.25.0"
   },
   "776854631": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-win-Portable.zip",
    "release": "desktop-v1.25.0"
   },
   "776854632": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-1.25.0-full.nupkg",
    "release": "desktop-v1.25.0"
   },
   "776854647": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-win-arm64-Portable.zip",
    "release": "desktop-v1.25.0"
   },
   "776854648": {
-   "count": 0,
+   "count": 1,
    "name": "TokalotSetup-arm64.exe",
    "release": "desktop-v1.25.0"
   },
   "776854725": {
-   "count": 0,
+   "count": 1,
    "name": "TokalotSetup.exe",
    "release": "desktop-v1.25.0"
   },
   "776854736": {
-   "count": 0,
+   "count": 1,
    "name": "assets.win-arm64.json",
    "release": "desktop-v1.25.0"
   },
   "776854745": {
-   "count": 0,
+   "count": 1,
    "name": "assets.win.json",
    "release": "desktop-v1.25.0"
   },
   "776854746": {
-   "count": 0,
+   "count": 1,
    "name": "releases.win-arm64.json",
    "release": "desktop-v1.25.0"
   },
   "776854752": {
-   "count": 0,
+   "count": 1,
    "name": "releases.win.json",
    "release": "desktop-v1.25.0"
+  },
+  "776855168": {
+   "count": 0,
+   "name": "Tokalot-1.25.0-full.nupkg",
+   "release": "desktop"
+  },
+  "776855306": {
+   "count": 0,
+   "name": "Tokalot-1.25.0-win-arm64-full.nupkg",
+   "release": "desktop"
+  },
+  "776855465": {
+   "count": 0,
+   "name": "Tokalot-win-Portable.zip",
+   "release": "desktop"
+  },
+  "776855640": {
+   "count": 0,
+   "name": "Tokalot-win-arm64-Portable.zip",
+   "release": "desktop"
+  },
+  "776855785": {
+   "count": 0,
+   "name": "TokalotSetup-arm64.exe",
+   "release": "desktop"
+  },
+  "776855913": {
+   "count": 1,
+   "name": "Tokalot-v1.57.apk",
+   "release": "v1.57"
+  },
+  "776855953": {
+   "count": 0,
+   "name": "TokalotSetup.exe",
+   "release": "desktop"
+  },
+  "776856090": {
+   "count": 0,
+   "name": "assets.win-arm64.json",
+   "release": "desktop"
+  },
+  "776856164": {
+   "count": 0,
+   "name": "assets.win.json",
+   "release": "desktop"
+  },
+  "776856245": {
+   "count": 3,
+   "name": "releases.win.json",
+   "release": "desktop"
+  },
+  "776856312": {
+   "count": 0,
+   "name": "RELEASES",
+   "release": "desktop"
+  },
+  "776856412": {
+   "count": 0,
+   "name": "releases.win-arm64.json",
+   "release": "desktop"
+  },
+  "776856565": {
+   "count": 0,
+   "name": "RELEASES-win-arm64",
+   "release": "desktop"
+  },
+  "776863209": {
+   "count": 1,
+   "name": "Tokalot-mac-arm64-0.17.0.zip",
+   "release": "mac-v0.17.0"
+  },
+  "776874008": {
+   "count": 1,
+   "name": "Tokalot-v1.63.apk",
+   "release": "v1.63"
   }
  },
- "total": 1689,
- "updated": "2026-11-21T20:58:32Z"
+ "total": 1709,
+ "updated": "2026-11-21T23:17:58Z"
 }
