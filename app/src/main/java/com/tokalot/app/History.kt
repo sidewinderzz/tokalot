@@ -40,6 +40,10 @@ object History {
     /** Held while the file itself is written, by the writer and by [restore]. Always taken before History's own lock. */
     private val fileLock = Any()
 
+    /** Goes up with every change to the history, so the keyboard knows to read it again (see [SpokenWords]). */
+    @Volatile var version = 0L
+        private set
+
     /** Set by the app screen so the list refreshes live when a dictation lands. */
     @Volatile var onChange: (() -> Unit)? = null
 
@@ -101,6 +105,7 @@ object History {
      */
     @Synchronized
     private fun save(ctx: Context) {
+        version++
         notifyChanged()
         if (writeQueued) return
         writeQueued = true
@@ -139,6 +144,7 @@ object History {
             replace(ctx, json, "history.restore")
             cache = null
             generation++
+            version++
         }
         notifyChanged()
     }
@@ -154,7 +160,7 @@ object History {
 
     /** Drops the in-memory copy so the next read comes from disk (after a restore). */
     @Synchronized
-    fun reload() { cache = null; generation++; notifyChanged() }
+    fun reload() { cache = null; generation++; version++; notifyChanged() }
 
     /** Tells the open screen to redraw (e.g. once a recording finishes saving). */
     fun notifyChanged() { onChange?.let { cb -> main.post { cb() } } }

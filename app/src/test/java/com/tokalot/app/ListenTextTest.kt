@@ -7,17 +7,17 @@ import org.junit.Test
 
 class ListenTextTest {
     @Test fun articleComesOutOfAPage() {
-        val html = """<html><head><title>How to calibrate a drill | Farm Journal</title>
-            <meta property="og:site_name" content="Farm Journal"></head><body>
+        val html = """<html><head><title>How to calibrate a drill | Maker Journal</title>
+            <meta property="og:site_name" content="Maker Journal"></head><body>
             <nav><p>Home</p><p>Subscribe</p></nav>
             <article><h1>How to calibrate a drill</h1>
             <p>Jack up one side so the drive wheel turns freely. ${"Count the turns it takes to cover a hundredth of an acre. ".repeat(4)}</p>
             <p>Catch the seed from two or three openers &amp; weigh it.</p>
             <script>var x = "<p>not this</p>";</script></article>
             <footer><p>© 2026</p></footer></body></html>"""
-        val page = ListenText.page(html, "https://www.farmjournal.com/a/1")
+        val page = ListenText.page(html, "https://www.makerjournal.example/a/1")
         assertEquals("How to calibrate a drill", page.title)
-        assertEquals("Farm Journal", page.site)
+        assertEquals("Maker Journal", page.site)
         assertEquals(3, page.blocks.size)
         assertEquals("Catch the seed from two or three openers & weigh it.", page.blocks[2])
     }

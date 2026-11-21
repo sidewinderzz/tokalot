@@ -255,7 +255,7 @@ class NoteScreen(private val a: MainActivity, private val id: Long, private val 
         }
         Notes.allTags(all).forEach { list.addView(line(it), lp()) }
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        if (list.childCount == 0) box.addView(text("No tags yet. Type one below, like Farm, Shop or Ideas.", 15f, C.SUB), lp().margins(this, b = 8))
+        if (list.childCount == 0) box.addView(text("No tags yet. Type one below, like Home, Work or Ideas.", 15f, C.SUB), lp().margins(this, b = 8))
         box.addView(list)
         val f = field("New tag")
         fun addTyped() {

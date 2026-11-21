@@ -1,8 +1,41 @@
 # Tokalot keyboard: additions on top of en_US.txt.gz (which is generated from the AOSP list, see
 # tools/keyboard/make_wordlist.py). Edited by hand. A word here is added, or raised to this probability
-# (0-255; nothing is lowered). "ok" after it clears the list's "possibly offensive" mark.
-#   word<TAB>probability[<TAB>ok]
-# After "=shortcuts": typed<TAB>replacement<TAB>strength (14+ always replaces something that isn't a word).
+# (0-255; nothing is lowered). After it, "ok" clears the list's "possibly offensive" mark and "x" sets it
+# (the word is accepted as typed, never suggested).
+#   word<TAB>probability[<TAB>ok|x]
+# Then "=shortcuts": typed<TAB>replacement<TAB>strength (14+ always replaces something that isn't a word),
+# and "=next": word<TAB>next<TAB>next... (what commonly follows a word, likeliest first; these go in front of
+# the generated list's own).
+sus	105
+rizz	105
+bae	105
+yeet	105
+lowkey	105
+highkey	105
+vibe	105
+vibes	105
+stan	105
+simp	105
+ghosted	105
+ghosting	105
+doomscrolling	105
+bestie	105
+besties	105
+fomo	105
+nft	105
+nfts	105
+saas	105
+crypto	105
+bitcoin	105
+startup	105
+startups	105
+onboarding	105
+binge	105
+kombucha	105
+matcha	105
+boba	105
+keto	105
+vegan	105
 ur	110
 u	120
 ya	100	ok
@@ -31,31 +64,239 @@ dunno	95
 y'all	110
 okay	150
 yeah	160
-auger	110
-augers	90
-nozzle	110
-nozzles	100
-sprayer	110
-sprayers	95
-planter	110
-seeder	100
-drill	130
-combine	140
-header	120
-baler	110
-bales	110
-heifer	100
-heifers	95
-bushels	110
-acres	130
-fertilizer	115
-hydraulic	115
-hydraulics	110
-diesel	120
-welder	110
-welding	115
-plasma	110
-torque	110
+# Everyday tech and app words the 2014 list lacks (general, not tied to any trade).
+api	110
+apis	110
+json	110
+async	110
+cron	110
+regex	110
+repo	110
+repos	110
+config	110
+configs	110
+dev	110
+devs	110
+webhook	110
+webhooks	110
+login	110
+logins	110
+logout	110
+signup	110
+signups	110
+dropdown	110
+dropdowns	110
+checkbox	110
+checkboxes	110
+frontend	110
+backend	110
+localhost	110
+oauth	110
+npm	110
+nginx	110
+github	110
+gitlab	110
+gmail	110
+gradle	110
+kotlin	110
+javascript	110
+typescript	110
+python	110
+linux	110
+android	110
+ios	110
+macos	110
+wifi	110
+hotspot	110
+bluetooth	110
+airpods	110
+earbuds	110
+smartwatch	110
+selfie	110
+selfies	110
+hashtag	110
+hashtags	110
+vlog	110
+vlogs	110
+vlogger	110
+podcast	110
+podcasts	110
+livestream	110
+livestreams	110
+streamer	110
+influencer	110
+influencers	110
+emoji	110
+emojis	110
+meme	110
+memes	110
+gif	110
+gifs	110
+tiktok	110
+insta	110
+instagram	110
+snapchat	110
+whatsapp	110
+venmo	110
+zelle	110
+paypal	110
+cashapp	110
+uber	110
+lyft	110
+doordash	110
+grubhub	110
+instacart	110
+airbnb	110
+netflix	110
+hulu	110
+spotify	110
+youtube	110
+youtuber	110
+chatgpt	110
+openai	110
+llm	110
+llms	110
+chatbot	110
+chatbots	110
+rebase	110
+refactor	110
+refactoring	110
+deploy	110
+deployed	110
+deploys	110
+commit	110
+commits	110
+debug	110
+debugging	110
+dashboard	110
+dashboards	110
+workflow	110
+workflows	110
+inbox	110
+screenshot	110
+screenshots	110
+unsubscribe	110
+ebook	110
+ebooks	110
+smartphone	110
+smartphones	110
+touchscreen	110
+app	110
+apps	110
+online	110
+offline	110
+website	110
+websites	110
+username	110
+usernames	110
+password	110
+passwords	110
+email	110
+emails	110
+texting	110
+voicemail	110
+facetime	110
+ringtone	110
+autocorrect	110
+keyboard	110
+keyboards	110
+scrollbar	110
+timestamp	110
+timestamps	110
+# Everyday texting words the 2014 list lacks (general chat, nothing tied to a trade or a region).
+jk	100
+gtg	100
+g2g	100
+ily	100
+ilysm	100
+wya	100
+tmr	100
+tmrw	100
+tmw	100
+ofc	100
+idgaf	100	x
+wdym	100
+frfr	100
+istg	100
+iykyk	100
+hmu	100
+wbu	100
+bff	100
+iirc	100
+tldr	100
+ftw	100
+gg	100
+ez	100
+lmfao	100	x
+bruh	100
+yw	100
+nbd	100
+srsly	100
+obvi	100
+vid	100
+vids	100
+convo	100
+bday	100
+gf	100
+kk	100
+hm	100
+ew	100
+aww	100
+meh	100
+vibing	100
+nocap	100
+deadass	100
+finna	100
+tryna	100
+boutta	100
+wassup	100
+hiya	100
+heya	100
+yolo	100
+facetimed	100
+venmoed	100
+screenshotted	100
+unfollow	100
+unfriend	100
+retweet	100
+delulu	100
+bussin	100
+periodt	100
+ick	100
+situationship	100
+glowup	100
+goated	100
+idc	100
+ngl	100
+fr	100
+fyi	100
+asap	100
+irl	100
+pic	100
+pics	100
+fam	100
+bro	100
+sis	100
+lil	100
+huh	100
+uh	100
+um	100
+ugh	100
+yay	100
+woo	100
+oops	100
+whoa	100
+wow	100
+gotcha	100
+sup	100
+congrats	100
+texted	100
+texting	100
+googled	100
+emoji	100
+meme	100
+vibe	100
+vibes	100
 =shortcuts
 definatly	definitely	15
 definately	definitely	15
@@ -93,8 +334,88 @@ andthe	and the	15
 forthe	for the	15
 iam	I am	15
 alot	a lot	15
-nozzel	nozzle	15
-augar	auger	15
-hydrolic	hydraulic	15
-hydralic	hydraulic	15
-fertlizer	fertilizer	15
+wenesday	Wednesday	15
+wensday	Wednesday	15
+wendsday	Wednesday	15
+wednsday	Wednesday	15
+wedensday	Wednesday	15
+thrusday	Thursday	15
+thurday	Thursday	15
+tuseday	Tuesday	15
+teusday	Tuesday	15
+saterday	Saturday	15
+satuday	Saturday	15
+febuary	February	15
+feburary	February	15
+=next
+I	don't	can	know	think	have	will	was	am	just	need	want	love	mean	can't	didn't	would
+you	can	are	know	have	want	need	too	don't	guys	got	were	will	think	should
+we	can	are	have	need	should	will	were	could	got	just
+they	are	have	were	will	can	don't	said	just
+he	is	was	said	has	will	just	can	didn't
+she	is	was	said	has	will	just	can	didn't
+it	is	was	will	would	works	looks	just	should	doesn't
+my	way	phone	house	mom	dad	name	bad	own	friend	car	wife	husband	place	day	fault
+your	way	phone	house	mom	dad	name	own	call	place	day	time
+on	my	the	a	your	it	his	her	time
+in	the	a	my	fact	case	this	an	your	there
+at	the	home	work	least	all	a	my	this
+to	the	be	do	get	go	see	have	me	you	make
+for	the	a	me	you	sure	now	it	this	my	your
+of	the	a	my	course	it	them	this	those	us	your
+with	the	a	you	me	my	it	that	this	them	us
+do	you	it	not	that	we	they	I
+did	you	it	not	that	he	she	they	I	we
+can	you	I	we	be	do	get	see
+could	you	be	have	I	we	not
+would	you	be	have	like	love	it	not
+will	be	you	do	have	get	not	let
+should	be	I	have	we	you	not
+are	you	we	they	not	the	going	there
+is	it	that	there	the	a	not	this	he	she
+was	the	a	it	going	just	not	there	thinking
+have	a	to	you	been	the	any	fun
+has	been	a	the	to	it
+had	a	to	the	been	it
+be	there	a	the	able	back	good	great	home	late	fine	sure
+been	a	the	there	working	thinking	trying
+thank	you	God	goodness
+thanks	for	so	a	again	though
+see	you	if	it	the	what	how	that
+let	me	us	them	you	him	her	it
+let's	go	do	get	see	just
+love	you	it	the	that	this	to
+miss	you	it	the	him	her
+call	me	you	him	her	it	them
+tell	me	you	him	her	them	us
+text	me	you	him	her	them
+send	me	it	you	them	him	her	the
+give	me	it	you	them	him	her	us
+going	to	on	out	back	home	well
+want	to	it	a	the	you	me	some
+need	to	a	it	the	you	some	help
+have	to	a	you	been	the	any	fun
+got	it	a	the	to	home	my	your
+get	it	a	the	to	back	out	home	there	some
+how	are	is	do	about	much	many	was	did	long
+what	is	are	do	about	time	did	was	the	if	happened
+when	you	I	we	the	is	are	do	did	it
+where	are	is	do	did	you	the	we
+why	are	is	do	did	not	would	don't
+who	is	are	was	did	knows
+good	morning	night	luck	job	to	idea	one	for	thing	time
+sounds	good	great	like	fun	perfect
+no	problem	worries	way	one	idea	I	need	thanks
+not	sure	a	the	yet	really	going	too	sure
+just	a	got	the	to	wanted	let	saw	like	in
+so	I	much	we	that	you	it	the	sorry	far	good
+too	much	many	late	bad	long
+very	much	good	well	nice
+a	lot	few	little	good	bit	couple	great	new	while
+the	same	best	way	other	first	one	time	only	whole	rest	next	last
+this	is	one	morning	week	weekend	time	year	afternoon	evening
+that	is	was	the	I	you	we	would	sounds	works	one
+next	week	time	year	month	to	weekend
+last	night	week	year	time	month	one	weekend
+right	now	here	there	away	after	before	back
+as	well	soon	a	long	much	the	far	I

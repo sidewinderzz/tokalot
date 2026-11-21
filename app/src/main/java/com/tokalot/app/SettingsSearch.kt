@@ -37,6 +37,8 @@ object SettingsSearch {
         "wpm" to listOf("auto speed aims"), "words" to listOf("auto speed aims"),
         "summary" to listOf("summary length"), "whatsapp" to listOf("voice notes"), "note" to listOf("voice notes", "note phrases"),
         "private" to listOf("privacy"), "privacy" to listOf("privacy"),
+        "accessibility" to listOf("floating", "just the app", "keyboard"), "welcome" to listOf("floating", "just the app"),
+        "transcribe" to listOf("just the app"), "transcription" to listOf("just the app"),
     )
 
     /** Words that say nothing about which setting: "turn on dark mode" searches for dark. */
