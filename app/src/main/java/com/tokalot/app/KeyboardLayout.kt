@@ -92,11 +92,23 @@ class KeyboardPage(val kind: PageKind, val rows: List<KeyRow>) {
         }
     }
 
-    /** The key under a touch at ([x], [y]), or null below or above the keys. */
-    fun keyAt(x: Float, y: Float): Key? {
+    /**
+     * The key under a touch at ([x], [y]), or null above the keys. A touch below the last row counts as that row
+     * (the thin margin under the space bar).
+     *
+     * [spaceReach] (a share of a row's height) lets the space bar take in the bottom of the keys right above it:
+     * a thumb aiming for space tends to land a little high, onto c v b n. The keyboard passes a full reach while
+     * a word is being typed (space is the likely next key) and a small one right after a space.
+     */
+    fun keyAt(x: Float, y: Float, spaceReach: Float = 0f): Key? {
         if (rows.isEmpty() || rowHeight <= 0f) return null
-        if (y < 0 || y >= height) return null
-        val r = (rows.indices).lastOrNull { rowTops[it] <= y } ?: return null
+        if (y < 0) return null
+        val yy = if (y >= height) height - 0.5f else y
+        val r = (rows.indices).lastOrNull { rowTops[it] <= yy } ?: return null
+        if (spaceReach > 0f && r == rows.size - 2 && yy >= rowTops[r + 1] - spaceReach * rowHeight) {
+            val space = rows[r + 1].keys.firstOrNull { it.code == KeyCode.SPACE }
+            if (space != null && x >= space.hitLeft && x < space.hitRight) return space
+        }
         return rows[r].keys.firstOrNull { x >= it.hitLeft && x < it.hitRight } ?: rows[r].keys.lastOrNull()
     }
 
@@ -117,6 +129,12 @@ class KeyboardPage(val kind: PageKind, val rows: List<KeyRow>) {
 object Layouts {
     /** The number row's height against a letter row's. */
     const val NUMBER_ROW = 0.78f
+    /** The space bar row's height against a letter row's: a little taller, so it's easier to hit. */
+    const val SPACE_ROW = 1.08f
+    /** How far (in rows) the space bar's touch area reaches up into the keys above it while a word is being typed. */
+    const val SPACE_REACH = 0.25f
+    /** The same right after a space or at the start, when a letter is the likely next key. */
+    const val SPACE_REACH_IDLE = 0.08f
     private val ACCENTS = mapOf(
         'a' to "àáâäæãåā", 'c' to "çćč", 'e' to "èéêëēęė", 'i' to "ìíîïīį", 'n' to "ñń",
         'o' to "òóôöõœøō", 's' to "ßśš", 'u' to "ùúûüū", 'y' to "ÿý", 'z' to "žźż", 'l' to "ł",
@@ -152,7 +170,7 @@ object Layouts {
             Key(KeyCode.SPACE, "", 4f),
             Key('.'.code, ".", popup = PERIOD_POPUP),
             Key(KeyCode.ENTER, "enter", 1.5f),
-        ))
+        ), heightScale = SPACE_ROW)
     }
 
     /** [symbolHints]: show and offer each letter's symbol on long press (the top row's digits always). */

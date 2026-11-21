@@ -51,7 +51,7 @@ object Listen {
     /** Whether this waiting item is something to read aloud (not a shared voice note). */
     fun isListen(info: NoteImport.Info) = info.o.has("listen")
 
-    /** What a waiting item shows: "Read aloud · farmprogress.com". */
+    /** What a waiting item shows: "Read aloud · example.com". */
     fun label(info: NoteImport.Info): String {
         val l = info.o.optJSONObject("listen") ?: return "Read aloud"
         val what = l.optString("site").ifEmpty { ListenText.host(l.optString("url")) }.ifEmpty { l.optString("name") }

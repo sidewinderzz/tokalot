@@ -101,7 +101,7 @@ class Glide(private val words: KeyboardWords) {
     }
 
     /** The best [n] words for the swipe so far, best first. [prev]: the word before, for context. */
-    fun words(n: Int, prev: String?, history: TypingHistory? = null): List<String> {
+    fun words(n: Int, prev: String?, history: TypingHistory? = null, spoken: SpokenWords? = null, now: Long = 0L): List<String> {
         if (count < 2 || centers.isEmpty()) return emptyList()
         ensureVocab()
         val radius = min(keyW, keyH)
@@ -148,6 +148,11 @@ class Glide(private val words: KeyboardWords) {
                     val c = history.count(form)
                     if (c > 0) score += min(2f, 0.6f * kotlin.math.ln(1f + c))
                     if (prev != null && history.pairCount(prev, form) > 0) score += 1.5f
+                }
+                if (spoken != null) {
+                    // Words the user says in dictations, and what they say after the word before.
+                    score += 0.6f * spoken.weight(form, words.prob(id), now)
+                    if (prev != null && spoken.pairCount(prev, form) >= SpokenWords.PAIR_MIN) score += 1.2f
                 }
                 insert(best, id to score, n)
             }

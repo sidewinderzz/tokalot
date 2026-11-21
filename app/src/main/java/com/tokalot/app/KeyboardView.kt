@@ -56,6 +56,8 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         fun onSlideEnd(cancelled: Boolean)
         /** The bar: a suggestion's slot (0-2), [SLOT_MENU], [SLOT_MESSAGE] or [SLOT_CANCEL]. */
         fun onStrip(slot: Int)
+        /** A suggestion on the bar was held. */
+        fun onStripLong(slot: Int) {}
         /** A toolbar button on the bar (one of [KeyboardToolbar]'s). */
         fun onTool(item: String)
         /** A key went down: for the click and buzz. */
@@ -74,6 +76,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
         /** A backspace slide that reached the keyboard's left edge: everything in the text box. */
         const val DELETE_ALL = Int.MAX_VALUE
         private const val LONG_PRESS_MS = 380L
+        private const val STRIP_LONG_MS = 500L
         private const val REPEAT_START_MS = 400L
         private const val REPEAT_MS = 55L
         /** A slide along space or from backspace only starts this long after the touch, so a quick tap stays a tap. */
@@ -316,6 +319,10 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     var symbolHints = true
 
     /** The keys' height against the usual (Settings' keyboard height, 0.8-1.3). */
+    /** True while a word is being typed (space is then the likely next key, see [KeyboardPage.keyAt]). */
+    var wordInProgress: () -> Boolean = { false }
+    private fun spaceReach() = if (wordInProgress()) Layouts.SPACE_REACH else Layouts.SPACE_REACH_IDLE
+
     var heightScale = 1f
         set(v) { if (field != v) { field = v; requestLayout(); invalidate() } }
 
@@ -340,9 +347,15 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
             return out
         }
         val micLeft = KeyboardToolbar.micOnLeft(toolbar)
-        val from = if (micLeft) 2 * side else side
+        var from = if (micLeft) 2 * side else side
         val to = if (micLeft) w else w - side
         if (micLeft) out += Part(side, 2 * side, TOOL, KeyboardToolbar.MIC)
+        // The clipboard stays one tap away while suggestions fill the bar (if it's on the toolbar at all).
+        if (message == null && KeyboardToolbar.CLIPBOARD in toolbar) {
+            val clip = stripHeight
+            out += Part(from, from + clip, TOOL, KeyboardToolbar.CLIPBOARD)
+            from += clip
+        }
         when {
             message != null -> out += Part(from, to, SLOT_MESSAGE)
             chips -> {
@@ -633,12 +646,16 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 val i = e.actionIndex
                 val x = e.getX(i); val y = e.getY(i)
                 if (y < keysTop) {
-                    if (e.actionMasked == MotionEvent.ACTION_DOWN) stripDown = x
+                    if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                        stripDown = x
+                        handler.removeCallbacks(stripLong)
+                        handler.postDelayed(stripLong, STRIP_LONG_MS)
+                    }
                     return true
                 }
                 // A second finger down: the first one's key is typed now (fast two-thumb typing).
                 for (p in pointers.values) if (!p.fired && !p.gliding && !p.sliding && !p.deleting && menu == null) fire(p)
-                val key = page.keyAt(toPageX(x), toPageY(y))
+                val key = page.keyAt(toPageX(x), toPageY(y), spaceReach())
                 val p = Pointer(e.getPointerId(i), key, x, y, SystemClock.uptimeMillis())
                 pointers[p.id] = p
                 if (key != null) {
@@ -652,6 +669,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 invalidate()
             }
             MotionEvent.ACTION_MOVE -> {
+                if (stripDown >= 0f && kotlin.math.abs(e.x - stripDown) > page.unit * 0.5f) handler.removeCallbacks(stripLong)
                 for (i in 0 until e.pointerCount) {
                     val p = pointers[e.getPointerId(i)] ?: continue
                     move(p, e.getX(i), e.getY(i))
@@ -660,6 +678,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                 val i = e.actionIndex
                 val id = e.getPointerId(i)
+                handler.removeCallbacks(stripLong)
                 if (pointers.isEmpty() && stripDown >= 0f && e.actionMasked == MotionEvent.ACTION_UP) {
                     stripTap(e.getX(i), e.getY(i))
                     stripDown = -1f
@@ -683,6 +702,7 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
                 pointers.clear()
                 menu = null
                 stripDown = -1f
+                handler.removeCallbacks(stripLong)
                 handler.removeCallbacks(longPress)
                 handler.removeCallbacks(repeat)
                 invalidate()
@@ -692,6 +712,17 @@ class KeyboardView(context: Context, private val listener: Listener) : View(cont
     }
 
     private var stripDown = -1f
+
+    /** A finger held on a suggestion: the word can be forgotten. The tap that would follow is dropped. */
+    private val stripLong = Runnable {
+        val x = stripDown
+        if (x < 0f || message != null || chips) return@Runnable
+        val part = stripParts().firstOrNull { x >= it.left && x < it.right } ?: return@Runnable
+        if (part.kind < 0 || suggestions.getOrNull(part.kind) == null) return@Runnable
+        stripDown = -1f
+        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+        listener.onStripLong(part.kind)
+    }
 
     private fun stripTap(x: Float, y: Float) {
         if (y > keysTop) return

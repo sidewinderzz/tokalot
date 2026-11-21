@@ -831,6 +831,11 @@ class SettingsScreen(private val a: MainActivity) {
 
         // --- Setup
         section(col, "Setup")
+        // How this phone uses Tokalot: it decides which rows below are must-dos and which are optional.
+        val mode = useMode()
+        col.addView(text("How you use Tokalot", 14f, C.SUB), lp().margins(this, b = 8, l = 4))
+        modePicker(col)
+        col.addView(text("Only the floating mic button needs the accessibility switch. You can use more than one: picking one just changes what this page asks for.", 13f, C.SUB), lp().margins(this, t = 8, b = 16, l = 4))
         val setup = card()
         fun setupRow(title: String, done: Boolean, doneText: String, action: String, optional: Boolean = false, onClick: () -> Unit): TextView {
             if (setup.childCount > 0) setup.addView(divider())
@@ -859,9 +864,15 @@ class SettingsScreen(private val a: MainActivity) {
                 askPermission(Manifest.permission.POST_NOTIFICATIONS, 2)
             }
         }
-        setupRow("Accessibility switch", serviceEnabled(), "On", "Set up") { openAccessibilitySetup() }
+        if (mode == UseMode.KEYBOARD) {
+            setupRow("Tokalot Keyboard", TokalotKeyboard.isEnabled(this), "On", "Turn on") {
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS))
+            }
+        }
+        val floating = mode == UseMode.FLOATING
+        setupRow("Accessibility switch (floating mic button)", serviceEnabled(), "On", "Set up", optional = !floating) { openAccessibilitySetup() }
         // A phone's battery saver can kill the mic button's service in the background; some makers' never start it again.
-        setupRow("Battery saver off for Tokalot", ServiceGuard.batteryUnrestricted(this), "Unrestricted", "Allow") {
+        setupRow("Battery saver off for Tokalot", ServiceGuard.batteryUnrestricted(this), "Unrestricted", "Allow", optional = !floating) {
             runCatching { startActivity(ServiceGuard.batteryIntent(this)) }
                 .onFailure { toast("Open this phone's Settings › Apps › Tokalot › Battery and pick Unrestricted") }
         }
@@ -926,8 +937,16 @@ class SettingsScreen(private val a: MainActivity) {
         // Optional extras for the bar, each needing one permission: a screenshot just taken, ready to paste,
         // and a sign-in code that just came in a text or email.
         val photos = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE
-        kbRow("Paste new screenshots", checkSelfPermission(photos) == android.content.pm.PackageManager.PERMISSION_GRANTED, "Allowed", "Allow") {
-            askPermission(photos, 3)
+        val photosOk = checkSelfPermission(photos) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        // "Select photos" on Android 14+ lets Tokalot see only the pictures picked then, never a new screenshot:
+        // that needs "Allow all", which is only on the app's permission page once a choice was made.
+        val somePhotos = !photosOk && Build.VERSION.SDK_INT >= 34 &&
+            checkSelfPermission(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        kbRow(if (somePhotos) "Paste new screenshots (needs Allow all photos)" else "Paste new screenshots", photosOk, "Allowed", if (somePhotos) "Allow all" else "Allow") {
+            if (somePhotos) {
+                toast("Photos and videos › Allow all")
+                startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName")))
+            } else askPermission(photos, 3)
         }
         kbRow("Codes from texts and emails", CodeListener.allowed(this), "Allowed", "Allow") {
             startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -944,7 +963,8 @@ class SettingsScreen(private val a: MainActivity) {
         kbSwitch("Swipe typing", "Slide your finger from letter to letter instead of tapping.", prefs.kbSwipe) { prefs.kbSwipe = it }
         kbSwitch("Capitalize sentences", "A capital letter at the start of each sentence, where the app asks for one.", prefs.kbAutoCaps) { prefs.kbAutoCaps = it }
         kbSwitch("Double space for a period", "Two taps on the space bar type a period and a space.", prefs.kbDoubleSpace) { prefs.kbDoubleSpace = it }
-        kbSwitch("Learn from my typing", "Remembers the words you use and what follows what, on this phone only, for better suggestions. A word the keyboard doesn't know goes into your dictionary once you've kept it twice, so it syncs.", prefs.kbLearn) { prefs.kbLearn = it }
+        kbSwitch("Learn from my typing", "Remembers the words you use and what follows what, on this phone only, for better suggestions. A word the keyboard doesn't know goes into your dictionary once you've kept it twice or tapped it on the bar, so it syncs. Hold a word on the bar to stop it being suggested.", prefs.kbLearn) { prefs.kbLearn = it }
+        kbSwitch("Learn from my dictations (beta)", "Autocorrect and suggestions follow what you say: your names and terms count as words, typos near them are fixed to them, the bar offers what you usually say next, and something you just dictated ranks higher. Worked out from your dictation history on this phone; nothing new is saved or sent.", prefs.kbSpoken) { prefs.kbSpoken = it }
         kbSwitch("Symbols on letters", "Each letter shows the symbol a long press gives.", prefs.kbSymbolHints) { prefs.kbSymbolHints = it }
         kbSwitch("Show key on press", "The key pops up bigger above your finger.", prefs.kbPopup) { prefs.kbPopup = it }
         kbSwitch("Vibrate on key press", "", prefs.kbVibrate) { prefs.kbVibrate = it }
@@ -1013,6 +1033,17 @@ class SettingsScreen(private val a: MainActivity) {
             pill("Clear") {
                 TokalotKeyboard.clearHistory(this)
                 android.widget.Toast.makeText(this, "Typing history cleared", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        ), lp().margins(this, t = 8, l = 4))
+        val hiddenWords = prefs.kbHidden
+        if (hiddenWords.isNotEmpty()) col.addView(row(
+            text((if (hiddenWords.size == 1) "1 word" else "${hiddenWords.size} words") + " you told the keyboard to stop suggesting: " + hiddenWords.sorted().take(8).joinToString(", ") + (if (hiddenWords.size > 8) "…" else "") + ". Hold a word on the keyboard's bar to add one.", 14f, C.SUB).apply {
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            },
+            pill("Suggest again") {
+                prefs.kbHidden = emptySet()
+                android.widget.Toast.makeText(this, "Those words can be suggested again", android.widget.Toast.LENGTH_SHORT).show()
+                render()
             }
         ), lp().margins(this, t = 8, l = 4))
 
@@ -1779,11 +1810,10 @@ class SettingsScreen(private val a: MainActivity) {
         when (name) {
             SETUP -> {
                 // The battery row only counts on phones known to kill background services; elsewhere it's just there.
-                val left = listOf(
-                    micGranted(), serviceEnabled(), prefs.cloudSttReady || ModelManager.isReady(this),
-                    !ServiceGuard.strictMaker || ServiceGuard.batteryUnrestricted(this),
-                ).count { !it }
-                if (left == 0) "All set" to false else "$left ${if (left == 1) "thing" else "things"} to do" to true
+                val battery = useMode() != UseMode.FLOATING || !ServiceGuard.strictMaker || ServiceGuard.batteryUnrestricted(this)
+                val left = (setupSteps() + battery).count { !it }
+                val how = useMode().label
+                if (left == 0) "$how · all set" to false else "$how · $left ${if (left == 1) "thing" else "things"} to do" to true
             }
             PRIVACY -> (Privacy.current(prefs)?.label ?: "Custom") to false
             KEYBOARD -> (if (!TokalotKeyboard.isEnabled(this)) "Off" else "On · swipe ${yes(prefs.kbSwipe)} · autocorrect ${yes(prefs.kbAutocorrect)}") to false

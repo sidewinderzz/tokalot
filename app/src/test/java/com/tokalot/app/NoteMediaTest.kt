@@ -94,7 +94,7 @@ class NoteMediaTest {
     }
 
     @Test fun voiceIsFoundOverSteadyNoise() {
-        // 1 s of tractor-like hum at -40 dB, 1 s of speech at -15 dB, 2 s of hum, 1 s of speech.
+        // 1 s of engine-like hum at -40 dB, 1 s of speech at -15 dB, 2 s of hum, 1 s of speech.
         val db = FloatArray(250) { i -> if (i in 50 until 100 || i in 200 until 250) -15f else -40f }
         val speech = NoteMedia.speechFrames(db)
         assertTrue(speech[75] && speech[225])

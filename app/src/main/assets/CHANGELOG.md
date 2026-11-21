@@ -6,6 +6,57 @@ the text of each GitHub release. Add a "## <versionName>" section, newest first,
 versionName in app/build.gradle.kts goes up. Plain sentences, one "- " line per change.
 -->
 
+## 1.63 · 2026-11-21
+- Tapping the speed button under a voice note opens the speed wheel and leaves it open, instead of a row of buttons underneath. Drag anywhere on it, or tap a speed to pick it. Auto and 1× sit on top of the wheel, and a tap anywhere else closes it.
+- Dragging sideways changes speed too: right is faster, left is slower. That helps when the button is near the bottom of the screen and there's no room to drag down.
+- The pace Auto speed aims for is in Settings › Notes.
+
+## 1.62 · 2026-11-10
+- The welcome on a new install starts by asking how you want to use Tokalot: a floating mic button over your own keyboard, Tokalot Keyboard, or just the app. Only the floating button needs Android's accessibility switch, and setup now asks only for what your pick needs.
+- Change it any time in Settings › Setup › How you use Tokalot. Picking one doesn't switch anything off, so you can still use more than one; it just changes what setup and Home's Finish setup ask for.
+- Just the app: a Record button at the top of Home. Talk, tap Stop, and the text is copied and saved on Home with your other dictations. Sharing a voice message or audio file to Tokalot works as before.
+- Share in a dictation's ⋮ menu on Home, to send the text to another app.
+
+## 1.61 · 2026-11-10
+- Fewer letters typed by mistake when you aim for the space bar. While you're typing a word, the space bar's touch area now reaches a little way up into the bottom of c, v, b and n, since a thumb going for space tends to land a bit high. Right after a space it barely reaches, so starting the next word on those letters works as before.
+- The space bar row is a little taller, and a tap in the thin strip under it now types a space instead of nothing.
+- The clipboard button stays on the bar while word suggestions are showing, next to the menu button, so you no longer have to finish or clear a word to reach it. Take Clipboard off the toolbar (the keyboard's grid menu) and it goes from both.
+
+## 1.60 · 2026-11-10
+- New, in beta: the keyboard learns from your dictations. The names and terms you say count as words, a typo near one is fixed to it, the bar offers what you usually say next ("on my" then "way") and how you usually start a sentence, and something you dictated in the last few hours ranks higher while you type the follow-up. It's worked out on the phone from your dictation history each time the keyboard opens; nothing new is saved or sent, and deleting a dictation takes its words back out. Saying a word a lot never makes autocorrect swap a real word for it. Settings › Keyboard › Learn from my dictations, also on the Privacy page; it starts out matching "Learn from my typing".
+- Real words are no longer swapped for commoner ones: "mow", "cam", "bot", "hum" and about 30 more stay as typed.
+- New words and jargon are left alone unless a likely slip onto a common word explains them: "numpy", "yaml", "postgres" and "airtag" stay, and a lowercase word never becomes an abbreviation ("jk" is no longer "HK").
+- About 90 everyday texting words are in (jk, tmrw, gtg, ofc, ngl, tryna, bruh, sus and more). Rude ones are accepted as typed but never suggested.
+- Words are ranked by how often people say them in conversation, not in formal writing, so "Kust" at the start of a sentence becomes "Just", not "Must". The ranks come from film and TV subtitle counts (FrequencyWords, CC BY-SA 4.0, credited in Open-source licenses); that one word file carries that licence.
+- The capital the keyboard adds at the start of a sentence no longer makes a typo look like a name: "Mich" becomes "Much", "Nad" becomes "And", and "Friend's" keeps its apostrophe.
+- A letter from across the keyboard counts as less likely than the key next door: "Qhat" becomes "What", "lovk" becomes "lock".
+- Two words typed without the space are split when they go together, including with "I": "ican", "idont", "andi", "infact", "thankyou", "doyou". A slip onto the next key stays one word ("doon" is "soon").
+- A hyphen or apostrophe you typed stays: "re-enter", "set-up", "time's", "minute's".
+- The keyboard looks two words back, in what you've typed and what you've said, and knows more of what commonly follows a word: "on my wat" becomes "on my way".
+- Undoing a correction with backspace no longer puts the word in your dictionary on the spot, since a backspace can be a slip. It's learned the second time, or when you tap it on the bar. Learned words rank as ordinary words, an undone correction leaves your typing history, and "tap to undo" on the Learned notice removes the word everywhere at once.
+- Tap back on a word that was corrected and the bar offers what you typed first. One tap puts it back.
+- Hold a word on the bar, then tap the notice, to stop it being suggested. Your own words leave the dictionary; any other word stays a word when you type it but is never offered again. Settings › Keyboard lists them, with a button to bring them back.
+- Put the cursor at the end of a word and add letters, and the whole word is checked as one ("walk" + "ing" is "walking"). A word you only touched is left exactly as it was.
+- After a swiped word, a comma or full stop no longer glues the next word on: "good, thanks", "done. See".
+- A space you typed after a word moves behind a full stop, comma, ! or ?: "ok ." becomes "ok. ".
+- With caps lock on, words of four letters or more are fixed and stay in capitals ("THANKD" becomes "THANKS"). Short ones are left alone.
+- Suggestions are worked out in the background, so each letter shows the moment you tap it, however long the word search takes.
+- "sus" was missing from the word list because of a broken line in the file. Example words in the app's tests and notes are no longer farm-specific.
+
+## 1.59 · 2026-11-09
+- The keyboard's Send, Search, Go and Done keys send the word as you typed it, so a fix can no longer slip into a message you couldn't check first. A new line still fixes the word like a space does.
+- Autocorrect guesses less: a word the keyboard doesn't know stays as you typed it unless a correction is close and clearly likely. App names, tech words and new slang ("venmo", "kotlin", "rizz") no longer turn into other words, and a close everyday word now beats a rare name ("chaim" becomes "chain", not "Chaim").
+- About 170 everyday words the old list lacked are in: apps, tech words and slang (login, dropdown, wifi, airpods, selfie, tiktok, venmo, lowkey and more).
+- Two words run together are only split when they're a very common pair ("ofthe", "haveto"), not a compound or a name ("squarespace", "redis").
+- A word is learned the moment you undo its correction or tap it on the bar, instead of after the second time.
+
+## 1.58 · 2026-11-05
+- Autocorrect, word suggestions and swipe typing work now. The keyboard couldn't find its own word list in the installed app, so since the keyboard first shipped it has been running with no words at all: nothing was fixed, nothing was suggested, and swipe couldn't find words. If the list ever fails to load again, the keyboard says so instead of going quiet.
+- Trade-specific words that had been added to the word list (hay equipment, machinery brands) are gone. Tokalot's keyboard is for everyone; your own words still go in your dictionary.
+- Screenshots are on the keyboard's clipboard page now, as on Gboard: the last hour's, newest first, each shown whole. Tap one to paste it.
+- If Android stopped letting Tokalot see your photos, the clipboard page says so, with an Allow button, instead of screenshots just not showing up.
+- On Android 14 and newer, "Select photos" only lets Tokalot see the pictures you picked that time, never a new screenshot. Settings › Keyboard now says when that's the case, and the button takes you to Allow all.
+
 ## 1.57 · 2026-11-05
 - Quiet microphones are heard properly. When a microphone records speech much softer than normal, Tokalot raises it to a normal level before it's transcribed, so soft words and soft endings are no longer missed. Your saved recordings stay as they were.
 

@@ -6,9 +6,9 @@ import org.junit.Test
 
 /** The Notes page's search, tag chips, sort and dates. The desktop apps' NoteFind is held to the same cases. */
 class NoteFindTest {
-    private val leak = NoteFind.Item(1, 300, "Found a hydraulic leak on the 4440 by the left lift cylinder.", "Hydraulic leak on the 4440", listOf("Equipment", "Shop"))
-    private val planter = NoteFind.Item(2, 200, "Parts list: two hydraulic hoses, 3/8 and 1/2, and seed tubes.", "Parts list for the planter", listOf("Farm"))
-    private val call = NoteFind.Item(3, 100, "Call Dave about the sprayer nozzles", null, emptyList())
+    private val leak = NoteFind.Item(1, 300, "Found a water leak under the kitchen sink by the left valve.", "Kitchen sink water leak", listOf("House", "Repairs"))
+    private val planter = NoteFind.Item(2, 200, "Parts list: two water hoses, 3/8 and 1/2, and washers.", "Parts list for the washer", listOf("Home"))
+    private val call = NoteFind.Item(3, 100, "Call Dave about the gutter quote", null, emptyList())
     private val all = listOf(call, leak, planter)
 
     private fun ids(f: NoteFind.Filter) = NoteFind.apply(all, f).map { it.id }
@@ -20,16 +20,16 @@ class NoteFindTest {
     }
 
     @Test fun searchFindsEveryWordInTitleTextOrTags() {
-        assertEquals(listOf(1L, 2L), ids(NoteFind.Filter(query = "HYDRAULIC")))
-        assertEquals(listOf(2L), ids(NoteFind.Filter(query = "hydraulic hoses")))
-        assertEquals(listOf(1L), ids(NoteFind.Filter(query = "shop")))  // a tag
+        assertEquals(listOf(1L, 2L), ids(NoteFind.Filter(query = "WATER")))
+        assertEquals(listOf(2L), ids(NoteFind.Filter(query = "water hoses")))
+        assertEquals(listOf(1L), ids(NoteFind.Filter(query = "repairs")))  // a tag
         assertEquals(listOf(3L), ids(NoteFind.Filter(query = "dave")))
-        assertEquals(emptyList<Long>(), ids(NoteFind.Filter(query = "baler")))
+        assertEquals(emptyList<Long>(), ids(NoteFind.Filter(query = "ladder")))
     }
 
     @Test fun tagsAndDatesNarrowIt() {
-        assertEquals(listOf(1L), ids(NoteFind.Filter(tag = "equipment")))
-        assertEquals(listOf(2L), ids(NoteFind.Filter(query = "hydraulic", tag = "Farm")))
+        assertEquals(listOf(1L), ids(NoteFind.Filter(tag = "house")))
+        assertEquals(listOf(2L), ids(NoteFind.Filter(query = "water", tag = "Home")))
         assertEquals(listOf(2L, 3L), ids(NoteFind.Filter(from = 100, to = 300)))
     }
 
