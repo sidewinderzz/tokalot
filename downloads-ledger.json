@@ -2891,7 +2891,7 @@
    "release": "v1.57"
   },
   "776855953": {
-   "count": 0,
+   "count": 1,
    "name": "TokalotSetup.exe",
    "release": "desktop"
   },
@@ -2906,7 +2906,7 @@
    "release": "desktop"
   },
   "776856245": {
-   "count": 3,
+   "count": 12,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2931,11 +2931,11 @@
    "release": "mac-v0.17.0"
   },
   "776874008": {
-   "count": 1,
+   "count": 2,
    "name": "Tokalot-v1.63.apk",
    "release": "v1.63"
   }
  },
- "total": 1709,
- "updated": "2026-11-21T23:17:58Z"
+ "total": 1720,
+ "updated": "2026-11-22T06:50:18Z"
 }
