@@ -2861,7 +2861,7 @@
    "release": "desktop-v1.25.0"
   },
   "776855168": {
-   "count": 0,
+   "count": 1,
    "name": "Tokalot-1.25.0-full.nupkg",
    "release": "desktop"
   },
@@ -2906,7 +2906,7 @@
    "release": "desktop"
   },
   "776856245": {
-   "count": 50,
+   "count": 65,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2931,11 +2931,11 @@
    "release": "mac-v0.17.0"
   },
   "776874008": {
-   "count": 3,
+   "count": 4,
    "name": "Tokalot-v1.63.apk",
    "release": "v1.63"
   }
  },
- "total": 1760,
- "updated": "2026-11-23T12:44:20Z"
+ "total": 1777,
+ "updated": "2026-11-24T00:51:51Z"
 }
