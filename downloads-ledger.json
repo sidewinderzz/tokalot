@@ -2906,7 +2906,7 @@
    "release": "desktop"
   },
   "776856245": {
-   "count": 162,
+   "count": 173,
    "name": "releases.win.json",
    "release": "desktop"
   },
@@ -2916,7 +2916,7 @@
    "release": "desktop"
   },
   "776856412": {
-   "count": 12,
+   "count": 15,
    "name": "releases.win-arm64.json",
    "release": "desktop"
   },
@@ -2936,6 +2936,6 @@
    "release": "v1.63"
   }
  },
- "total": 1889,
- "updated": "2026-11-28T02:41:26Z"
+ "total": 1903,
+ "updated": "2026-11-28T11:47:05Z"
 }
